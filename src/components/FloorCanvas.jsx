@@ -5,6 +5,8 @@ import useStore from '../store.js'
 const SET_PREFIX = 'set-rect-'
 const LABEL_PREFIX = 'set-label-'
 const RULE_PREFIX = 'rule-line-'
+const TOOLTIP_NAME = 'hover-tooltip'
+const TOOLTIP_BG_NAME = 'hover-tooltip-bg'
 
 export default function FloorCanvas({ onCanvasSize }) {
   const canvasRef = useRef(null)
@@ -115,6 +117,85 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.off('mouse:up', onUp)
     }
   }, [])
+
+  // Hover tooltip
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+
+    const removeTooltip = () => {
+      fc.getObjects()
+        .filter(o => o.name === TOOLTIP_NAME || o.name === TOOLTIP_BG_NAME)
+        .forEach(o => fc.remove(o))
+    }
+
+    const onOver = (opt) => {
+      const target = opt.target
+      if (!target || !target.name?.startsWith(SET_PREFIX)) return
+
+      const setId = parseInt(target.name.replace(SET_PREFIX, ''))
+      const setData = sets.find(s => s.id === setId)
+      if (!setData) return
+
+      removeTooltip()
+
+      const tooltipText = `${setData.name}  (${setData.width}${unit} x ${setData.height}${unit})`
+      const padding = 6
+
+      const label = new fabric.FabricText(tooltipText, {
+        fontSize: 13,
+        fill: '#ffffff',
+        fontFamily: 'system-ui, sans-serif',
+        fontWeight: '600',
+        selectable: false,
+        evented: false,
+        name: TOOLTIP_NAME,
+      })
+
+      // Position tooltip above the rectangle
+      const rectTop = target.top
+      const rectLeft = target.left
+      const tooltipLeft = rectLeft
+      const tooltipTop = rectTop - 28
+
+      label.set({ left: tooltipLeft + padding + 2, top: tooltipTop + padding })
+
+      const bg = new fabric.Rect({
+        left: tooltipLeft,
+        top: tooltipTop,
+        width: label.width + padding * 2 + 4,
+        height: 24,
+        fill: '#1f2937ee',
+        rx: 4,
+        ry: 4,
+        stroke: setData.color,
+        strokeWidth: 1,
+        selectable: false,
+        evented: false,
+        name: TOOLTIP_BG_NAME,
+      })
+
+      fc.add(bg)
+      fc.add(label)
+      fc.requestRenderAll()
+    }
+
+    const onOut = (opt) => {
+      const target = opt.target
+      if (!target || !target.name?.startsWith(SET_PREFIX)) return
+      removeTooltip()
+      fc.requestRenderAll()
+    }
+
+    fc.on('mouse:over', onOver)
+    fc.on('mouse:out', onOut)
+
+    return () => {
+      fc.off('mouse:over', onOver)
+      fc.off('mouse:out', onOut)
+      removeTooltip()
+    }
+  }, [sets, unit])
 
   // Calibration click handler
   useEffect(() => {
@@ -248,6 +329,11 @@ export default function FloorCanvas({ onCanvasSize }) {
       .filter(o => o.name?.startsWith(SET_PREFIX) || o.name?.startsWith(LABEL_PREFIX) || o.name?.startsWith(RULE_PREFIX))
       .forEach(o => fc.remove(o))
 
+    // Also remove any stale tooltips
+    fc.getObjects()
+      .filter(o => o.name === TOOLTIP_NAME || o.name === TOOLTIP_BG_NAME)
+      .forEach(o => fc.remove(o))
+
     // Draw rule lines
     for (const rule of rules) {
       if (rule.type === 'FIXED') continue
@@ -296,6 +382,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         hasControls: false,
         lockRotation: true,
         cornerSize: 0,
+        hoverCursor: 'move',
       })
 
       // Drag handler
@@ -325,11 +412,12 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       fc.add(rect)
 
-      // Label
+      // Label — only show set name abbreviated for small rects, full for large
+      const labelFontSize = Math.min(12, Math.max(8, w / 8))
       const label = new fabric.FabricText(set.name, {
         left: set.x + 4,
         top: set.y + 4,
-        fontSize: 12,
+        fontSize: labelFontSize,
         fill: '#ffffff',
         fontFamily: 'system-ui, sans-serif',
         fontWeight: 'bold',
@@ -343,8 +431,8 @@ export default function FloorCanvas({ onCanvasSize }) {
       // Dimensions label
       const dimLabel = new fabric.FabricText(`${set.width}x${set.height}`, {
         left: set.x + 4,
-        top: set.y + 18,
-        fontSize: 10,
+        top: set.y + 4 + labelFontSize + 2,
+        fontSize: Math.min(10, labelFontSize - 1),
         fill: '#ffffffaa',
         fontFamily: 'system-ui, sans-serif',
         selectable: false,
@@ -352,6 +440,21 @@ export default function FloorCanvas({ onCanvasSize }) {
         name: LABEL_PREFIX + set.id + '-dim',
       })
       fc.add(dimLabel)
+
+      // Rotation indicator
+      if (set.rotation && set.rotation !== 0) {
+        const rotLabel = new fabric.FabricText(`${set.rotation}°`, {
+          left: set.x + w - 20,
+          top: set.y + h - 14,
+          fontSize: 9,
+          fill: '#fbbf24aa',
+          fontFamily: 'system-ui, sans-serif',
+          selectable: false,
+          evented: false,
+          name: LABEL_PREFIX + set.id + '-rot',
+        })
+        fc.add(rotLabel)
+      }
     }
 
     // Draw FIXED indicators

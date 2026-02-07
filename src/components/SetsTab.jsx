@@ -47,6 +47,12 @@ export default function SetsTab() {
     setForm({ name: '', width: '', height: '', color: COLORS[sets.length % COLORS.length] })
   }
 
+  const handleRotate = (e, setData) => {
+    e.stopPropagation()
+    const newRot = ((setData.rotation || 0) + 90) % 360
+    updateSet(setData.id, { rotation: newRot })
+  }
+
   return (
     <div className="p-3 flex flex-col gap-3">
       <BulkImport />
@@ -110,6 +116,10 @@ export default function SetsTab() {
             <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: set.color }} />
             <span className="flex-1 truncate">{set.name}</span>
             <span className="text-xs text-gray-400">{set.width}x{set.height}</span>
+            <button onClick={(e) => handleRotate(e, set)}
+              className="text-xs text-yellow-400 hover:text-yellow-300" title={`Rotate (${set.rotation || 0}°)`}>
+              &#x21BB;
+            </button>
             <button onClick={(e) => { e.stopPropagation(); startEdit(set) }}
               className="text-xs text-blue-400 hover:text-blue-300">Edit</button>
             <button onClick={(e) => { e.stopPropagation(); deleteSet(set.id) }}

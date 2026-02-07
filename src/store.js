@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 const AUTOSAVE_KEY = 'floorplan-app-autosave'
+const SAVES_KEY = 'floorplan-app-saves'
 
 function loadAutosave() {
   try {
@@ -8,6 +9,14 @@ function loadAutosave() {
     if (data) return JSON.parse(data)
   } catch (e) { /* ignore */ }
   return null
+}
+
+function loadSavedProjects() {
+  try {
+    const data = localStorage.getItem(SAVES_KEY)
+    if (data) return JSON.parse(data)
+  } catch (e) { /* ignore */ }
+  return {}
 }
 
 const saved = loadAutosave()
@@ -22,6 +31,10 @@ const useStore = create((set, get) => ({
   gridVisible: saved?.gridVisible ?? true,
   snapToGrid: saved?.snapToGrid ?? true,
   gridSize: saved?.gridSize || 50,
+
+  // Project info
+  projectName: saved?.projectName || 'Untitled Project',
+  lastSaved: saved?.lastSaved || null,
 
   // Sets
   sets: saved?.sets || [],
@@ -44,11 +57,32 @@ const useStore = create((set, get) => ({
     set({ pdfPosition: pos })
     get().autosave()
   },
-  setPixelsPerUnit: (p) => set({ pixelsPerUnit: p }),
-  setUnit: (u) => set({ unit: u }),
-  setGridVisible: (v) => set({ gridVisible: v }),
-  setSnapToGrid: (v) => set({ snapToGrid: v }),
-  setGridSize: (s) => set({ gridSize: s }),
+  setPixelsPerUnit: (p) => {
+    set({ pixelsPerUnit: p })
+    get().autosave()
+  },
+  setUnit: (u) => {
+    set({ unit: u })
+    get().autosave()
+  },
+  setGridVisible: (v) => {
+    set({ gridVisible: v })
+    get().autosave()
+  },
+  setSnapToGrid: (v) => {
+    set({ snapToGrid: v })
+    get().autosave()
+  },
+  setGridSize: (s) => {
+    set({ gridSize: s })
+    get().autosave()
+  },
+
+  // Project name
+  setProjectName: (name) => {
+    set({ projectName: name })
+    get().autosave()
+  },
 
   // Calibration
   setCalibrating: (v) => set({ calibrating: v, calibrationPoints: [] }),
@@ -121,7 +155,11 @@ const useStore = create((set, get) => ({
   // Save/Load
   autosave: () => {
     const state = get()
+    const now = new Date().toISOString()
+    set({ lastSaved: now })
     const data = {
+      projectName: state.projectName,
+      lastSaved: now,
       pdfImage: state.pdfImage,
       pdfRotation: state.pdfRotation,
       pdfPosition: state.pdfPosition,
@@ -140,10 +178,60 @@ const useStore = create((set, get) => ({
     } catch (e) { /* ignore quota errors */ }
   },
 
+  // Named project saves (stored in localStorage)
+  saveProjectAs: (name) => {
+    const state = get()
+    set({ projectName: name })
+    const data = {
+      projectName: name,
+      lastSaved: new Date().toISOString(),
+      pdfImage: state.pdfImage,
+      pdfRotation: state.pdfRotation,
+      pdfPosition: state.pdfPosition,
+      pixelsPerUnit: state.pixelsPerUnit,
+      unit: state.unit,
+      gridVisible: state.gridVisible,
+      snapToGrid: state.snapToGrid,
+      gridSize: state.gridSize,
+      sets: state.sets,
+      nextSetId: state.nextSetId,
+      rules: state.rules,
+      nextRuleId: state.nextRuleId,
+    }
+    try {
+      const saves = loadSavedProjects()
+      saves[name] = data
+      localStorage.setItem(SAVES_KEY, JSON.stringify(saves))
+    } catch (e) { /* ignore */ }
+    get().autosave()
+  },
+
+  getSavedProjects: () => {
+    return loadSavedProjects()
+  },
+
+  loadSavedProject: (name) => {
+    const saves = loadSavedProjects()
+    const data = saves[name]
+    if (data) {
+      get().importProject(data)
+      set({ projectName: name })
+    }
+  },
+
+  deleteSavedProject: (name) => {
+    try {
+      const saves = loadSavedProjects()
+      delete saves[name]
+      localStorage.setItem(SAVES_KEY, JSON.stringify(saves))
+    } catch (e) { /* ignore */ }
+  },
+
   exportProject: () => {
     const state = get()
     return {
       version: 1,
+      projectName: state.projectName,
       pdfImage: state.pdfImage,
       pdfRotation: state.pdfRotation,
       pdfPosition: state.pdfPosition,
@@ -161,6 +249,7 @@ const useStore = create((set, get) => ({
 
   importProject: (data) => {
     set({
+      projectName: data.projectName || 'Untitled Project',
       pdfImage: data.pdfImage || null,
       pdfRotation: data.pdfRotation || 0,
       pdfPosition: data.pdfPosition || { x: 0, y: 0 },
@@ -180,6 +269,8 @@ const useStore = create((set, get) => ({
 
   clearAll: () => {
     set({
+      projectName: 'Untitled Project',
+      lastSaved: null,
       pdfImage: null,
       pdfRotation: 0,
       pdfPosition: { x: 0, y: 0 },
