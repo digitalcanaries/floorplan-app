@@ -14,7 +14,8 @@ export default function FloorCanvas({ onCanvasSize }) {
   const lastPan = useRef({ x: 0, y: 0 })
 
   const {
-    pdfImage, pdfRotation, pixelsPerUnit, setPixelsPerUnit,
+    pdfImage, pdfRotation, pdfPosition, setPdfPosition,
+    pixelsPerUnit, setPixelsPerUnit,
     gridVisible, snapToGrid, gridSize,
     sets, updateSet, selectedSetId, setSelectedSetId,
     rules,
@@ -155,22 +156,37 @@ export default function FloorCanvas({ onCanvasSize }) {
       return
     }
 
-    const img = new Image()
-    img.onload = () => {
-      const fImg = new fabric.FabricImage(img, {
-        left: 0,
-        top: 0,
+    // Use Fabric.js v7 async image loading
+    fabric.FabricImage.fromURL(pdfImage).then((fImg) => {
+      fImg.set({
+        left: pdfPosition.x,
+        top: pdfPosition.y,
         angle: pdfRotation,
-        selectable: false,
-        evented: false,
+        selectable: true,
+        evented: true,
         name: 'pdf-bg',
         opacity: 0.6,
+        hasControls: false,
+        hasBorders: true,
+        borderColor: '#6366F1',
+        borderDashArray: [5, 5],
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true,
       })
-      // Insert at index 0 so it's behind everything
-      fc.insertAt(fImg, 0)
+      // Save position when moved
+      fImg.on('modified', function () {
+        setPdfPosition({ x: this.left, y: this.top })
+      })
+      // Remove any bg that was added while we were loading
+      const existing = fc.getObjects().find(o => o.name === 'pdf-bg')
+      if (existing) fc.remove(existing)
+      fc.add(fImg)
+      fc.sendObjectToBack(fImg)
       fc.requestRenderAll()
-    }
-    img.src = pdfImage
+    }).catch((err) => {
+      console.error('Failed to load PDF image onto canvas:', err)
+    })
   }, [pdfImage, pdfRotation])
 
   // Draw grid
@@ -343,7 +359,7 @@ export default function FloorCanvas({ onCanvasSize }) {
       if (rule.type !== 'FIXED') continue
       const s = sets.find(ss => ss.id === rule.setA)
       if (!s) continue
-      const lockIcon = new fabric.FabricText('🔒', {
+      const lockIcon = new fabric.FabricText('\u{1F512}', {
         left: s.x + s.width * ppu - 16,
         top: s.y + 2,
         fontSize: 12,

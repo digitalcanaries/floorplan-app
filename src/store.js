@@ -16,6 +16,7 @@ const useStore = create((set, get) => ({
   // PDF / Canvas state
   pdfImage: saved?.pdfImage || null,
   pdfRotation: saved?.pdfRotation || 0,
+  pdfPosition: saved?.pdfPosition || { x: 0, y: 0 },
   pixelsPerUnit: saved?.pixelsPerUnit || 1,
   unit: saved?.unit || 'ft',
   gridVisible: saved?.gridVisible ?? true,
@@ -39,6 +40,10 @@ const useStore = create((set, get) => ({
   // PDF actions
   setPdfImage: (img) => set({ pdfImage: img }),
   setPdfRotation: (r) => set({ pdfRotation: r }),
+  setPdfPosition: (pos) => {
+    set({ pdfPosition: pos })
+    get().autosave()
+  },
   setPixelsPerUnit: (p) => set({ pixelsPerUnit: p }),
   setUnit: (u) => set({ unit: u }),
   setGridVisible: (v) => set({ gridVisible: v }),
@@ -64,6 +69,21 @@ const useStore = create((set, get) => ({
     set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
     get().autosave()
     return id
+  },
+  bulkAddSets: (newSets) => {
+    let nextId = get().nextSetId
+    const created = newSets.map((s, i) => ({
+      ...s,
+      id: nextId + i,
+      x: 50 + (i % 4) * 120,
+      y: 50 + Math.floor(i / 4) * 120,
+      rotation: 0,
+    }))
+    set({
+      sets: [...get().sets, ...created],
+      nextSetId: nextId + newSets.length,
+    })
+    get().autosave()
   },
   updateSet: (id, updates) => {
     set({ sets: get().sets.map(s => s.id === id ? { ...s, ...updates } : s) })
@@ -104,6 +124,7 @@ const useStore = create((set, get) => ({
     const data = {
       pdfImage: state.pdfImage,
       pdfRotation: state.pdfRotation,
+      pdfPosition: state.pdfPosition,
       pixelsPerUnit: state.pixelsPerUnit,
       unit: state.unit,
       gridVisible: state.gridVisible,
@@ -125,6 +146,7 @@ const useStore = create((set, get) => ({
       version: 1,
       pdfImage: state.pdfImage,
       pdfRotation: state.pdfRotation,
+      pdfPosition: state.pdfPosition,
       pixelsPerUnit: state.pixelsPerUnit,
       unit: state.unit,
       gridVisible: state.gridVisible,
@@ -141,6 +163,7 @@ const useStore = create((set, get) => ({
     set({
       pdfImage: data.pdfImage || null,
       pdfRotation: data.pdfRotation || 0,
+      pdfPosition: data.pdfPosition || { x: 0, y: 0 },
       pixelsPerUnit: data.pixelsPerUnit || 1,
       unit: data.unit || 'ft',
       gridVisible: data.gridVisible ?? true,
@@ -159,6 +182,7 @@ const useStore = create((set, get) => ({
     set({
       pdfImage: null,
       pdfRotation: 0,
+      pdfPosition: { x: 0, y: 0 },
       pixelsPerUnit: 1,
       sets: [],
       nextSetId: 1,

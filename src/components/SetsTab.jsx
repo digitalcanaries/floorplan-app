@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import useStore from '../store.js'
+import BulkImport from './BulkImport.jsx'
 
 const COLORS = [
   '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
@@ -48,6 +49,10 @@ export default function SetsTab() {
 
   return (
     <div className="p-3 flex flex-col gap-3">
+      <BulkImport />
+
+      <div className="h-px bg-gray-700" />
+
       <form onSubmit={editing ? handleUpdate : handleAdd} className="flex flex-col gap-2">
         <input
           type="text" placeholder="Set name" value={form.name}
