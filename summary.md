@@ -291,12 +291,14 @@ _Goal: Make the 3D look realistic enough for client presentations._
 
 **Deliverable:** Photo-quality 3D renders of set designs for director/producer approval.
 
-### Phase 2C — Prop Inventory Integration
+### Phase 2C — Prop Inventory Integration (FUTURE — inventory not yet built)
 _Goal: Connect to prop inventory system and place real props in 3D scenes._
+_**Blocked by:** Prop inventory system needs to be built first as a separate project. This phase will be revisited once the inventory app exists with an API._
 
 | Step | Task | Details | Effort |
 |------|------|---------|--------|
-| 2C-1 | **Prop inventory API connection** | Connect to the prop inventory database/API (Digital Canaries inventory system). Browse props by category, search by name. | Medium |
+| 2C-0 | **Build prop inventory app** | Separate project: prop database with photos, dimensions, categories, availability tracking. REST API for integration. | Large (separate project) |
+| 2C-1 | **Prop inventory API connection** | Connect floor plan app to prop inventory API. Browse props by category, search by name. | Medium |
 | 2C-2 | **Prop images on 2D plan** | Drag props from inventory onto the 2D floor plan. Display prop photo as the set icon instead of a plain rectangle. | Medium |
 | 2C-3 | **3D prop models** | For props with photos: generate basic 3D models from images (billboards/sprites for photos, or proper .glb models if available). Place in 3D scene at floor-plan coordinates. | Large |
 | 2C-4 | **AI 3D model generation** | Use AI image-to-3D (e.g., TripoSR, Meshy, Luma) to convert prop photos into 3D meshes. Cache generated models for reuse. | Large |
@@ -332,13 +334,17 @@ _Goal: Full production pipeline integration._
 
 ---
 
-## Phase 2A Data Model Extensions (for 3D)
+## Phase 2A/2B Data Model Extensions (for 3D)
+| Field | Type | Phase | Purpose |
+|-------|------|-------|---------|
+| wallHeight | number | 2A | Visual wall height for 3D extrusion (default 10ft) |
+| elevation | number | 2A | Height off floor for 3D placement |
+| materialTexture | string | 2B | Surface texture/material reference |
+| connectionPoints | array | 2B | 3D joining endpoints for flat-to-flat connections |
+
+### Future Data Model Extensions (Phase 2C — when prop inventory exists)
 | Field | Type | Purpose |
 |-------|------|---------|
-| wallHeight | number | Visual wall height for 3D extrusion (default 10ft) |
-| elevation | number | Height off floor for 3D placement |
-| materialTexture | string | Surface texture/material reference |
-| connectionPoints | array | 3D joining endpoints for flat-to-flat connections |
 | propInventoryId | string | Link to prop inventory system |
 | propImageUrl | string | Photo URL for prop rendering |
 | prop3dModelUrl | string | .glb model URL for 3D scene |
@@ -347,17 +353,18 @@ _Goal: Full production pipeline integration._
 
 ## What's Next — Recommended Priority
 
+### Immediate (can start now)
 1. **Phase 2A-1 through 2A-4** — Get basic 3D working with wall extrusion and first-person walkthrough. This is the minimum viable 3D feature that transforms the tool from a 2D planner into a spatial design tool.
 
 2. **Phase 2A-5 & 2A-6** — Add door/window openings and lighting to make the walkthrough feel real.
 
-3. **Phase 2C-1 & 2C-2** — Connect prop inventory and show prop images on the 2D plan (no 3D needed yet). This provides immediate production value.
+3. **Phase 2B** — Add materials and textures to make the 3D presentable for client meetings.
 
-4. **Phase 2B** — Add materials and textures to make the 3D presentable for client meetings.
+### After 3D is solid
+4. **Phase 2D** — AI photorealistic renders (the endgame for pre-viz). Can be built on top of the 3D scene without needing the prop inventory.
 
-5. **Phase 2C-3 & 2C-4** — AI-generated 3D models from prop photos. This is the magic feature.
-
-6. **Phase 2D** — AI photorealistic renders (the endgame for pre-viz).
+### When prop inventory is built (separate project)
+5. **Phase 2C** — Prop inventory integration. Blocked until the prop inventory app exists with an API. Once available, props can be placed on 2D plans and rendered in the 3D walkthrough.
 
 ---
 
