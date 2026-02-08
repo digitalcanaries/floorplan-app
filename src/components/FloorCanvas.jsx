@@ -25,7 +25,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     pdfImage, pdfRotation, pdfPosition, setPdfPosition,
     pixelsPerUnit, setPixelsPerUnit,
     gridVisible, snapToGrid, snapToSets, gridSize,
-    labelsVisible,
+    labelsVisible, showOverlaps,
     sets, updateSet, selectedSetId, setSelectedSetId,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
@@ -695,27 +695,29 @@ export default function FloorCanvas({ onCanvasSize }) {
       }
     }
 
-    // Draw overlap zones between visible sets
-    const visibleAABBs = visibleSets.map(s => getAABB(s, ppu))
-    for (let i = 0; i < visibleAABBs.length; i++) {
-      for (let j = i + 1; j < visibleAABBs.length; j++) {
-        const overlap = getOverlapRect(visibleAABBs[i], visibleAABBs[j])
-        if (!overlap || overlap.w < 2 || overlap.h < 2) continue
+    // Draw overlap zones between visible sets (if enabled)
+    if (showOverlaps) {
+      const visibleAABBs = visibleSets.map(s => getAABB(s, ppu))
+      for (let i = 0; i < visibleAABBs.length; i++) {
+        for (let j = i + 1; j < visibleAABBs.length; j++) {
+          const overlap = getOverlapRect(visibleAABBs[i], visibleAABBs[j])
+          if (!overlap || overlap.w < 2 || overlap.h < 2) continue
 
-        const zone = new fabric.Rect({
-          left: overlap.x,
-          top: overlap.y,
-          width: overlap.w,
-          height: overlap.h,
-          fill: '#EF444430',
-          stroke: '#EF4444',
-          strokeWidth: 1.5,
-          strokeDashArray: [6, 3],
-          selectable: false,
-          evented: false,
-          name: OVERLAP_PREFIX + visibleAABBs[i].id + '-' + visibleAABBs[j].id,
-        })
-        fc.add(zone)
+          const zone = new fabric.Rect({
+            left: overlap.x,
+            top: overlap.y,
+            width: overlap.w,
+            height: overlap.h,
+            fill: '#EF444430',
+            stroke: '#EF4444',
+            strokeWidth: 1.5,
+            strokeDashArray: [6, 3],
+            selectable: false,
+            evented: false,
+            name: OVERLAP_PREFIX + visibleAABBs[i].id + '-' + visibleAABBs[j].id,
+          })
+          fc.add(zone)
+        }
       }
     }
 
@@ -736,7 +738,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
 
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, showOverlaps])
 
   useEffect(() => {
     syncSets()

@@ -33,6 +33,7 @@ const useStore = create((set, get) => ({
   snapToSets: saved?.snapToSets ?? true,
   gridSize: saved?.gridSize || 50,
   labelsVisible: saved?.labelsVisible ?? true,
+  showOverlaps: saved?.showOverlaps ?? true,
 
   // Project info
   projectName: saved?.projectName || 'Untitled Project',
@@ -88,6 +89,10 @@ const useStore = create((set, get) => ({
   },
   setLabelsVisible: (v) => {
     set({ labelsVisible: v })
+    get().autosave()
+  },
+  setShowOverlaps: (v) => {
+    set({ showOverlaps: v })
     get().autosave()
   },
   setGridSize: (s) => {
@@ -414,6 +419,7 @@ const useStore = create((set, get) => ({
       snapToSets: state.snapToSets,
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
+      showOverlaps: state.showOverlaps,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -441,6 +447,7 @@ const useStore = create((set, get) => ({
       snapToSets: state.snapToSets,
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
+      showOverlaps: state.showOverlaps,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -490,6 +497,7 @@ const useStore = create((set, get) => ({
       snapToSets: state.snapToSets,
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
+      showOverlaps: state.showOverlaps,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -510,6 +518,7 @@ const useStore = create((set, get) => ({
       snapToSets: data.snapToSets ?? true,
       gridSize: data.gridSize || 50,
       labelsVisible: data.labelsVisible ?? true,
+      showOverlaps: data.showOverlaps ?? true,
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,
       rules: data.rules || [],
