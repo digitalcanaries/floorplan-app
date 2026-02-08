@@ -126,11 +126,12 @@ const useStore = create((set, get) => ({
   // Set CRUD
   addSet: (s) => {
     const id = get().nextSetId
+    const maxZ = get().sets.length > 0 ? Math.max(...get().sets.map(s => s.zIndex || 0)) : 0
     const newSet = {
-      ...s, id, x: 100, y: 100, rotation: 0, lockedToPdf: false, onPlan: true,
+      ...s, id, x: s.x ?? 100, y: s.y ?? 100, rotation: 0, lockedToPdf: false, onPlan: true,
       category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
       labelPosition: s.labelPosition || 'top-left',
-      wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
+      wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? (maxZ + 1),
       iconType: s.iconType || 'rect', thickness: s.thickness ?? null,
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,

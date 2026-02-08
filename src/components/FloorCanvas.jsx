@@ -891,6 +891,50 @@ export default function FloorCanvas({ onCanvasSize }) {
     syncSets()
   }, [syncSets])
 
+  // Pan canvas to center on newly selected set
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc || !selectedSetId) return
+    const s = sets.find(s => s.id === selectedSetId)
+    if (!s || s.onPlan === false || s.hidden) return
+
+    const ppu = pixelsPerUnit
+    const w = s.width * ppu
+    const h = s.height * ppu
+    const isRotated = (s.rotation || 0) % 180 !== 0
+    const sw = isRotated ? h : w
+    const sh = isRotated ? w : h
+
+    // Centre of the set in canvas coordinates
+    const cx = s.x + sw / 2
+    const cy = s.y + sh / 2
+
+    // Check if the set centre is already visible in the viewport
+    const zoom = fc.getZoom()
+    const vpt = fc.viewportTransform
+    const canvasW = fc.getWidth()
+    const canvasH = fc.getHeight()
+
+    // Convert set centre to screen coordinates
+    const screenX = cx * zoom + vpt[4]
+    const screenY = cy * zoom + vpt[5]
+
+    // Only pan if the set is outside a generous visible margin (20% inset)
+    const margin = 0.2
+    const inView = screenX > canvasW * margin && screenX < canvasW * (1 - margin)
+      && screenY > canvasH * margin && screenY < canvasH * (1 - margin)
+
+    if (!inView) {
+      // Pan so the set is centred
+      const targetVptX = canvasW / 2 - cx * zoom
+      const targetVptY = canvasH / 2 - cy * zoom
+      vpt[4] = targetVptX
+      vpt[5] = targetVptY
+      fc.setViewportTransform(vpt)
+      fc.requestRenderAll()
+    }
+  }, [selectedSetId])
+
   // Calibration visual indicators
   useEffect(() => {
     const fc = fabricRef.current
