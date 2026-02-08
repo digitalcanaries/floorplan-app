@@ -397,9 +397,10 @@ export default function TopBar({ canvasSize }) {
       {/* View Mode toggle */}
       <select value={viewMode} onChange={e => setViewMode(e.target.value)}
         className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
-        title="Icon view mode">
+        title="View mode">
         <option value="plan">Plan View</option>
         <option value="elevation">Elevation</option>
+        <option value="3d">3D Walk-Through</option>
       </select>
 
       <div className="h-5 w-px bg-gray-600" />

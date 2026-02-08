@@ -9,8 +9,8 @@ const WINDOW_DEPTH_PRESETS = [
   { value: 24, label: '24"' },
   { value: 36, label: '36"' },
 ]
-const FLAT_WIDTH_PRESETS = [1, 2, 3, 4]
-const FLAT_HEIGHT_PRESETS = [8, 10, 12]
+const FLAT_WIDTH_PRESETS = [1, 2, 3, 4, 5, 6]
+const FLAT_HEIGHT_PRESETS = [8, 10, 12, 14, 16]
 const WINDOW_WIDTH_PRESETS = [2, 3, 4, 6, 8, 12]
 const WINDOW_HEIGHT_PRESETS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 const DOOR_WIDTH_PRESETS = [3, 3.5, 4, 6, 8]
@@ -38,18 +38,23 @@ export default function FlatBuilder({ mode, onSave, onClose }) {
 
 function FlatForm({ onSave }) {
   const [width, setWidth] = useState(4)
-  const [height, setHeight] = useState(8)
+  const [height, setHeight] = useState(12)
   const [style, setStyle] = useState('hollywood')
   const [sides, setSides] = useState('single')
   const [name, setName] = useState('')
 
+  // Standard construction: 1×3 timber (0.75" × 2.5" actual, ~3.5" on edge for Hollywood)
+  // Rails: 2' standard (top + bottom), stiles run full height
+  // Hollywood flat: 1×3 on edge + luan = 3.5" thick ≈ 0.292'
+  // Broadway flat: 1×3 flat + muslin = 0.75" thick
   const thickness = sides === 'braced' ? 2.583 : sides === 'double' ? 0.333 : 0.292
   const iconType = sides === 'braced' ? 'flat-braced' : sides === 'double' ? 'flat-double' : 'flat'
 
-  // Lumber estimate
-  const rails = 2 // top + bottom
-  const stiles = 2 // left + right
-  const toggleCount = Math.max(0, Math.floor((height - 1) / 2.5))
+  // Lumber estimate — standard flat construction with 2' rails and 1×3 timber
+  const railHeight = 2 // standard 2' rail width
+  const rails = 2 // top + bottom rail
+  const stiles = 2 // left + right stile
+  const toggleCount = Math.max(0, Math.floor((height - railHeight * 2) / 2.5))
   const totalPieces = rails + stiles + toggleCount
   const lumberFt = (width * rails) + (height * stiles) + (width * toggleCount)
   const luanSheets = Math.ceil((width * height) / 32) * (sides === 'double' ? 2 : 1)
@@ -65,14 +70,19 @@ function FlatForm({ onSave }) {
       width,
       height,
       thickness,
+      wallHeight: height,
       icon_type: iconType,
       properties: {
         style,
         sides,
+        railHeight: railHeight,
+        timber: '1x3',
         toggles: toggleCount,
         lumberPieces: totalPieces,
         lumberFt: Math.round(lumberFt),
         luanSheets,
+        flatWidth: width,
+        flatHeight: height,
       },
     })
   }
@@ -215,14 +225,20 @@ function FlatForm({ onSave }) {
       <div className="bg-gray-900/70 rounded p-3 border border-gray-700">
         <h4 className="text-[11px] text-gray-300 font-medium mb-2">Material Estimate</h4>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+          <span className="text-gray-500">Flat Size:</span>
+          <span className="text-white">{width}' × {height}' ({width * height} sq ft)</span>
           <span className="text-gray-500">Thickness:</span>
           <span className="text-white">{thickness}' ({Math.round(thickness * 12)}")</span>
+          <span className="text-gray-500">Rails:</span>
+          <span className="text-white">2 × {width}' (2' standard rail)</span>
+          <span className="text-gray-500">Stiles:</span>
+          <span className="text-white">2 × {height}' (1×3 {style === 'hollywood' ? 'on edge' : 'flat'})</span>
           <span className="text-gray-500">1×3 Lumber:</span>
           <span className="text-white">{totalPieces} pieces (~{Math.round(lumberFt)} lin. ft)</span>
           <span className="text-gray-500">Toggles:</span>
           <span className="text-white">{toggleCount} (every ~2.5')</span>
-          <span className="text-gray-500">Luan Sheets:</span>
-          <span className="text-white">{luanSheets} × 4'×8' sheet{luanSheets > 1 ? 's' : ''}</span>
+          <span className="text-gray-500">{style === 'hollywood' ? 'Luan Sheets' : 'Muslin'}:</span>
+          <span className="text-white">{style === 'hollywood' ? `${luanSheets} × 4'×8' sheet${luanSheets > 1 ? 's' : ''}` : `${Math.ceil(width * height / 30)} yard${Math.ceil(width * height / 30) > 1 ? 's' : ''}`}</span>
         </div>
       </div>
 

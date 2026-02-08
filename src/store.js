@@ -36,6 +36,7 @@ const useStore = create((set, get) => ({
   labelMode: saved?.labelMode ?? 'inline',
   showOverlaps: saved?.showOverlaps ?? true,
   viewMode: saved?.viewMode ?? 'plan',
+  wallRenderMode: saved?.wallRenderMode ?? 'finished', // 'finished', 'construction-front', 'construction-rear'
 
   // Undo/redo history (not persisted)
   _past: [],
@@ -152,6 +153,12 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Wall render mode (finished vs construction view)
+  setWallRenderMode: (mode) => {
+    set({ wallRenderMode: mode })
+    get().autosave()
+  },
+
   // Undo/redo
   _pushHistory: () => {
     const state = get()
@@ -244,6 +251,8 @@ const useStore = create((set, get) => ({
       labelPosition: s.labelPosition || 'top-left',
       wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? (maxZ + 1),
       iconType: s.iconType || 'rect', thickness: s.thickness ?? null,
+      wallHeight: s.wallHeight ?? null, elevation: s.elevation ?? 0,
+      materialTexture: s.materialTexture || null,
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
     }
@@ -266,6 +275,8 @@ const useStore = create((set, get) => ({
       labelPosition: s.labelPosition || 'top-left',
       wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
       iconType: s.iconType || 'rect', thickness: s.thickness ?? null,
+      wallHeight: s.wallHeight ?? null, elevation: s.elevation ?? 0,
+      materialTexture: s.materialTexture || null,
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
     }))
@@ -676,6 +687,7 @@ const useStore = create((set, get) => ({
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
+      wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
       layerVisibility: state.layerVisibility,
@@ -713,6 +725,7 @@ const useStore = create((set, get) => ({
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
+      wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
       layerVisibility: state.layerVisibility,
@@ -772,6 +785,7 @@ const useStore = create((set, get) => ({
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
+      wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
       layerVisibility: state.layerVisibility,
@@ -802,6 +816,7 @@ const useStore = create((set, get) => ({
       labelMode: data.labelMode ?? 'inline',
       showOverlaps: data.showOverlaps ?? true,
       viewMode: data.viewMode ?? 'plan',
+      wallRenderMode: data.wallRenderMode ?? 'finished',
       showDimensions: data.showDimensions ?? false,
       showHoverTooltips: data.showHoverTooltips ?? true,
       layerVisibility: data.layerVisibility || {},
