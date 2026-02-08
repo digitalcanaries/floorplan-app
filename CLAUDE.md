@@ -48,3 +48,20 @@ src/
 - **Move set**: Drag rectangle
 - **Rotate set**: Double-click rectangle
 - **Calibrate**: Click two points on PDF, enter real distance
+
+## Project Setup
+- NOT using ABP framework - this is a plain React + Vite + Express app
+- Dev server: 16.54.34.31:3080 (SSH: ubuntu@16.54.34.31, key: ~/.claude/projects/keypairs/devkey.pem)
+- App location on server: /opt/apps/floorplan-app/
+- GitHub: digitalcanaries/floorplan-app
+- Do NOT include Co-Authored-By lines in git commits
+
+## Tech Stack (Full)
+- React 19 + Vite 7 (plain JSX, no TypeScript)
+- Fabric.js v7.1.0 for canvas
+- pdfjs-dist v5.4.624 + Tesseract.js v7 for PDF/OCR
+- Zustand for state management
+- Tailwind CSS v4
+- Express.js v5 + better-sqlite3 (SQLite) backend
+- JWT auth (jsonwebtoken + bcryptjs)
+- Docker multi-stage build on AWS Lightsail Ubuntu 24.04

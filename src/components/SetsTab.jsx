@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import useStore from '../store.js'
+import { getAABB } from '../engine/geometry.js'
 import BulkImport from './BulkImport.jsx'
 
 const COLORS = [
@@ -191,6 +192,93 @@ export default function SetsTab() {
       deleteSet(id)
     }
     setMultiSelected(new Set())
+  }
+
+  // Alignment functions
+  const getSelectedSets = () => {
+    const ppu = useStore.getState().pixelsPerUnit
+    return [...multiSelected]
+      .map(id => sets.find(s => s.id === id))
+      .filter(Boolean)
+      .map(s => ({ ...s, aabb: getAABB(s, ppu) }))
+  }
+
+  const alignLeft = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 2) return
+    const minX = Math.min(...selected.map(s => s.aabb.x))
+    for (const s of selected) updateSet(s.id, { x: minX })
+  }
+
+  const alignRight = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 2) return
+    const maxRight = Math.max(...selected.map(s => s.aabb.x + s.aabb.w))
+    for (const s of selected) updateSet(s.id, { x: maxRight - s.aabb.w })
+  }
+
+  const alignTop = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 2) return
+    const minY = Math.min(...selected.map(s => s.aabb.y))
+    for (const s of selected) updateSet(s.id, { y: minY })
+  }
+
+  const alignBottom = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 2) return
+    const maxBottom = Math.max(...selected.map(s => s.aabb.y + s.aabb.h))
+    for (const s of selected) updateSet(s.id, { y: maxBottom - s.aabb.h })
+  }
+
+  const alignCenterH = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 2) return
+    const allLeft = Math.min(...selected.map(s => s.aabb.x))
+    const allRight = Math.max(...selected.map(s => s.aabb.x + s.aabb.w))
+    const centerX = (allLeft + allRight) / 2
+    for (const s of selected) updateSet(s.id, { x: centerX - s.aabb.w / 2 })
+  }
+
+  const alignCenterV = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 2) return
+    const allTop = Math.min(...selected.map(s => s.aabb.y))
+    const allBottom = Math.max(...selected.map(s => s.aabb.y + s.aabb.h))
+    const centerY = (allTop + allBottom) / 2
+    for (const s of selected) updateSet(s.id, { y: centerY - s.aabb.h / 2 })
+  }
+
+  const distributeH = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 3) return
+    const sorted = [...selected].sort((a, b) => a.aabb.x - b.aabb.x)
+    const totalWidth = sorted.reduce((sum, s) => sum + s.aabb.w, 0)
+    const minX = sorted[0].aabb.x
+    const maxRight = sorted[sorted.length - 1].aabb.x + sorted[sorted.length - 1].aabb.w
+    const totalSpace = maxRight - minX - totalWidth
+    const gap = totalSpace / (sorted.length - 1)
+    let currentX = minX
+    for (const s of sorted) {
+      updateSet(s.id, { x: currentX })
+      currentX += s.aabb.w + gap
+    }
+  }
+
+  const distributeV = () => {
+    const selected = getSelectedSets()
+    if (selected.length < 3) return
+    const sorted = [...selected].sort((a, b) => a.aabb.y - b.aabb.y)
+    const totalHeight = sorted.reduce((sum, s) => sum + s.aabb.h, 0)
+    const minY = sorted[0].aabb.y
+    const maxBottom = sorted[sorted.length - 1].aabb.y + sorted[sorted.length - 1].aabb.h
+    const totalSpace = maxBottom - minY - totalHeight
+    const gap = totalSpace / (sorted.length - 1)
+    let currentY = minY
+    for (const s of sorted) {
+      updateSet(s.id, { y: currentY })
+      currentY += s.aabb.h + gap
+    }
   }
 
   const onPlanSets = sets.filter(s => s.onPlan !== false && !s.hidden)
@@ -385,6 +473,51 @@ export default function SetsTab() {
               ))}
             </div>
           </div>
+
+          {/* Alignment tools */}
+          {multiSelected.size >= 2 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-gray-400">Align:</span>
+              <div className="flex gap-1 flex-wrap">
+                <button onClick={alignLeft} title="Align left edges"
+                  className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white font-mono">
+                  &#x258C; L
+                </button>
+                <button onClick={alignCenterH} title="Align centers horizontally"
+                  className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white font-mono">
+                  &#x2503; CH
+                </button>
+                <button onClick={alignRight} title="Align right edges"
+                  className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white font-mono">
+                  &#x2590; R
+                </button>
+                <button onClick={alignTop} title="Align top edges"
+                  className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white font-mono">
+                  &#x2580; T
+                </button>
+                <button onClick={alignCenterV} title="Align centers vertically"
+                  className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white font-mono">
+                  &#x2501; CV
+                </button>
+                <button onClick={alignBottom} title="Align bottom edges"
+                  className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white font-mono">
+                  &#x2584; B
+                </button>
+              </div>
+              {multiSelected.size >= 3 && (
+                <div className="flex gap-1">
+                  <button onClick={distributeH} title="Distribute evenly horizontally"
+                    className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white">
+                    &#x2194; Distribute H
+                  </button>
+                  <button onClick={distributeV} title="Distribute evenly vertically"
+                    className="px-1.5 py-1 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-cyan-700 hover:text-white">
+                    &#x2195; Distribute V
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Bulk actions row */}
           <div className="flex gap-1 flex-wrap">
