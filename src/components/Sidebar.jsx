@@ -32,8 +32,8 @@ export default function Sidebar() {
 
     const onMouseMove = (e) => {
       if (!isDragging.current) return
-      // Sidebar is on the RIGHT, so dragging left = wider
-      const delta = startX.current - e.clientX
+      // Sidebar is on the LEFT, so dragging right = wider
+      const delta = e.clientX - startX.current
       const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startWidth.current + delta))
       latestWidth.current = newWidth
       setWidth(newWidth)
@@ -54,13 +54,7 @@ export default function Sidebar() {
 
   return (
     <div className="flex shrink-0 overflow-hidden" style={{ width }}>
-      {/* Resize handle */}
-      <div
-        onMouseDown={onMouseDown}
-        className="w-1.5 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-500/70 transition-colors bg-gray-700 shrink-0"
-        title="Drag to resize sidebar"
-      />
-      <div className="flex-1 bg-gray-800 text-white flex flex-col border-r border-gray-700 overflow-hidden">
+      <div className="flex-1 bg-gray-800 text-white flex flex-col overflow-hidden">
         <PdfUploader />
 
         <div className="flex border-b border-gray-700">
@@ -86,6 +80,12 @@ export default function Sidebar() {
           {sidebarTab === 'sets' ? <SetsTab /> : <RulesTab />}
         </div>
       </div>
+      {/* Resize handle on right edge */}
+      <div
+        onMouseDown={onMouseDown}
+        className="w-1.5 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-500/70 transition-colors bg-gray-700 shrink-0"
+        title="Drag to resize sidebar"
+      />
     </div>
   )
 }
