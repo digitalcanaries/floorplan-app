@@ -97,33 +97,39 @@ if (componentCount.cnt === 0) {
     { category: 'Wall', subcategory: 'Braced Access', name: '4\'×12\' Braced Access', width: 4, height: 12, thickness: 2.583, icon_type: 'flat-braced', properties: { style: 'braced', gap: 2, sides: 'double' } },
 
     // === WINDOWS ===
-    // Standard window sizes with single pane
-    { category: 'Window', subcategory: 'Single Pane', name: '2\'×3\' Window', width: 2, height: 3, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Single Pane', name: '3\'×4\' Window', width: 3, height: 4, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Single Pane', name: '4\'×4\' Window', width: 4, height: 4, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Single Pane', name: '4\'×6\' Window', width: 4, height: 6, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Single Pane', name: '6\'×4\' Window', width: 6, height: 4, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Single Pane', name: '6\'×6\' Window', width: 6, height: 6, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
+    // Standard window sizes with single pane — height is plan-view depth, elevationHeight stores face height
+    { category: 'Window', subcategory: 'Single Pane', name: '2\'×3\' Window', width: 2, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 3 } },
+    { category: 'Window', subcategory: 'Single Pane', name: '3\'×4\' Window', width: 3, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Single Pane', name: '4\'×4\' Window', width: 4, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Single Pane', name: '4\'×6\' Window', width: 4, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 6 } },
+    { category: 'Window', subcategory: 'Single Pane', name: '6\'×4\' Window', width: 6, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Single Pane', name: '6\'×6\' Window', width: 6, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 6 } },
 
     // Multi-pane windows
-    { category: 'Window', subcategory: 'Multi Pane', name: '6\' 2-Pane Window', width: 6, height: 4, thickness: 0.292, icon_type: 'window', properties: { panes: 2, divider: 0.333, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Multi Pane', name: '8\' 2-Pane Window', width: 8, height: 4, thickness: 0.292, icon_type: 'window', properties: { panes: 2, divider: 0.333, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Multi Pane', name: '8\' 2-Pane Tall', width: 8, height: 6, thickness: 0.292, icon_type: 'window', properties: { panes: 2, divider: 0.333, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Multi Pane', name: '12\' 3-Pane Window', width: 12, height: 4, thickness: 0.292, icon_type: 'window', properties: { panes: 3, divider: 0.333, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Multi Pane', name: '12\' 3-Pane Tall', width: 12, height: 6, thickness: 0.292, icon_type: 'window', properties: { panes: 3, divider: 0.333, surround: 0.333 } },
+    { category: 'Window', subcategory: 'Multi Pane', name: '6\' 2-Pane Window', width: 6, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 2, divider: 0.333, surround: 0.333, depth: 0.5, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Multi Pane', name: '8\' 2-Pane Window', width: 8, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 2, divider: 0.333, surround: 0.333, depth: 0.5, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Multi Pane', name: '8\' 2-Pane Tall', width: 8, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 2, divider: 0.333, surround: 0.333, depth: 0.5, elevationHeight: 6 } },
+    { category: 'Window', subcategory: 'Multi Pane', name: '12\' 3-Pane Window', width: 12, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 3, divider: 0.333, surround: 0.333, depth: 0.5, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Multi Pane', name: '12\' 3-Pane Tall', width: 12, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 3, divider: 0.333, surround: 0.333, depth: 0.5, elevationHeight: 6 } },
 
     // Large picture windows
-    { category: 'Window', subcategory: 'Picture Window', name: '8\'×8\' Picture', width: 8, height: 8, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
-    { category: 'Window', subcategory: 'Picture Window', name: '12\'×8\' Picture', width: 12, height: 8, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333 } },
+    { category: 'Window', subcategory: 'Picture Window', name: '8\'×8\' Picture', width: 8, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 8 } },
+    { category: 'Window', subcategory: 'Picture Window', name: '12\'×8\' Picture', width: 12, height: 0.5, thickness: 0.292, icon_type: 'window', properties: { panes: 1, divider: 0, surround: 0.333, depth: 0.5, elevationHeight: 8 } },
 
-    // === DOORS ===
-    { category: 'Door', subcategory: 'Single Door', name: '3\'×7\' Door', width: 3, height: 7, thickness: 0.292, icon_type: 'door', properties: { style: 'single', swing: 'left' } },
-    { category: 'Door', subcategory: 'Single Door', name: '3\'×8\' Door', width: 3, height: 8, thickness: 0.292, icon_type: 'door', properties: { style: 'single', swing: 'left' } },
-    { category: 'Door', subcategory: 'Single Door', name: '3.5\'×8\' Door', width: 3.5, height: 8, thickness: 0.292, icon_type: 'door', properties: { style: 'single', swing: 'left' } },
-    { category: 'Door', subcategory: 'Double Door', name: '6\'×8\' Double Door', width: 6, height: 8, thickness: 0.292, icon_type: 'door-double', properties: { style: 'double', swing: 'both' } },
-    { category: 'Door', subcategory: 'Double Door', name: '8\'×8\' Double Door', width: 8, height: 8, thickness: 0.292, icon_type: 'door-double', properties: { style: 'double', swing: 'both' } },
-    { category: 'Door', subcategory: 'Arch', name: '4\'×8\' Arch Door', width: 4, height: 8, thickness: 0.292, icon_type: 'door-arch', properties: { style: 'arch' } },
-    { category: 'Door', subcategory: 'Arch', name: '6\'×10\' Arch Door', width: 6, height: 10, thickness: 0.292, icon_type: 'door-arch', properties: { style: 'arch' } },
+    // Bay windows
+    { category: 'Window', subcategory: 'Bay Window', name: '6\' 3-Section Bay', width: 6, height: 2, thickness: 0.292, icon_type: 'window-bay', properties: { panes: 3, baySections: 3, bayAngle: 30, depth: 2, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Bay Window', name: '8\' 3-Section Bay', width: 8, height: 2.5, thickness: 0.292, icon_type: 'window-bay', properties: { panes: 3, baySections: 3, bayAngle: 30, depth: 2.5, elevationHeight: 4 } },
+    { category: 'Window', subcategory: 'Bay Window', name: '10\' 5-Section Bay', width: 10, height: 3, thickness: 0.292, icon_type: 'window-bay', properties: { panes: 5, baySections: 5, bayAngle: 45, depth: 3, elevationHeight: 5 } },
+    { category: 'Window', subcategory: 'Bay Window', name: '12\' 5-Section Bay', width: 12, height: 3.5, thickness: 0.292, icon_type: 'window-bay', properties: { panes: 5, baySections: 5, bayAngle: 45, depth: 3.5, elevationHeight: 6 } },
+
+    // === DOORS === height is plan-view depth, elevationHeight stores face height
+    { category: 'Door', subcategory: 'Single Door', name: '3\'×7\' Door', width: 3, height: 0.333, thickness: 0.292, icon_type: 'door', properties: { style: 'single', swing: 'left', depth: 0.333, elevationHeight: 7 } },
+    { category: 'Door', subcategory: 'Single Door', name: '3\'×8\' Door', width: 3, height: 0.333, thickness: 0.292, icon_type: 'door', properties: { style: 'single', swing: 'left', depth: 0.333, elevationHeight: 8 } },
+    { category: 'Door', subcategory: 'Single Door', name: '3.5\'×8\' Door', width: 3.5, height: 0.333, thickness: 0.292, icon_type: 'door', properties: { style: 'single', swing: 'left', depth: 0.333, elevationHeight: 8 } },
+    { category: 'Door', subcategory: 'Double Door', name: '6\'×8\' Double Door', width: 6, height: 0.333, thickness: 0.292, icon_type: 'door-double', properties: { style: 'double', swing: 'both', depth: 0.333, elevationHeight: 8 } },
+    { category: 'Door', subcategory: 'Double Door', name: '8\'×8\' Double Door', width: 8, height: 0.333, thickness: 0.292, icon_type: 'door-double', properties: { style: 'double', swing: 'both', depth: 0.333, elevationHeight: 8 } },
+    { category: 'Door', subcategory: 'Arch', name: '4\'×8\' Arch Door', width: 4, height: 0.333, thickness: 0.292, icon_type: 'door-arch', properties: { style: 'arch', depth: 0.333, elevationHeight: 8 } },
+    { category: 'Door', subcategory: 'Arch', name: '6\'×10\' Arch Door', width: 6, height: 0.333, thickness: 0.292, icon_type: 'door-arch', properties: { style: 'arch', depth: 0.333, elevationHeight: 10 } },
 
     // === ARCHITECTURAL ===
     { category: 'Other', subcategory: 'Column', name: '1\'×1\' Column', width: 1, height: 1, thickness: 1, icon_type: 'column', properties: { shape: 'round' } },

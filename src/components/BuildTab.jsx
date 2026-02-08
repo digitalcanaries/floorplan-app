@@ -226,7 +226,9 @@ export default function BuildTab() {
                               <div className="flex-1 min-w-0">
                                 <span className="text-[11px] text-white block truncate">{comp.name}</span>
                                 <span className="text-[10px] text-gray-500">
-                                  {comp.width}×{comp.height} {unit}
+                                  {comp.width}{unit} wide
+                                  {comp.properties?.elevationHeight ? ` · ${comp.properties.elevationHeight}${unit} tall` : ''}
+                                  {comp.properties?.depth ? ` · ${Math.round(comp.properties.depth * 12)}" deep` : ''}
                                   {comp.thickness ? ` · ${comp.thickness}' thick` : ''}
                                 </span>
                               </div>

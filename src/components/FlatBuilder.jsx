@@ -1,5 +1,14 @@
 import { useState } from 'react'
 
+const DEPTH_PRESETS = [
+  { value: 0.25, label: '3"' },
+  { value: 0.333, label: '4"' },
+  { value: 0.5, label: '6"' },
+  { value: 1, label: "1'" },
+  { value: 1.5, label: "1.5'" },
+  { value: 2, label: "2'" },
+  { value: 3, label: "3'" },
+]
 const FLAT_WIDTH_PRESETS = [1, 2, 3, 4]
 const FLAT_HEIGHT_PRESETS = [8, 10, 12]
 const WINDOW_WIDTH_PRESETS = [2, 3, 4, 6, 8, 12]
@@ -230,12 +239,19 @@ function FlatForm({ onSave }) {
 function WindowForm({ onSave }) {
   const [width, setWidth] = useState(4)
   const [height, setHeight] = useState(4)
+  const [depth, setDepth] = useState(0.5) // wall depth in ft for plan view
   const [panes, setPanes] = useState(1)
   const [dividerWidth, setDividerWidth] = useState(0.333) // 4 inches
   const [surroundWidth, setSurroundWidth] = useState(0.333)
+  const [windowStyle, setWindowStyle] = useState('standard') // standard, bay
+  const [bayAngle, setBayAngle] = useState(30) // bay window angle in degrees
+  const [baySections, setBaySections] = useState(3) // bay window section count
   const [name, setName] = useState('')
 
-  const autoName = panes > 1
+  const iconType = windowStyle === 'bay' ? 'window-bay' : 'window'
+  const autoName = windowStyle === 'bay'
+    ? `${width}' ${baySections}-Section Bay Window`
+    : panes > 1
     ? `${width}' ${panes}-Pane Window`
     : `${width}'×${height}' Window`
 
@@ -243,13 +259,20 @@ function WindowForm({ onSave }) {
     e.preventDefault()
     onSave({
       category: 'Window',
-      subcategory: panes > 1 ? 'Multi Pane' : 'Single Pane',
+      subcategory: windowStyle === 'bay' ? 'Bay Window' : panes > 1 ? 'Multi Pane' : 'Single Pane',
       name: name || autoName,
       width,
-      height,
+      height: depth, // plan-view: height of the set IS the depth (projection from wall)
       thickness: 0.292,
-      icon_type: 'window',
-      properties: { panes, divider: panes > 1 ? dividerWidth : 0, surround: surroundWidth },
+      icon_type: iconType,
+      properties: {
+        panes,
+        divider: panes > 1 ? dividerWidth : 0,
+        surround: surroundWidth,
+        elevationHeight: height, // store full elevation height for reference
+        depth,
+        ...(windowStyle === 'bay' ? { bayAngle, baySections } : {}),
+      },
     })
   }
 
@@ -266,9 +289,36 @@ function WindowForm({ onSave }) {
         />
       </div>
 
+      {/* Window Style */}
+      <div>
+        <label className="text-[11px] text-gray-400 block mb-1">Window Type</label>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => setWindowStyle('standard')}
+            className={`flex-1 px-2 py-2 rounded text-xs ${
+              windowStyle === 'standard' ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+            }`}
+          >
+            Standard
+            <span className="block text-[9px] mt-0.5 opacity-70">Flat window</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWindowStyle('bay')}
+            className={`flex-1 px-2 py-2 rounded text-xs ${
+              windowStyle === 'bay' ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+            }`}
+          >
+            Bay Window
+            <span className="block text-[9px] mt-0.5 opacity-70">Projects outward</span>
+          </button>
+        </div>
+      </div>
+
       {/* Width */}
       <div>
-        <label className="text-[11px] text-gray-400 block mb-1">Width (ft)</label>
+        <label className="text-[11px] text-gray-400 block mb-1">Width (ft) — along wall face</label>
         <div className="flex gap-1 flex-wrap mb-1.5">
           {WINDOW_WIDTH_PRESETS.map(w => (
             <button
@@ -294,9 +344,9 @@ function WindowForm({ onSave }) {
         />
       </div>
 
-      {/* Height */}
+      {/* Height (elevation) */}
       <div>
-        <label className="text-[11px] text-gray-400 block mb-1">Height (ft)</label>
+        <label className="text-[11px] text-gray-400 block mb-1">Height (ft) — elevation / face view</label>
         <div className="flex gap-1 flex-wrap mb-1.5">
           {WINDOW_HEIGHT_PRESETS.map(h => (
             <button
@@ -322,27 +372,102 @@ function WindowForm({ onSave }) {
         />
       </div>
 
-      {/* Panes */}
+      {/* Depth (plan view projection) */}
       <div>
-        <label className="text-[11px] text-gray-400 block mb-1">Number of Panes</label>
-        <div className="flex gap-1.5">
-          {[1, 2, 3, 4].map(p => (
+        <label className="text-[11px] text-gray-400 block mb-1">
+          Depth (ft) — {windowStyle === 'bay' ? 'bay projection from wall' : 'frame depth / wall thickness on plan'}
+        </label>
+        <div className="flex gap-1 flex-wrap mb-1.5">
+          {DEPTH_PRESETS.map(d => (
             <button
-              key={p}
+              key={d.value}
               type="button"
-              onClick={() => setPanes(p)}
-              className={`flex-1 px-2 py-1.5 rounded text-xs ${
-                panes === p ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+              onClick={() => setDepth(d.value)}
+              className={`px-2 py-1 rounded text-xs ${
+                depth === d.value ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
               }`}
             >
-              {p}
+              {d.label}
             </button>
           ))}
         </div>
+        <input
+          type="number"
+          value={depth}
+          onChange={e => setDepth(parseFloat(e.target.value) || 0)}
+          min="0.1"
+          max="6"
+          step="0.083"
+          className="w-full px-2 py-1.5 bg-gray-900 border border-gray-600 rounded text-xs text-white focus:outline-none focus:border-indigo-500"
+        />
+        <span className="text-[9px] text-gray-500 mt-0.5 block">
+          {Math.round(depth * 12)}" — sets the footprint depth on plan view
+        </span>
       </div>
 
-      {/* Divider / Surround widths */}
-      {panes > 1 && (
+      {/* Bay window specific settings */}
+      {windowStyle === 'bay' && (
+        <>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Bay Angle</label>
+            <div className="flex gap-1.5">
+              {[30, 45, 60].map(a => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setBayAngle(a)}
+                  className={`flex-1 px-2 py-1.5 rounded text-xs ${
+                    bayAngle === a ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                >
+                  {a}°
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Sections</label>
+            <div className="flex gap-1.5">
+              {[3, 5].map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setBaySections(s)}
+                  className={`flex-1 px-2 py-1.5 rounded text-xs ${
+                    baySections === s ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                >
+                  {s} Section{s > 1 ? 's' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Panes (standard windows only) */}
+      {windowStyle === 'standard' && (
+        <div>
+          <label className="text-[11px] text-gray-400 block mb-1">Number of Panes</label>
+          <div className="flex gap-1.5">
+            {[1, 2, 3, 4].map(p => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPanes(p)}
+                className={`flex-1 px-2 py-1.5 rounded text-xs ${
+                  panes === p ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Divider / Surround widths (standard only) */}
+      {windowStyle === 'standard' && panes > 1 && (
         <div>
           <label className="text-[11px] text-gray-400 block mb-1">Centre Divider</label>
           <div className="flex gap-1.5">
@@ -368,34 +493,40 @@ function WindowForm({ onSave }) {
         </div>
       )}
 
-      <div>
-        <label className="text-[11px] text-gray-400 block mb-1">Surround Width</label>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={() => setSurroundWidth(0.25)}
-            className={`flex-1 px-2 py-1 rounded text-xs ${
-              surroundWidth === 0.25 ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-            }`}
-          >
-            3"
-          </button>
-          <button
-            type="button"
-            onClick={() => setSurroundWidth(0.333)}
-            className={`flex-1 px-2 py-1 rounded text-xs ${
-              surroundWidth === 0.333 ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-            }`}
-          >
-            4"
-          </button>
+      {windowStyle === 'standard' && (
+        <div>
+          <label className="text-[11px] text-gray-400 block mb-1">Surround Width</label>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSurroundWidth(0.25)}
+              className={`flex-1 px-2 py-1 rounded text-xs ${
+                surroundWidth === 0.25 ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+              }`}
+            >
+              3"
+            </button>
+            <button
+              type="button"
+              onClick={() => setSurroundWidth(0.333)}
+              className={`flex-1 px-2 py-1 rounded text-xs ${
+                surroundWidth === 0.333 ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+              }`}
+            >
+              4"
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Preview */}
       <div className="bg-gray-900/70 rounded p-3 border border-gray-700">
         <h4 className="text-[11px] text-gray-300 font-medium mb-2">Preview</h4>
-        <WindowPreview width={width} height={height} panes={panes} dividerWidth={dividerWidth} surroundWidth={surroundWidth} />
+        {windowStyle === 'bay' ? (
+          <BayWindowPreview width={width} depth={depth} bayAngle={bayAngle} baySections={baySections} />
+        ) : (
+          <WindowPreview width={width} height={height} panes={panes} dividerWidth={dividerWidth} surroundWidth={surroundWidth} />
+        )}
       </div>
 
       <button
@@ -439,9 +570,58 @@ function WindowPreview({ width, height, panes, dividerWidth, surroundWidth }) {
   )
 }
 
+function BayWindowPreview({ width, depth, bayAngle, baySections }) {
+  const maxW = 220
+  const maxH = 140
+  const scale = Math.min(maxW / width, maxH / (depth + 0.5))
+  const w = width * scale
+  const d = depth * scale
+  const pad = 10
+
+  // Bay geometry: centre section is flat, side sections angle outward
+  const angleRad = (bayAngle * Math.PI) / 180
+  const sideWidth = w * 0.25
+  const centreWidth = w - sideWidth * 2
+  const sideDepth = Math.min(d, sideWidth * Math.sin(angleRad))
+
+  // Points: wall line at top, bay projects downward
+  const wallY = pad
+  const points = [
+    `${pad},${wallY}`, // wall left
+    `${pad + sideWidth * Math.cos(angleRad)},${wallY + sideDepth}`, // left side end
+  ]
+  if (baySections >= 3) {
+    points.push(`${pad + sideWidth * Math.cos(angleRad) + centreWidth},${wallY + sideDepth}`) // centre right
+  }
+  points.push(`${pad + w},${wallY}`) // wall right
+
+  return (
+    <svg width={w + pad * 2} height={d + pad * 2} viewBox={`0 0 ${w + pad * 2} ${d + pad * 2}`}>
+      {/* Wall line */}
+      <line x1={pad} y1={wallY} x2={pad + w} y2={wallY} stroke="#06B6D4" strokeWidth="2" />
+      {/* Bay outline */}
+      <polyline points={points.join(' ')} fill="rgba(135,206,235,0.1)" stroke="#06B6D4" strokeWidth="1.5" />
+      {/* Glass lines for each section */}
+      {baySections >= 3 && (
+        <>
+          {/* Left glass */}
+          <line x1={pad + 2} y1={wallY + 2} x2={pad + sideWidth * Math.cos(angleRad) - 2} y2={wallY + sideDepth - 2} stroke="rgba(135,206,235,0.4)" strokeWidth="0.8" />
+          {/* Centre glass */}
+          <line x1={pad + sideWidth * Math.cos(angleRad) + 2} y1={wallY + sideDepth} x2={pad + sideWidth * Math.cos(angleRad) + centreWidth - 2} y2={wallY + sideDepth} stroke="rgba(135,206,235,0.4)" strokeWidth="0.8" />
+          {/* Right glass */}
+          <line x1={pad + sideWidth * Math.cos(angleRad) + centreWidth + 2} y1={wallY + sideDepth - 2} x2={pad + w - 2} y2={wallY + 2} stroke="rgba(135,206,235,0.4)" strokeWidth="0.8" />
+        </>
+      )}
+      {/* Dimension label */}
+      <text x={pad + w / 2} y={d + pad - 2} textAnchor="middle" fontSize="9" fill="#666">{Math.round(depth * 12)}" deep</text>
+    </svg>
+  )
+}
+
 function DoorForm({ onSave }) {
   const [width, setWidth] = useState(3)
   const [height, setHeight] = useState(8)
+  const [depth, setDepth] = useState(0.333) // door frame depth for plan view
   const [style, setStyle] = useState('single') // single, double, arch
   const [swing, setSwing] = useState('left')
   const [name, setName] = useState('')
@@ -460,10 +640,10 @@ function DoorForm({ onSave }) {
       subcategory: style === 'double' ? 'Double Door' : style === 'arch' ? 'Arch' : 'Single Door',
       name: name || autoName,
       width,
-      height,
+      height: depth, // plan-view: height of the set IS the depth
       thickness: 0.292,
       icon_type: iconType,
-      properties: { style, swing: style === 'double' ? 'both' : swing || 'left' },
+      properties: { style, swing: style === 'double' ? 'both' : swing || 'left', elevationHeight: height, depth },
     })
   }
 
@@ -516,7 +696,7 @@ function DoorForm({ onSave }) {
 
       {/* Width */}
       <div>
-        <label className="text-[11px] text-gray-400 block mb-1">Width (ft)</label>
+        <label className="text-[11px] text-gray-400 block mb-1">Width (ft) — opening width</label>
         <div className="flex gap-1 flex-wrap mb-1.5">
           {DOOR_WIDTH_PRESETS.map(w => (
             <button
@@ -542,9 +722,9 @@ function DoorForm({ onSave }) {
         />
       </div>
 
-      {/* Height */}
+      {/* Height (elevation) */}
       <div>
-        <label className="text-[11px] text-gray-400 block mb-1">Height (ft)</label>
+        <label className="text-[11px] text-gray-400 block mb-1">Height (ft) — elevation / face view</label>
         <div className="flex gap-1.5 mb-1.5">
           {DOOR_HEIGHT_PRESETS.map(h => (
             <button
@@ -568,6 +748,37 @@ function DoorForm({ onSave }) {
           step="0.5"
           className="w-full px-2 py-1.5 bg-gray-900 border border-gray-600 rounded text-xs text-white focus:outline-none focus:border-indigo-500"
         />
+      </div>
+
+      {/* Depth (plan view) */}
+      <div>
+        <label className="text-[11px] text-gray-400 block mb-1">Depth (ft) — frame depth on plan view</label>
+        <div className="flex gap-1 flex-wrap mb-1.5">
+          {DEPTH_PRESETS.slice(0, 4).map(d => (
+            <button
+              key={d.value}
+              type="button"
+              onClick={() => setDepth(d.value)}
+              className={`px-2 py-1 rounded text-xs ${
+                depth === d.value ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+              }`}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+        <input
+          type="number"
+          value={depth}
+          onChange={e => setDepth(parseFloat(e.target.value) || 0)}
+          min="0.1"
+          max="4"
+          step="0.083"
+          className="w-full px-2 py-1.5 bg-gray-900 border border-gray-600 rounded text-xs text-white focus:outline-none focus:border-indigo-500"
+        />
+        <span className="text-[9px] text-gray-500 mt-0.5 block">
+          {Math.round(depth * 12)}" — sets the footprint depth on plan view
+        </span>
       </div>
 
       {/* Swing direction (single + arch doors) */}

@@ -55,6 +55,10 @@ export function drawComponentIcon(iconType, set, w, h, ppu, properties = {}, vie
       return isPlan
         ? drawPlanBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
         : drawBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'window-bay':
+      return isPlan
+        ? drawPlanBayWindowIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawBayWindowIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'column':
       return drawColumnIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'stair':
@@ -570,6 +574,81 @@ function drawStairIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
 }
 
 
+/**
+ * Bay window — elevation view: trapezoid outline with glass sections
+ */
+function drawBayWindowIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const sections = props.baySections || 3
+  const bayAngle = props.bayAngle || 30
+  const angleRad = (bayAngle * Math.PI) / 180
+
+  // Draw as a front elevation — angled side sections + flat centre
+  const sideW = w * 0.25
+  const centreW = w - sideW * 2
+  const sideProjection = Math.min(sideW * 0.6, h * 0.15)
+
+  // Left angled section
+  objects.push(new fabric.Polygon([
+    { x: x, y: y },
+    { x: x + sideW, y: y + sideProjection },
+    { x: x + sideW, y: y + h - sideProjection },
+    { x: x, y: y + h },
+  ], {
+    fill: hexToRgba('#87CEEB', 0.1),
+    stroke: lineColor,
+    strokeWidth: 1.5,
+    selectable: false, evented: false,
+    name: prefix + 'bay-l',
+  }))
+
+  // Centre section
+  objects.push(new fabric.Rect({
+    left: x + sideW,
+    top: y + sideProjection,
+    width: centreW,
+    height: h - sideProjection * 2,
+    fill: hexToRgba('#87CEEB', 0.12),
+    stroke: lineColor,
+    strokeWidth: 1.5,
+    selectable: false, evented: false,
+    name: prefix + 'bay-c',
+  }))
+
+  // Right angled section
+  objects.push(new fabric.Polygon([
+    { x: x + w, y: y },
+    { x: x + w - sideW, y: y + sideProjection },
+    { x: x + w - sideW, y: y + h - sideProjection },
+    { x: x + w, y: y + h },
+  ], {
+    fill: hexToRgba('#87CEEB', 0.1),
+    stroke: lineColor,
+    strokeWidth: 1.5,
+    selectable: false, evented: false,
+    name: prefix + 'bay-r',
+  }))
+
+  // Glass cross lines in centre
+  if (centreW > 20 && h > 30) {
+    const cx = x + sideW
+    const cy = y + sideProjection
+    const cw = centreW
+    const ch = h - sideProjection * 2
+    objects.push(new fabric.Line(
+      [cx + 2, cy + 2, cx + cw - 2, cy + ch - 2],
+      { stroke: hexToRgba('#87CEEB', 0.2), strokeWidth: 0.5, selectable: false, evented: false, name: prefix + 'cross1' }
+    ))
+    objects.push(new fabric.Line(
+      [cx + cw - 2, cy + 2, cx + 2, cy + ch - 2],
+      { stroke: hexToRgba('#87CEEB', 0.2), strokeWidth: 0.5, selectable: false, evented: false, name: prefix + 'cross2' }
+    ))
+  }
+
+  return objects
+}
+
+
 // ══════════════════════════════════════════════════════════════
 // PLAN VIEW (Top-Down) Icons — standard architectural conventions
 // ══════════════════════════════════════════════════════════════
@@ -806,6 +885,148 @@ function drawPlanBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, props)
       left: x + w - wallThick, top: y, width: wallThick, height: h,
       fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
       selectable: false, evented: false, name: prefix + 'leaf-r',
+    }))
+  }
+
+  return objects
+}
+
+
+/**
+ * Plan-view bay window — trapezoid projecting from wall line
+ * Standard architectural convention: wall line at top, bay projects downward
+ */
+function drawPlanBayWindowIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const sections = props.baySections || 3
+  const bayAngle = props.bayAngle || 30
+  const isWide = w >= h
+
+  if (isWide) {
+    // Bay projects downward (wider than tall)
+    const angleRad = (bayAngle * Math.PI) / 180
+    const sideLen = h / Math.sin(angleRad) // length of angled side section
+    const sideRunX = Math.min(w * 0.25, sideLen * Math.cos(angleRad)) // horizontal run of each side
+    const centreW = w - sideRunX * 2
+    const bayDepth = h // full height is the bay depth
+
+    // Wall line at top
+    objects.push(new fabric.Line(
+      [x, y, x + w, y],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'wall' }
+    ))
+
+    // Left angled wall
+    objects.push(new fabric.Line(
+      [x, y, x + sideRunX, y + bayDepth],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'side-l' }
+    ))
+
+    // Centre front wall
+    objects.push(new fabric.Line(
+      [x + sideRunX, y + bayDepth, x + sideRunX + centreW, y + bayDepth],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'front' }
+    ))
+
+    // Right angled wall
+    objects.push(new fabric.Line(
+      [x + sideRunX + centreW, y + bayDepth, x + w, y],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'side-r' }
+    ))
+
+    // Glass lines (thin lines inside each section)
+    const glassColor = hexToRgba('#87CEEB', 0.4)
+    const inset = 2
+
+    // Left glass
+    objects.push(new fabric.Line(
+      [x + inset, y + inset, x + sideRunX - inset, y + bayDepth - inset],
+      { stroke: glassColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'glass-l' }
+    ))
+
+    // Centre glass
+    objects.push(new fabric.Line(
+      [x + sideRunX + inset, y + bayDepth - inset, x + sideRunX + centreW - inset, y + bayDepth - inset],
+      { stroke: glassColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'glass-c' }
+    ))
+
+    // Right glass
+    objects.push(new fabric.Line(
+      [x + sideRunX + centreW + inset, y + bayDepth - inset, x + w - inset, y + inset],
+      { stroke: glassColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'glass-r' }
+    ))
+
+    // Fill the bay area
+    objects.push(new fabric.Polygon([
+      { x: x, y: y },
+      { x: x + sideRunX, y: y + bayDepth },
+      { x: x + sideRunX + centreW, y: y + bayDepth },
+      { x: x + w, y: y },
+    ], {
+      fill: hexToRgba('#87CEEB', 0.06),
+      stroke: 'transparent',
+      selectable: false, evented: false,
+      name: prefix + 'fill',
+    }))
+
+  } else {
+    // Bay projects rightward (taller than wide)
+    const angleRad = (bayAngle * Math.PI) / 180
+    const sideRunY = Math.min(h * 0.25, w / Math.tan(angleRad))
+    const centreH = h - sideRunY * 2
+    const bayDepth = w
+
+    // Wall line at left
+    objects.push(new fabric.Line(
+      [x, y, x, y + h],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'wall' }
+    ))
+
+    // Top angled wall
+    objects.push(new fabric.Line(
+      [x, y, x + bayDepth, y + sideRunY],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'side-t' }
+    ))
+
+    // Centre side wall
+    objects.push(new fabric.Line(
+      [x + bayDepth, y + sideRunY, x + bayDepth, y + sideRunY + centreH],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'front' }
+    ))
+
+    // Bottom angled wall
+    objects.push(new fabric.Line(
+      [x + bayDepth, y + sideRunY + centreH, x, y + h],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'side-b' }
+    ))
+
+    // Glass lines
+    const glassColor = hexToRgba('#87CEEB', 0.4)
+    const inset = 2
+    objects.push(new fabric.Line(
+      [x + inset, y + inset, x + bayDepth - inset, y + sideRunY + inset],
+      { stroke: glassColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'glass-t' }
+    ))
+    objects.push(new fabric.Line(
+      [x + bayDepth - inset, y + sideRunY + inset, x + bayDepth - inset, y + sideRunY + centreH - inset],
+      { stroke: glassColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'glass-c' }
+    ))
+    objects.push(new fabric.Line(
+      [x + bayDepth - inset, y + sideRunY + centreH - inset, x + inset, y + h - inset],
+      { stroke: glassColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'glass-b' }
+    ))
+
+    // Fill
+    objects.push(new fabric.Polygon([
+      { x: x, y: y },
+      { x: x + bayDepth, y: y + sideRunY },
+      { x: x + bayDepth, y: y + sideRunY + centreH },
+      { x: x, y: y + h },
+    ], {
+      fill: hexToRgba('#87CEEB', 0.06),
+      stroke: 'transparent',
+      selectable: false, evented: false,
+      name: prefix + 'fill',
     }))
   }
 
