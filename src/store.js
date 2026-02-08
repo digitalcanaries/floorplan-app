@@ -227,6 +227,33 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Lock/Unlock all on-plan sets to PDF
+  lockAllToPdf: () => {
+    const state = get()
+    const pdfPos = state.pdfPosition
+    const updatedSets = state.sets.map(s => {
+      if (s.onPlan === false || s.lockedToPdf) return s
+      return {
+        ...s,
+        lockedToPdf: true,
+        pdfOffsetX: s.x - pdfPos.x,
+        pdfOffsetY: s.y - pdfPos.y,
+      }
+    })
+    set({ sets: updatedSets })
+    get().autosave()
+  },
+
+  unlockAllFromPdf: () => {
+    const updatedSets = get().sets.map(s => {
+      if (!s.lockedToPdf) return s
+      const { pdfOffsetX, pdfOffsetY, ...rest } = s
+      return { ...rest, lockedToPdf: false }
+    })
+    set({ sets: updatedSets })
+    get().autosave()
+  },
+
   // Rule CRUD
   addRule: (r) => {
     const id = get().nextRuleId

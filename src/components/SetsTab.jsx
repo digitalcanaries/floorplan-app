@@ -10,7 +10,8 @@ const COLORS = [
 export default function SetsTab() {
   const {
     sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId, unit,
-    pdfImage, toggleLockToPdf, duplicateSet, removeSetFromPlan, addSetToPlan,
+    pdfImage, toggleLockToPdf, lockAllToPdf, unlockAllFromPdf,
+    duplicateSet, removeSetFromPlan, addSetToPlan,
   } = useStore()
   const [form, setForm] = useState({ name: '', width: '', height: '', color: COLORS[0] })
   const [editing, setEditing] = useState(null)
@@ -107,6 +108,20 @@ export default function SetsTab() {
           )}
         </div>
       </form>
+
+      {/* Lock all / Unlock all */}
+      {pdfImage && onPlanSets.length > 0 && (
+        <div className="flex gap-2">
+          <button onClick={lockAllToPdf}
+            className="flex-1 px-2 py-1 bg-amber-700 hover:bg-amber-600 rounded text-xs text-white">
+            Lock All
+          </button>
+          <button onClick={unlockAllFromPdf}
+            className="flex-1 px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs text-white">
+            Unlock All
+          </button>
+        </div>
+      )}
 
       {/* On-plan sets */}
       <div className="flex flex-col gap-1 overflow-y-auto">
