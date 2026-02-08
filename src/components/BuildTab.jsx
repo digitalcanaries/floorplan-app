@@ -25,7 +25,7 @@ const CATEGORY_TEXT = {
 }
 
 export default function BuildTab() {
-  const { addSet, unit } = useStore()
+  const { addSet, unit, viewMode, setViewMode } = useStore()
   const [components, setComponents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -119,6 +119,31 @@ export default function BuildTab() {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold text-white">Component Library</h3>
         <span className="text-[10px] text-gray-500">{components.length} items</span>
+      </div>
+
+      {/* View Mode Toggle */}
+      <div className="flex items-center gap-2 bg-gray-900 rounded p-1.5">
+        <span className="text-[10px] text-gray-500 shrink-0">Icon Style:</span>
+        <button
+          onClick={() => setViewMode('plan')}
+          className={`flex-1 px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+            viewMode === 'plan'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+          }`}
+        >
+          ⬇ Plan (Top-Down)
+        </button>
+        <button
+          onClick={() => setViewMode('elevation')}
+          className={`flex-1 px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+            viewMode === 'elevation'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+          }`}
+        >
+          ▶ Elevation (Face)
+        </button>
       </div>
 
       {/* Search */}
