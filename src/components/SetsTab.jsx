@@ -34,6 +34,7 @@ export default function SetsTab() {
     hideSet, showSet, cutIntoSet,
     bringForward, sendBackward, bringToFront, sendToBack,
     labelMode,
+    addGroup,
   } = useStore()
   const [form, setForm] = useState({
     name: '', width: '', height: '', color: COLORS[0],
@@ -548,6 +549,16 @@ export default function SetsTab() {
 
           {/* Bulk actions row */}
           <div className="flex gap-1 flex-wrap">
+            <button onClick={() => {
+              const name = prompt('Group name:', `Group ${Date.now() % 1000}`)
+              if (name && name.trim()) {
+                addGroup(name.trim(), [...multiSelected])
+                setMultiSelected(new Set())
+              }
+            }}
+              className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-700 text-white hover:bg-indigo-600">
+              Group
+            </button>
             <button onClick={() => bulkSetNoCut(true)}
               className="px-1.5 py-0.5 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-gray-600">
               No Cut On

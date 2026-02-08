@@ -55,6 +55,23 @@ const useStore = create((set, get) => ({
   rules: saved?.rules || [],
   nextRuleId: saved?.nextRuleId || 1,
 
+  // Annotations (text labels on canvas)
+  annotations: saved?.annotations || [],
+  nextAnnotationId: saved?.nextAnnotationId || 1,
+
+  // Groups
+  groups: saved?.groups || [],
+  nextGroupId: saved?.nextGroupId || 1,
+
+  // Layers visibility (by category)
+  layerVisibility: saved?.layerVisibility || {},
+
+  // Dimension lines
+  showDimensions: saved?.showDimensions ?? false,
+
+  // Clipboard (not persisted)
+  _clipboard: null,
+
   // UI state
   sidebarTab: 'sets',
   calibrating: false,
@@ -139,8 +156,12 @@ const useStore = create((set, get) => ({
     const snapshot = {
       sets: JSON.parse(JSON.stringify(state.sets)),
       rules: JSON.parse(JSON.stringify(state.rules)),
+      annotations: JSON.parse(JSON.stringify(state.annotations)),
+      groups: JSON.parse(JSON.stringify(state.groups)),
       nextSetId: state.nextSetId,
       nextRuleId: state.nextRuleId,
+      nextAnnotationId: state.nextAnnotationId,
+      nextGroupId: state.nextGroupId,
     }
     const past = [...state._past, snapshot]
     if (past.length > state._maxHistory) past.shift()
@@ -148,20 +169,26 @@ const useStore = create((set, get) => ({
   },
 
   undo: () => {
-    const { _past, _future, sets, rules, nextSetId, nextRuleId } = get()
+    const { _past, _future, sets, rules, annotations, groups, nextSetId, nextRuleId, nextAnnotationId, nextGroupId } = get()
     if (_past.length === 0) return
     const currentSnapshot = {
       sets: JSON.parse(JSON.stringify(sets)),
       rules: JSON.parse(JSON.stringify(rules)),
-      nextSetId, nextRuleId,
+      annotations: JSON.parse(JSON.stringify(annotations)),
+      groups: JSON.parse(JSON.stringify(groups)),
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId,
     }
     const previous = _past[_past.length - 1]
     set({
       _recording: false,
       sets: JSON.parse(JSON.stringify(previous.sets)),
       rules: JSON.parse(JSON.stringify(previous.rules)),
+      annotations: JSON.parse(JSON.stringify(previous.annotations || [])),
+      groups: JSON.parse(JSON.stringify(previous.groups || [])),
       nextSetId: previous.nextSetId,
       nextRuleId: previous.nextRuleId,
+      nextAnnotationId: previous.nextAnnotationId || get().nextAnnotationId,
+      nextGroupId: previous.nextGroupId || get().nextGroupId,
       _past: _past.slice(0, -1),
       _future: [currentSnapshot, ..._future],
       selectedSetId: null,
@@ -171,20 +198,26 @@ const useStore = create((set, get) => ({
   },
 
   redo: () => {
-    const { _past, _future, sets, rules, nextSetId, nextRuleId } = get()
+    const { _past, _future, sets, rules, annotations, groups, nextSetId, nextRuleId, nextAnnotationId, nextGroupId } = get()
     if (_future.length === 0) return
     const currentSnapshot = {
       sets: JSON.parse(JSON.stringify(sets)),
       rules: JSON.parse(JSON.stringify(rules)),
-      nextSetId, nextRuleId,
+      annotations: JSON.parse(JSON.stringify(annotations)),
+      groups: JSON.parse(JSON.stringify(groups)),
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId,
     }
     const next = _future[0]
     set({
       _recording: false,
       sets: JSON.parse(JSON.stringify(next.sets)),
       rules: JSON.parse(JSON.stringify(next.rules)),
+      annotations: JSON.parse(JSON.stringify(next.annotations || [])),
+      groups: JSON.parse(JSON.stringify(next.groups || [])),
       nextSetId: next.nextSetId,
       nextRuleId: next.nextRuleId,
+      nextAnnotationId: next.nextAnnotationId || get().nextAnnotationId,
+      nextGroupId: next.nextGroupId || get().nextGroupId,
       _past: [..._past, currentSnapshot],
       _future: _future.slice(1),
       selectedSetId: null,
@@ -492,6 +525,108 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Dimension lines toggle
+  setShowDimensions: (v) => {
+    set({ showDimensions: v })
+    get().autosave()
+  },
+
+  // Layer visibility by category
+  setLayerVisibility: (category, visible) => {
+    const current = get().layerVisibility
+    set({ layerVisibility: { ...current, [category]: visible } })
+    get().autosave()
+  },
+  toggleLayerVisibility: (category) => {
+    const current = get().layerVisibility
+    set({ layerVisibility: { ...current, [category]: !(current[category] ?? true) } })
+    get().autosave()
+  },
+
+  // Annotation CRUD
+  addAnnotation: (a) => {
+    get()._pushHistory()
+    const id = get().nextAnnotationId
+    const newAnnotation = {
+      ...a, id, x: a.x ?? 200, y: a.y ?? 200,
+      text: a.text || 'Label', fontSize: a.fontSize || 14,
+      color: a.color || '#ffffff', rotation: a.rotation || 0,
+      bgColor: a.bgColor || null,
+    }
+    set({ annotations: [...get().annotations, newAnnotation], nextAnnotationId: id + 1 })
+    get().autosave()
+    return id
+  },
+  updateAnnotation: (id, updates) => {
+    get()._pushHistory()
+    set({ annotations: get().annotations.map(a => a.id === id ? { ...a, ...updates } : a) })
+    get().autosave()
+  },
+  deleteAnnotation: (id) => {
+    get()._pushHistory()
+    set({ annotations: get().annotations.filter(a => a.id !== id) })
+    get().autosave()
+  },
+
+  // Group CRUD
+  addGroup: (name, setIds) => {
+    get()._pushHistory()
+    const id = get().nextGroupId
+    const group = { id, name, setIds: [...setIds], collapsed: false }
+    set({ groups: [...get().groups, group], nextGroupId: id + 1 })
+    get().autosave()
+    return id
+  },
+  updateGroup: (id, updates) => {
+    set({ groups: get().groups.map(g => g.id === id ? { ...g, ...updates } : g) })
+    get().autosave()
+  },
+  deleteGroup: (id) => {
+    get()._pushHistory()
+    set({ groups: get().groups.filter(g => g.id !== id) })
+    get().autosave()
+  },
+  ungroupAll: (id) => {
+    get()._pushHistory()
+    set({ groups: get().groups.filter(g => g.id !== id) })
+    get().autosave()
+  },
+  moveGroup: (groupId, dx, dy) => {
+    get()._pushHistory()
+    const group = get().groups.find(g => g.id === groupId)
+    if (!group) return
+    const updatedSets = get().sets.map(s =>
+      group.setIds.includes(s.id) ? { ...s, x: s.x + dx, y: s.y + dy } : s
+    )
+    set({ sets: updatedSets })
+    get().autosave()
+  },
+
+  // Clipboard
+  copySet: (id) => {
+    const s = get().sets.find(s => s.id === id)
+    if (s) set({ _clipboard: JSON.parse(JSON.stringify(s)) })
+  },
+  pasteSet: () => {
+    const clip = get()._clipboard
+    if (!clip) return
+    get()._pushHistory()
+    const id = get().nextSetId
+    const maxZ = get().sets.length > 0 ? Math.max(...get().sets.map(s => s.zIndex || 0)) : 0
+    const newSet = {
+      ...clip, id,
+      name: clip.name + ' (copy)',
+      x: clip.x + 40, y: clip.y + 40,
+      lockedToPdf: false, zIndex: maxZ + 1,
+      cutouts: clip.cutouts ? JSON.parse(JSON.stringify(clip.cutouts)) : undefined,
+    }
+    delete newSet.pdfOffsetX
+    delete newSet.pdfOffsetY
+    set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
+    get().autosave()
+    return id
+  },
+
   // Rule CRUD
   addRule: (r) => {
     get()._pushHistory()
@@ -532,10 +667,16 @@ const useStore = create((set, get) => ({
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
+      showDimensions: state.showDimensions,
+      layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
       nextRuleId: state.nextRuleId,
+      annotations: state.annotations,
+      nextAnnotationId: state.nextAnnotationId,
+      groups: state.groups,
+      nextGroupId: state.nextGroupId,
     }
     try {
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data))
@@ -562,10 +703,16 @@ const useStore = create((set, get) => ({
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
+      showDimensions: state.showDimensions,
+      layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
       nextRuleId: state.nextRuleId,
+      annotations: state.annotations,
+      nextAnnotationId: state.nextAnnotationId,
+      groups: state.groups,
+      nextGroupId: state.nextGroupId,
     }
     try {
       const saves = loadSavedProjects()
@@ -614,10 +761,16 @@ const useStore = create((set, get) => ({
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
+      showDimensions: state.showDimensions,
+      layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
       nextRuleId: state.nextRuleId,
+      annotations: state.annotations,
+      nextAnnotationId: state.nextAnnotationId,
+      groups: state.groups,
+      nextGroupId: state.nextGroupId,
     }
   },
 
@@ -637,10 +790,16 @@ const useStore = create((set, get) => ({
       labelMode: data.labelMode ?? 'inline',
       showOverlaps: data.showOverlaps ?? true,
       viewMode: data.viewMode ?? 'plan',
+      showDimensions: data.showDimensions ?? false,
+      layerVisibility: data.layerVisibility || {},
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,
       rules: data.rules || [],
       nextRuleId: data.nextRuleId || 1,
+      annotations: data.annotations || [],
+      nextAnnotationId: data.nextAnnotationId || 1,
+      groups: data.groups || [],
+      nextGroupId: data.nextGroupId || 1,
       selectedSetId: null,
       _past: [], _future: [],
     })
@@ -659,6 +818,11 @@ const useStore = create((set, get) => ({
       nextSetId: 1,
       rules: [],
       nextRuleId: 1,
+      annotations: [],
+      nextAnnotationId: 1,
+      groups: [],
+      nextGroupId: 1,
+      layerVisibility: {},
       selectedSetId: null,
       _past: [], _future: [],
     })

@@ -4,6 +4,7 @@ import PdfUploader from './PdfUploader.jsx'
 import SetsTab from './SetsTab.jsx'
 import BuildTab from './BuildTab.jsx'
 import RulesTab from './RulesTab.jsx'
+import LayersTab from './LayersTab.jsx'
 
 const MIN_WIDTH = 200
 const MAX_WIDTH = 600
@@ -83,10 +84,18 @@ export default function Sidebar() {
           >
             Rules
           </button>
+          <button
+            onClick={() => setSidebarTab('layers')}
+            className={`flex-1 px-3 py-2 text-sm font-medium ${
+              sidebarTab === 'layers' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Layers
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {sidebarTab === 'sets' ? <SetsTab /> : sidebarTab === 'build' ? <BuildTab /> : <RulesTab />}
+          {sidebarTab === 'sets' ? <SetsTab /> : sidebarTab === 'build' ? <BuildTab /> : sidebarTab === 'layers' ? <LayersTab /> : <RulesTab />}
         </div>
       </div>
       {/* Resize handle on right edge */}

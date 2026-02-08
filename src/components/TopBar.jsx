@@ -17,6 +17,8 @@ export default function TopBar({ canvasSize }) {
     saveProjectAs, getSavedProjects, loadSavedProject, deleteSavedProject,
     undo, redo, _past, _future,
     viewMode, setViewMode,
+    showDimensions, setShowDimensions,
+    annotations, sets: allSets, pixelsPerUnit: ppu,
   } = useStore()
 
   const loadInputRef = useRef(null)
@@ -202,6 +204,76 @@ export default function TopBar({ canvasSize }) {
     link.click()
   }
 
+  const handleExportPDF = () => {
+    // Create a printable HTML page with title block, scale bar, and legend
+    const visibleSets = allSets.filter(s => s.onPlan !== false && !s.hidden)
+    const categories = [...new Set(visibleSets.map(s => s.category || 'Set'))]
+    const canvas = document.querySelector('.canvas-container canvas:first-child')
+    if (!canvas) return
+    const imgData = canvas.toDataURL('image/png')
+
+    // Calculate total area
+    const totalArea = visibleSets.reduce((sum, s) => sum + s.width * s.height, 0)
+    const unit = useStore.getState().unit
+
+    const printWindow = window.open('', '_blank')
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head><title>${projectName} - Floor Plan</title>
+<style>
+  @page { size: landscape; margin: 0.5in; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: white; color: #111; }
+  .title-block { border: 2px solid #333; padding: 12px 20px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+  .title-block h1 { font-size: 20px; margin: 0; }
+  .title-block .meta { font-size: 11px; color: #666; text-align: right; }
+  .canvas-img { width: 100%; border: 1px solid #ccc; margin-bottom: 16px; }
+  .footer { display: flex; gap: 30px; font-size: 11px; border-top: 1px solid #ccc; padding-top: 10px; }
+  .legend { flex: 1; }
+  .legend h3 { font-size: 12px; margin: 0 0 6px 0; }
+  .legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 2px; border: 1px solid #ccc; }
+  .scale-bar { flex: 0 0 200px; }
+  .stats { flex: 0 0 180px; text-align: right; }
+  .stats p { margin: 2px 0; }
+  .scale-line { width: 100px; height: 4px; background: repeating-linear-gradient(90deg, #333 0, #333 50px, #fff 50px, #fff 100px); border: 1px solid #333; margin: 4px 0; }
+</style></head><body>
+<div class="title-block">
+  <div>
+    <h1>${projectName}</h1>
+    <div style="font-size:12px;color:#888;">Film Set Floor Plan Layout</div>
+  </div>
+  <div class="meta">
+    <div>Date: ${new Date().toLocaleDateString()}</div>
+    <div>Scale: 1 px = ${(1/ppu).toFixed(3)} ${unit}</div>
+    <div>Sets: ${visibleSets.length}</div>
+  </div>
+</div>
+<img class="canvas-img" src="${imgData}" />
+<div class="footer">
+  <div class="legend">
+    <h3>Legend</h3>
+    ${categories.map(cat => {
+      const catSets = visibleSets.filter(s => (s.category || 'Set') === cat)
+      const color = catSets[0]?.color || '#666'
+      return `<div class="legend-item"><div class="legend-swatch" style="background:${color}"></div><span><b>${cat}</b> (${catSets.length})</span></div>`
+    }).join('')}
+  </div>
+  <div class="scale-bar">
+    <h3>Scale</h3>
+    <div class="scale-line"></div>
+    <div>${Math.round(100 / ppu * 10) / 10} ${unit}</div>
+  </div>
+  <div class="stats">
+    <h3>Summary</h3>
+    <p>Total sets: ${visibleSets.length}</p>
+    <p>Total area: ${Math.round(totalArea)} sq ${unit}</p>
+    ${annotations.length > 0 ? `<p>Annotations: ${annotations.length}</p>` : ''}
+  </div>
+</div>
+</body></html>`)
+    printWindow.document.close()
+    setTimeout(() => printWindow.print(), 500)
+  }
+
   const openLoadMenu = () => {
     setSavedProjectsList(getSavedProjects())
     loadServerProjects()
@@ -301,6 +373,11 @@ export default function TopBar({ canvasSize }) {
       <label className="flex items-center gap-1 text-xs cursor-pointer">
         <input type="checkbox" checked={showOverlaps} onChange={e => setShowOverlaps(e.target.checked)} />
         Overlaps
+      </label>
+
+      <label className="flex items-center gap-1 text-xs cursor-pointer">
+        <input type="checkbox" checked={showDimensions} onChange={e => setShowDimensions(e.target.checked)} />
+        Dims
       </label>
 
       <div className="h-5 w-px bg-gray-600" />
@@ -477,7 +554,12 @@ export default function TopBar({ canvasSize }) {
 
       <button onClick={handleExportPNG}
         className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs">
-        Export PNG
+        PNG
+      </button>
+
+      <button onClick={handleExportPDF}
+        className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs">
+        Print/PDF
       </button>
 
       <button onClick={() => { if (confirm('Clear all data? This cannot be undone.')) clearAll() }}

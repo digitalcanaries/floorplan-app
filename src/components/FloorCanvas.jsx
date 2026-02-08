@@ -14,6 +14,8 @@ const LEADER_PREFIX = 'leader-line-'
 const SNAP_LINE_NAME = 'snap-guide-line'
 const TOOLTIP_NAME = 'hover-tooltip'
 const TOOLTIP_BG_NAME = 'hover-tooltip-bg'
+const DIM_PREFIX = 'dim-line-'
+const ANNO_PREFIX = 'annotation-'
 
 export default function FloorCanvas({ onCanvasSize }) {
   const canvasRef = useRef(null)
@@ -28,11 +30,14 @@ export default function FloorCanvas({ onCanvasSize }) {
     pixelsPerUnit, setPixelsPerUnit,
     gridVisible, snapToGrid, snapToSets, gridSize,
     labelsVisible, labelMode, showOverlaps,
-    sets, updateSet, selectedSetId, setSelectedSetId,
+    sets, updateSet, selectedSetId, setSelectedSetId, deleteSet,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
     unit, viewMode,
     undo, redo,
+    annotations, updateAnnotation,
+    layerVisibility, showDimensions,
+    copySet, pasteSet, duplicateSet,
   } = useStore()
 
   // Initialize fabric canvas
@@ -362,7 +367,7 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     const ppu = pixelsPerUnit
 
-    // Remove old set objects, rule lines, overlap zones, gap zones, snap lines
+    // Remove old set objects, rule lines, overlap zones, gap zones, snap lines, dimensions, annotations
     fc.getObjects()
       .filter(o =>
         o.name?.startsWith(SET_PREFIX) ||
@@ -373,6 +378,8 @@ export default function FloorCanvas({ onCanvasSize }) {
         o.name?.startsWith(GAP_PREFIX) ||
         o.name?.startsWith(LEADER_PREFIX) ||
         o.name?.startsWith(ICON_PREFIX) ||
+        o.name?.startsWith(DIM_PREFIX) ||
+        o.name?.startsWith(ANNO_PREFIX) ||
         o.name === SNAP_LINE_NAME
       )
       .forEach(o => fc.remove(o))
@@ -409,10 +416,10 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.add(line)
     }
 
-    // Draw set shapes (only sets that are on the plan and not hidden)
+    // Draw set shapes (only sets that are on the plan, not hidden, and layer is visible)
     // Sort by zIndex for rendering order
     const visibleSets = sets
-      .filter(s => s.onPlan !== false && !s.hidden)
+      .filter(s => s.onPlan !== false && !s.hidden && (layerVisibility[s.category || 'Set'] !== false))
       .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 
     for (const s of visibleSets) {
@@ -885,8 +892,152 @@ export default function FloorCanvas({ onCanvasSize }) {
       })
     }
 
+    // Draw dimension lines between adjacent sets
+    if (showDimensions) {
+      for (let i = 0; i < visibleSets.length; i++) {
+        const si = visibleSets[i]
+        const siAABB = getAABB(si, ppu)
+
+        // Show width and height dimensions for each set
+        const dimColor = '#94a3b8'
+        const dimFont = Math.max(9, Math.min(12, siAABB.w / 10))
+
+        // Width dimension (bottom)
+        const widthText = `${si.width}${unit}`
+        const wLabel = new fabric.FabricText(widthText, {
+          left: siAABB.x + siAABB.w / 2,
+          top: siAABB.y + siAABB.h + 6,
+          fontSize: dimFont,
+          fill: dimColor,
+          fontFamily: 'system-ui, sans-serif',
+          originX: 'center',
+          selectable: false,
+          evented: false,
+          name: DIM_PREFIX + si.id + '-w',
+        })
+        fc.add(wLabel)
+
+        // Width dimension lines
+        const wLine = new fabric.Line(
+          [siAABB.x, siAABB.y + siAABB.h + 4, siAABB.x + siAABB.w, siAABB.y + siAABB.h + 4],
+          {
+            stroke: dimColor, strokeWidth: 0.8,
+            selectable: false, evented: false,
+            name: DIM_PREFIX + si.id + '-wl',
+          }
+        )
+        fc.add(wLine)
+
+        // Height dimension (right)
+        const heightText = `${si.height}${unit}`
+        const hLabel = new fabric.FabricText(heightText, {
+          left: siAABB.x + siAABB.w + 6,
+          top: siAABB.y + siAABB.h / 2,
+          fontSize: dimFont,
+          fill: dimColor,
+          fontFamily: 'system-ui, sans-serif',
+          originX: 'left',
+          originY: 'center',
+          selectable: false,
+          evented: false,
+          name: DIM_PREFIX + si.id + '-h',
+        })
+        fc.add(hLabel)
+
+        // Height dimension line
+        const hLine = new fabric.Line(
+          [siAABB.x + siAABB.w + 3, siAABB.y, siAABB.x + siAABB.w + 3, siAABB.y + siAABB.h],
+          {
+            stroke: dimColor, strokeWidth: 0.8,
+            selectable: false, evented: false,
+            name: DIM_PREFIX + si.id + '-hl',
+          }
+        )
+        fc.add(hLine)
+
+        // Distance to nearest neighbors
+        for (let j = i + 1; j < visibleSets.length; j++) {
+          const sj = visibleSets[j]
+          const sjAABB = getAABB(sj, ppu)
+
+          // Check horizontal gap (si right to sj left or vice versa)
+          const hOverlap = !(siAABB.y + siAABB.h < sjAABB.y || sjAABB.y + sjAABB.h < siAABB.y)
+          if (hOverlap) {
+            const gapRight = sjAABB.x - (siAABB.x + siAABB.w)
+            const gapLeft = siAABB.x - (sjAABB.x + sjAABB.w)
+            const gap = gapRight > 2 ? gapRight : gapLeft > 2 ? gapLeft : 0
+            if (gap > 2 && gap < 500) {
+              const fromX = gapRight > 2 ? siAABB.x + siAABB.w : sjAABB.x + sjAABB.w
+              const toX = gapRight > 2 ? sjAABB.x : siAABB.x
+              const midY = Math.max(siAABB.y, sjAABB.y) + Math.min(siAABB.y + siAABB.h, sjAABB.y + sjAABB.h)
+              const y = midY / 2
+              const distFt = Math.round((gap / ppu) * 10) / 10
+              const dLine = new fabric.Line([fromX, y, toX, y], {
+                stroke: '#f59e0b88', strokeWidth: 1, strokeDashArray: [3, 3],
+                selectable: false, evented: false, name: DIM_PREFIX + si.id + '-' + sj.id,
+              })
+              fc.add(dLine)
+              const dLabel = new fabric.FabricText(`${distFt}${unit}`, {
+                left: (fromX + toX) / 2, top: y - 12,
+                fontSize: 9, fill: '#f59e0b', fontFamily: 'system-ui, sans-serif',
+                originX: 'center', selectable: false, evented: false,
+                name: DIM_PREFIX + si.id + '-' + sj.id + '-t',
+              })
+              fc.add(dLabel)
+            }
+          }
+        }
+      }
+    }
+
+    // Draw annotations (text labels)
+    for (const anno of annotations) {
+      const text = new fabric.FabricText(anno.text, {
+        left: anno.x,
+        top: anno.y,
+        fontSize: anno.fontSize || 14,
+        fill: anno.color || '#ffffff',
+        fontFamily: 'system-ui, sans-serif',
+        fontWeight: 'bold',
+        angle: anno.rotation || 0,
+        selectable: true,
+        evented: true,
+        hasControls: false,
+        hasBorders: true,
+        borderColor: '#6366F1',
+        hoverCursor: 'move',
+        name: ANNO_PREFIX + anno.id,
+        shadow: new fabric.Shadow({ color: '#000000', blur: 4 }),
+      })
+
+      if (anno.bgColor) {
+        const bgRect = new fabric.Rect({
+          left: anno.x - 4,
+          top: anno.y - 2,
+          width: text.width + 8,
+          height: (anno.fontSize || 14) + 4,
+          fill: anno.bgColor,
+          rx: 3, ry: 3,
+          selectable: false,
+          evented: false,
+          name: ANNO_PREFIX + anno.id + '-bg',
+        })
+        fc.add(bgRect)
+      }
+
+      text.on('modified', function () {
+        updateAnnotation(anno.id, { x: this.left, y: this.top })
+      })
+      text.on('mousedblclick', function () {
+        const newText = prompt('Edit annotation text:', anno.text)
+        if (newText !== null) updateAnnotation(anno.id, { text: newText })
+      })
+
+      fc.add(text)
+    }
+
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode, layerVisibility, showDimensions, annotations])
 
   useEffect(() => {
     syncSets()
@@ -970,6 +1121,7 @@ export default function FloorCanvas({ onCanvasSize }) {
       const tag = e.target.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
 
+      const state = useStore.getState()
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault()
         undo()
@@ -979,12 +1131,36 @@ export default function FloorCanvas({ onCanvasSize }) {
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
         e.preventDefault()
         redo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        // Copy selected set
+        if (state.selectedSetId) {
+          e.preventDefault()
+          copySet(state.selectedSetId)
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        // Paste
+        if (state._clipboard) {
+          e.preventDefault()
+          pasteSet()
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        // Duplicate
+        if (state.selectedSetId) {
+          e.preventDefault()
+          duplicateSet(state.selectedSetId)
+        }
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Delete selected set
+        if (state.selectedSetId) {
+          e.preventDefault()
+          deleteSet(state.selectedSetId)
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo])
+  }, [undo, redo, copySet, pasteSet, duplicateSet, deleteSet])
 
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden bg-gray-900">
