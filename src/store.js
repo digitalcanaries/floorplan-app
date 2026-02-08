@@ -69,6 +69,9 @@ const useStore = create((set, get) => ({
   // Dimension lines
   showDimensions: saved?.showDimensions ?? false,
 
+  // Hover tooltips
+  showHoverTooltips: saved?.showHoverTooltips ?? true,
+
   // Clipboard (not persisted)
   _clipboard: null,
 
@@ -531,6 +534,12 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Hover tooltips toggle
+  setShowHoverTooltips: (v) => {
+    set({ showHoverTooltips: v })
+    get().autosave()
+  },
+
   // Layer visibility by category
   setLayerVisibility: (category, visible) => {
     const current = get().layerVisibility
@@ -668,6 +677,7 @@ const useStore = create((set, get) => ({
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
       showDimensions: state.showDimensions,
+      showHoverTooltips: state.showHoverTooltips,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -704,6 +714,7 @@ const useStore = create((set, get) => ({
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
       showDimensions: state.showDimensions,
+      showHoverTooltips: state.showHoverTooltips,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -762,6 +773,7 @@ const useStore = create((set, get) => ({
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
       showDimensions: state.showDimensions,
+      showHoverTooltips: state.showHoverTooltips,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -791,6 +803,7 @@ const useStore = create((set, get) => ({
       showOverlaps: data.showOverlaps ?? true,
       viewMode: data.viewMode ?? 'plan',
       showDimensions: data.showDimensions ?? false,
+      showHoverTooltips: data.showHoverTooltips ?? true,
       layerVisibility: data.layerVisibility || {},
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,

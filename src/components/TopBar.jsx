@@ -542,6 +542,23 @@ export default function TopBar({ canvasSize }) {
               ))
             )}
 
+            {/* Templates */}
+            <div className="px-3 py-1.5 text-[10px] text-gray-400 uppercase tracking-wide border-b border-t border-gray-600 mt-1">
+              Templates
+            </div>
+            <button onClick={async () => {
+              try {
+                const res = await fetch('/883-islington-floorplan.json')
+                const data = await res.json()
+                importProject(data)
+                setShowLoadMenu(false)
+              } catch (err) { alert('Failed to load template: ' + err.message) }
+            }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600">
+              <span className="text-white">883 Islington Ave</span>
+              <span className="text-gray-400 ml-1 text-[10px]">Warehouse &amp; Office (37,104 SF)</span>
+            </button>
+
             <div className="border-t border-gray-600" />
             <button onClick={() => { loadInputRef.current?.click(); setShowLoadMenu(false) }}
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-gray-400">

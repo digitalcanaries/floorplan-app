@@ -37,6 +37,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     undo, redo,
     annotations, updateAnnotation,
     layerVisibility, showDimensions,
+    showHoverTooltips,
     copySet, pasteSet, duplicateSet,
   } = useStore()
 
@@ -144,6 +145,12 @@ export default function FloorCanvas({ onCanvasSize }) {
         .forEach(o => fc.remove(o))
     }
 
+    // If tooltips disabled, just clean up and return
+    if (!showHoverTooltips) {
+      removeTooltip()
+      return
+    }
+
     const onOver = (opt) => {
       const target = opt.target
       if (!target || !target.name?.startsWith(SET_PREFIX)) return
@@ -213,7 +220,7 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.off('mouse:out', onOut)
       removeTooltip()
     }
-  }, [sets, unit])
+  }, [sets, unit, showHoverTooltips])
 
   // Calibration click handler
   useEffect(() => {

@@ -37,6 +37,7 @@ export default function LayersTab() {
     labelsVisible, setLabelsVisible,
     showOverlaps, setShowOverlaps,
     gridVisible, setGridVisible,
+    showHoverTooltips, setShowHoverTooltips,
     unit, pixelsPerUnit,
   } = useStore()
 
@@ -78,6 +79,10 @@ export default function LayersTab() {
         <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
           <input type="checkbox" checked={showDimensions} onChange={e => setShowDimensions(e.target.checked)} className="accent-indigo-500" />
           <span className="text-gray-300">Dimension Lines</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
+          <input type="checkbox" checked={showHoverTooltips} onChange={e => setShowHoverTooltips(e.target.checked)} className="accent-indigo-500" />
+          <span className="text-gray-300">Hover Tooltips</span>
         </label>
       </div>
 
