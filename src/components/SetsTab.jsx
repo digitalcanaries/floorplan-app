@@ -39,7 +39,8 @@ export default function SetsTab() {
   })
   const [editing, setEditing] = useState(null)
   const [cuttingSetId, setCuttingSetId] = useState(null)
-  const [categoryFilter, setCategoryFilter] = useState(null) // null = show all
+  const [categoryFilter, setCategoryFilter] = useState(null)
+  const [multiSelected, setMultiSelected] = useState(new Set())
 
   const handleAdd = (e) => {
     e.preventDefault()
@@ -83,6 +84,7 @@ export default function SetsTab() {
 
   const startEdit = (s) => {
     setEditing(s.id)
+    setMultiSelected(new Set())
     setForm({
       name: s.name, width: String(s.width), height: String(s.height), color: s.color,
       category: s.category || 'Set', wallGap: String(s.wallGap || ''), opacity: String(s.opacity ?? 1),
@@ -112,6 +114,83 @@ export default function SetsTab() {
   const handleCategoryChange = (cat) => {
     const isWallType = WALL_CATEGORIES.includes(cat)
     setForm(f => ({ ...f, category: cat, noCut: isWallType ? true : f.noCut }))
+  }
+
+  // Multi-select handlers
+  const toggleMultiSelect = (e, id) => {
+    e.stopPropagation()
+    setMultiSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleSetClick = (e, id) => {
+    // Shift+click for multi-select
+    if (e.shiftKey) {
+      toggleMultiSelect(e, id)
+      return
+    }
+    // Normal click — clear multi-select, toggle single selection
+    if (multiSelected.size > 0) {
+      setMultiSelected(new Set())
+    }
+    setSelectedSetId(id === selectedSetId ? null : id)
+  }
+
+  const selectAll = () => {
+    setMultiSelected(new Set(filteredOnPlan.map(s => s.id)))
+  }
+
+  const clearMultiSelect = () => {
+    setMultiSelected(new Set())
+  }
+
+  // Bulk actions
+  const bulkSetCategory = (cat) => {
+    const isWallType = WALL_CATEGORIES.includes(cat)
+    for (const id of multiSelected) {
+      updateSet(id, {
+        category: cat,
+        noCut: isWallType ? true : undefined,
+      })
+    }
+  }
+
+  const bulkSetColor = (color) => {
+    for (const id of multiSelected) {
+      updateSet(id, { color })
+    }
+  }
+
+  const bulkSetNoCut = (val) => {
+    for (const id of multiSelected) {
+      updateSet(id, { noCut: val })
+    }
+  }
+
+  const bulkHide = () => {
+    for (const id of multiSelected) {
+      hideSet(id)
+    }
+    setMultiSelected(new Set())
+  }
+
+  const bulkRemoveFromPlan = () => {
+    for (const id of multiSelected) {
+      removeSetFromPlan(id)
+    }
+    setMultiSelected(new Set())
+  }
+
+  const bulkDelete = () => {
+    if (!confirm(`Delete ${multiSelected.size} selected items permanently?`)) return
+    for (const id of multiSelected) {
+      deleteSet(id)
+    }
+    setMultiSelected(new Set())
   }
 
   const onPlanSets = sets.filter(s => s.onPlan !== false && !s.hidden)
@@ -268,6 +347,80 @@ export default function SetsTab() {
         </div>
       )}
 
+      {/* Multi-select bulk actions bar */}
+      {multiSelected.size > 0 && (
+        <div className="bg-indigo-900/50 border border-indigo-600/50 rounded p-2 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-indigo-300 font-medium">{multiSelected.size} selected</span>
+            <button onClick={selectAll} className="text-[10px] text-indigo-400 hover:text-white">Select All</button>
+            <div className="flex-1" />
+            <button onClick={clearMultiSelect} className="text-xs text-gray-400 hover:text-white">&#x2715;</button>
+          </div>
+
+          {/* Bulk category change */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-gray-400">Change category:</span>
+            <div className="flex gap-1 flex-wrap">
+              {CATEGORIES.map(c => (
+                <button key={c}
+                  onClick={() => bulkSetCategory(c)}
+                  className="px-1.5 py-0.5 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-indigo-600 hover:text-white"
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Bulk color change */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-400">Color:</span>
+            <div className="flex gap-0.5 flex-wrap">
+              {COLORS.map(c => (
+                <button key={c}
+                  onClick={() => bulkSetColor(c)}
+                  className="w-4 h-4 rounded-sm border border-gray-600 hover:border-white"
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Bulk actions row */}
+          <div className="flex gap-1 flex-wrap">
+            <button onClick={() => bulkSetNoCut(true)}
+              className="px-1.5 py-0.5 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-gray-600">
+              No Cut On
+            </button>
+            <button onClick={() => bulkSetNoCut(false)}
+              className="px-1.5 py-0.5 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-gray-600">
+              No Cut Off
+            </button>
+            <button onClick={bulkHide}
+              className="px-1.5 py-0.5 rounded text-[10px] bg-gray-700 text-gray-300 hover:bg-gray-600">
+              Hide
+            </button>
+            <button onClick={bulkRemoveFromPlan}
+              className="px-1.5 py-0.5 rounded text-[10px] bg-gray-700 text-orange-300 hover:bg-orange-700">
+              Remove
+            </button>
+            <button onClick={bulkDelete}
+              className="px-1.5 py-0.5 rounded text-[10px] bg-gray-700 text-red-300 hover:bg-red-700">
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Select all / hint */}
+      {filteredOnPlan.length > 0 && multiSelected.size === 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-gray-600 italic">Shift+click or use checkboxes to multi-select</span>
+          <div className="flex-1" />
+          <button onClick={selectAll} className="text-[10px] text-gray-500 hover:text-indigo-400">Select All</button>
+        </div>
+      )}
+
       {/* On-plan visible sets */}
       <div className="flex flex-col gap-1 overflow-y-auto">
         {sets.length === 0 && (
@@ -276,12 +429,21 @@ export default function SetsTab() {
         {filteredOnPlan.map(s => (
           <div key={s.id}>
             <div
-              onClick={() => setSelectedSetId(s.id === selectedSetId ? null : s.id)}
+              onClick={(e) => handleSetClick(e, s.id)}
               title={`${s.name} — ${s.width}${unit} x ${s.height}${unit}${s.category && s.category !== 'Set' ? ` [${s.category}]` : ''}${s.wallGap > 0 ? ` Gap: ${s.wallGap}${unit}` : ''}${s.lockedToPdf ? ' [Locked]' : ''}${s.noCut ? ' [No Cut]' : ''}${s.rotation ? ` ${s.rotation}\u00B0` : ''}`}
               className={`flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer text-sm
-                ${s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
-                ${s.lockedToPdf ? 'border border-amber-600/40' : ''}`}
+                ${multiSelected.has(s.id) ? 'bg-indigo-900/40 border border-indigo-500/50' : s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
+                ${s.lockedToPdf && !multiSelected.has(s.id) ? 'border border-amber-600/40' : ''}`}
             >
+              {/* Multi-select checkbox */}
+              <input
+                type="checkbox"
+                checked={multiSelected.has(s.id)}
+                onChange={(e) => toggleMultiSelect(e, s.id)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-3 h-3 shrink-0 accent-indigo-500 cursor-pointer"
+              />
+
               <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color, opacity: s.opacity ?? 1 }} />
               <span className="flex-1 truncate text-xs">{s.name}</span>
 
