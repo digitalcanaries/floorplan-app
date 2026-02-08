@@ -54,7 +54,14 @@ const useStore = create((set, get) => ({
   setPdfImage: (img) => set({ pdfImage: img }),
   setPdfRotation: (r) => set({ pdfRotation: r }),
   setPdfPosition: (pos) => {
-    set({ pdfPosition: pos })
+    const oldPos = get().pdfPosition
+    const dx = pos.x - oldPos.x
+    const dy = pos.y - oldPos.y
+    // Move all locked-to-PDF sets with the PDF
+    const updatedSets = get().sets.map(s =>
+      s.lockedToPdf ? { ...s, x: s.x + dx, y: s.y + dy } : s
+    )
+    set({ pdfPosition: pos, sets: updatedSets })
     get().autosave()
   },
   setPixelsPerUnit: (p) => {
@@ -99,7 +106,7 @@ const useStore = create((set, get) => ({
   // Set CRUD
   addSet: (s) => {
     const id = get().nextSetId
-    const newSet = { ...s, id, x: 100, y: 100, rotation: 0 }
+    const newSet = { ...s, id, x: 100, y: 100, rotation: 0, lockedToPdf: false, onPlan: true }
     set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
     get().autosave()
     return id
@@ -112,6 +119,8 @@ const useStore = create((set, get) => ({
       x: 50 + (i % 4) * 120,
       y: 50 + Math.floor(i / 4) * 120,
       rotation: 0,
+      lockedToPdf: false,
+      onPlan: true,
     }))
     set({
       sets: [...get().sets, ...created],
@@ -133,6 +142,88 @@ const useStore = create((set, get) => ({
   },
   setSets: (sets) => {
     set({ sets })
+    get().autosave()
+  },
+
+  // Duplicate a set — auto-increments name with number suffix
+  duplicateSet: (id) => {
+    const state = get()
+    const original = state.sets.find(s => s.id === id)
+    if (!original) return
+
+    // Find the next number suffix for this base name
+    const baseName = original.name.replace(/\s*\(\d+\)\s*$/, '')
+    const existing = state.sets.filter(s => s.name.startsWith(baseName))
+    let maxNum = 0
+    for (const s of existing) {
+      const match = s.name.match(/\((\d+)\)\s*$/)
+      if (match) maxNum = Math.max(maxNum, parseInt(match[1]))
+    }
+    const newName = `${baseName} (${maxNum + 1})`
+
+    const newId = state.nextSetId
+    const newSet = {
+      ...original,
+      id: newId,
+      name: newName,
+      x: original.x + 30,
+      y: original.y + 30,
+      lockedToPdf: false,
+    }
+    // Remove offset fields from duplicate
+    delete newSet.pdfOffsetX
+    delete newSet.pdfOffsetY
+
+    set({
+      sets: [...state.sets, newSet],
+      nextSetId: newId + 1,
+      selectedSetId: newId,
+    })
+    get().autosave()
+    return newId
+  },
+
+  // Remove set from the plan (hide from canvas) but keep in set list
+  removeSetFromPlan: (id) => {
+    set({
+      sets: get().sets.map(s =>
+        s.id === id ? { ...s, onPlan: false, lockedToPdf: false } : s
+      ),
+    })
+    get().autosave()
+  },
+
+  // Add set back to the plan
+  addSetToPlan: (id) => {
+    set({
+      sets: get().sets.map(s =>
+        s.id === id ? { ...s, onPlan: true, x: 100, y: 100 } : s
+      ),
+    })
+    get().autosave()
+  },
+
+  // Lock/Unlock set to PDF position
+  toggleLockToPdf: (id) => {
+    const state = get()
+    const pdfPos = state.pdfPosition
+    const updatedSets = state.sets.map(s => {
+      if (s.id !== id) return s
+      if (s.lockedToPdf) {
+        // Unlocking — keep current absolute position, remove offset data
+        const { pdfOffsetX, pdfOffsetY, ...rest } = s
+        return { ...rest, lockedToPdf: false }
+      } else {
+        // Locking — store the offset from PDF origin
+        return {
+          ...s,
+          lockedToPdf: true,
+          pdfOffsetX: s.x - pdfPos.x,
+          pdfOffsetY: s.y - pdfPos.y,
+        }
+      }
+    })
+    set({ sets: updatedSets })
     get().autosave()
   },
 

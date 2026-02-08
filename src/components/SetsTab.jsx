@@ -8,7 +8,10 @@ const COLORS = [
 ]
 
 export default function SetsTab() {
-  const { sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId, unit } = useStore()
+  const {
+    sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId, unit,
+    pdfImage, toggleLockToPdf, duplicateSet, removeSetFromPlan, addSetToPlan,
+  } = useStore()
   const [form, setForm] = useState({ name: '', width: '', height: '', color: COLORS[0] })
   const [editing, setEditing] = useState(null)
 
@@ -52,6 +55,9 @@ export default function SetsTab() {
     const newRot = ((setData.rotation || 0) + 90) % 360
     updateSet(setData.id, { rotation: newRot })
   }
+
+  const onPlanSets = sets.filter(s => s.onPlan !== false)
+  const offPlanSets = sets.filter(s => s.onPlan === false)
 
   return (
     <div className="p-3 flex flex-col gap-3">
@@ -102,31 +108,99 @@ export default function SetsTab() {
         </div>
       </form>
 
+      {/* On-plan sets */}
       <div className="flex flex-col gap-1 overflow-y-auto">
         {sets.length === 0 && (
           <p className="text-gray-500 text-xs text-center py-4">No sets added yet</p>
         )}
-        {sets.map(set => (
+        {onPlanSets.map(s => (
           <div
-            key={set.id}
-            onClick={() => setSelectedSetId(set.id === selectedSetId ? null : set.id)}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm
-              ${set.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}`}
+            key={s.id}
+            onClick={() => setSelectedSetId(s.id === selectedSetId ? null : s.id)}
+            className={`flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer text-sm
+              ${s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
+              ${s.lockedToPdf ? 'border border-amber-600/40' : ''}`}
           >
-            <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: set.color }} />
-            <span className="flex-1 truncate">{set.name}</span>
-            <span className="text-xs text-gray-400">{set.width}x{set.height}</span>
-            <button onClick={(e) => handleRotate(e, set)}
-              className="text-xs text-yellow-400 hover:text-yellow-300" title={`Rotate (${set.rotation || 0}°)`}>
+            <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
+            <span className="flex-1 truncate text-xs">{s.name}</span>
+            <span className="text-[10px] text-gray-400">{s.width}x{s.height}</span>
+
+            {/* Lock to PDF button */}
+            {pdfImage && (
+              <button onClick={(e) => { e.stopPropagation(); toggleLockToPdf(s.id) }}
+                className={`text-xs ${s.lockedToPdf ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}`}
+                title={s.lockedToPdf ? 'Unlock from PDF' : 'Lock to PDF position'}>
+                {s.lockedToPdf ? '\u{1F4CC}' : '\u{1F4CD}'}
+              </button>
+            )}
+
+            {/* Rotate */}
+            <button onClick={(e) => handleRotate(e, s)}
+              className="text-xs text-yellow-400 hover:text-yellow-300" title={`Rotate (${s.rotation || 0}\u00B0)`}>
               &#x21BB;
             </button>
-            <button onClick={(e) => { e.stopPropagation(); startEdit(set) }}
-              className="text-xs text-blue-400 hover:text-blue-300">Edit</button>
-            <button onClick={(e) => { e.stopPropagation(); deleteSet(set.id) }}
-              className="text-xs text-red-400 hover:text-red-300">Del</button>
+
+            {/* Duplicate */}
+            <button onClick={(e) => { e.stopPropagation(); duplicateSet(s.id) }}
+              className="text-xs text-cyan-400 hover:text-cyan-300" title="Duplicate set">
+              &#x29C9;
+            </button>
+
+            {/* Remove from plan (not delete) */}
+            <button onClick={(e) => { e.stopPropagation(); removeSetFromPlan(s.id) }}
+              className="text-xs text-orange-400 hover:text-orange-300" title="Remove from plan (keep in list)">
+              &#x2B07;
+            </button>
+
+            {/* Edit */}
+            <button onClick={(e) => { e.stopPropagation(); startEdit(s) }}
+              className="text-xs text-blue-400 hover:text-blue-300" title="Edit set">
+              &#x270E;
+            </button>
+
+            {/* Delete permanently */}
+            <button onClick={(e) => { e.stopPropagation(); deleteSet(s.id) }}
+              className="text-xs text-red-400 hover:text-red-300" title="Delete permanently">
+              &#x2715;
+            </button>
           </div>
         ))}
       </div>
+
+      {/* Off-plan sets */}
+      {offPlanSets.length > 0 && (
+        <>
+          <div className="flex items-center gap-2">
+            <div className="h-px bg-gray-600 flex-1" />
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Off Plan</span>
+            <div className="h-px bg-gray-600 flex-1" />
+          </div>
+          <div className="flex flex-col gap-1 overflow-y-auto">
+            {offPlanSets.map(s => (
+              <div
+                key={s.id}
+                className="flex items-center gap-1.5 px-2 py-1.5 rounded text-sm bg-gray-800/50 opacity-60 hover:opacity-100"
+              >
+                <div className="w-3 h-3 rounded-sm shrink-0 opacity-50" style={{ backgroundColor: s.color }} />
+                <span className="flex-1 truncate text-xs text-gray-400">{s.name}</span>
+                <span className="text-[10px] text-gray-500">{s.width}x{s.height}</span>
+
+                {/* Add back to plan */}
+                <button onClick={() => addSetToPlan(s.id)}
+                  className="text-xs text-green-400 hover:text-green-300" title="Add back to plan">
+                  &#x2B06;
+                </button>
+
+                {/* Delete permanently */}
+                <button onClick={() => deleteSet(s.id)}
+                  className="text-xs text-red-400 hover:text-red-300" title="Delete permanently">
+                  &#x2715;
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }

@@ -139,7 +139,8 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       removeTooltip()
 
-      const tooltipText = `${setData.name}  (${setData.width}${unit} x ${setData.height}${unit})`
+      const lockedLabel = setData.lockedToPdf ? ' [Locked]' : ''
+      const tooltipText = `${setData.name}  (${setData.width}${unit} x ${setData.height}${unit})${lockedLabel}`
       const padding = 6
 
       const label = new fabric.FabricText(tooltipText, {
@@ -168,7 +169,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         fill: '#1f2937ee',
         rx: 4,
         ry: 4,
-        stroke: setData.color,
+        stroke: setData.lockedToPdf ? '#f59e0b' : setData.color,
         strokeWidth: 1,
         selectable: false,
         evented: false,
@@ -255,7 +256,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         lockScalingX: true,
         lockScalingY: true,
       })
-      // Save position when moved
+      // Save position when moved — locked sets move via setPdfPosition in store
       fImg.on('modified', function () {
         setPdfPosition({ x: this.left, y: this.top })
       })
@@ -334,11 +335,11 @@ export default function FloorCanvas({ onCanvasSize }) {
       .filter(o => o.name === TOOLTIP_NAME || o.name === TOOLTIP_BG_NAME)
       .forEach(o => fc.remove(o))
 
-    // Draw rule lines
+    // Draw rule lines (only for visible sets)
     for (const rule of rules) {
       if (rule.type === 'FIXED') continue
-      const a = sets.find(s => s.id === rule.setA)
-      const b = sets.find(s => s.id === rule.setB)
+      const a = sets.find(s => s.id === rule.setA && s.onPlan !== false)
+      const b = sets.find(s => s.id === rule.setB && s.onPlan !== false)
       if (!a || !b) continue
 
       const aw = a.width * ppu, ah = a.height * ppu
@@ -361,106 +362,126 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.add(line)
     }
 
-    // Draw set rectangles
-    for (const set of sets) {
-      const w = set.width * ppu
-      const h = set.height * ppu
-      const isSelected = set.id === selectedSetId
+    // Draw set rectangles (only sets that are on the plan)
+    const visibleSets = sets.filter(s => s.onPlan !== false)
+    for (const s of visibleSets) {
+      const w = s.width * ppu
+      const h = s.height * ppu
+      const isSelected = s.id === selectedSetId
+      const isLocked = s.lockedToPdf
 
       const rect = new fabric.Rect({
-        left: set.x,
-        top: set.y,
+        left: s.x,
+        top: s.y,
         width: w,
         height: h,
-        fill: set.color + '40',
-        stroke: isSelected ? '#ffffff' : set.color,
+        fill: isLocked ? s.color + '55' : s.color + '40',
+        stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
         strokeWidth: isSelected ? 3 : 2,
-        angle: set.rotation || 0,
+        strokeDashArray: isLocked ? [6, 3] : [],
+        angle: s.rotation || 0,
         originX: 'left',
         originY: 'top',
-        name: SET_PREFIX + set.id,
+        name: SET_PREFIX + s.id,
         hasControls: false,
         lockRotation: true,
         cornerSize: 0,
-        hoverCursor: 'move',
+        selectable: !isLocked,
+        evented: true,
+        hoverCursor: isLocked ? 'default' : 'move',
       })
 
-      // Drag handler
-      rect.on('moving', function () {
-        let x = this.left
-        let y = this.top
-        if (snapToGrid) {
-          x = Math.round(x / gridSize) * gridSize
-          y = Math.round(y / gridSize) * gridSize
-          this.set({ left: x, top: y })
-        }
-      })
+      if (!isLocked) {
+        // Drag handler — only for unlocked sets
+        rect.on('moving', function () {
+          let x = this.left
+          let y = this.top
+          if (snapToGrid) {
+            x = Math.round(x / gridSize) * gridSize
+            y = Math.round(y / gridSize) * gridSize
+            this.set({ left: x, top: y })
+          }
+        })
 
-      rect.on('modified', function () {
-        updateSet(set.id, { x: this.left, y: this.top })
-      })
+        rect.on('modified', function () {
+          updateSet(s.id, { x: this.left, y: this.top })
+        })
+
+        // Double-click to rotate 90 degrees — only unlocked
+        rect.on('mousedblclick', function () {
+          const newRot = ((s.rotation || 0) + 90) % 360
+          updateSet(s.id, { rotation: newRot })
+        })
+      }
 
       rect.on('mousedown', function () {
-        setSelectedSetId(set.id)
-      })
-
-      // Double-click to rotate 90 degrees
-      rect.on('mousedblclick', function () {
-        const newRot = ((set.rotation || 0) + 90) % 360
-        updateSet(set.id, { rotation: newRot })
+        setSelectedSetId(s.id)
       })
 
       fc.add(rect)
 
-      // Label — only show set name abbreviated for small rects, full for large
+      // Label
       const labelFontSize = Math.min(12, Math.max(8, w / 8))
-      const label = new fabric.FabricText(set.name, {
-        left: set.x + 4,
-        top: set.y + 4,
+      const label = new fabric.FabricText(s.name, {
+        left: s.x + 4,
+        top: s.y + 4,
         fontSize: labelFontSize,
         fill: '#ffffff',
         fontFamily: 'system-ui, sans-serif',
         fontWeight: 'bold',
         selectable: false,
         evented: false,
-        name: LABEL_PREFIX + set.id,
+        name: LABEL_PREFIX + s.id,
         shadow: new fabric.Shadow({ color: '#000000', blur: 3 }),
       })
       fc.add(label)
 
       // Dimensions label
-      const dimLabel = new fabric.FabricText(`${set.width}x${set.height}`, {
-        left: set.x + 4,
-        top: set.y + 4 + labelFontSize + 2,
+      const dimLabel = new fabric.FabricText(`${s.width}x${s.height}`, {
+        left: s.x + 4,
+        top: s.y + 4 + labelFontSize + 2,
         fontSize: Math.min(10, labelFontSize - 1),
         fill: '#ffffffaa',
         fontFamily: 'system-ui, sans-serif',
         selectable: false,
         evented: false,
-        name: LABEL_PREFIX + set.id + '-dim',
+        name: LABEL_PREFIX + s.id + '-dim',
       })
       fc.add(dimLabel)
 
+      // Lock indicator — pin icon in top-right corner
+      if (isLocked) {
+        const pinIcon = new fabric.FabricText('\u{1F4CC}', {
+          left: s.x + w - 18,
+          top: s.y + 2,
+          fontSize: 13,
+          selectable: false,
+          evented: false,
+          name: LABEL_PREFIX + s.id + '-pin',
+        })
+        fc.add(pinIcon)
+      }
+
       // Rotation indicator
-      if (set.rotation && set.rotation !== 0) {
-        const rotLabel = new fabric.FabricText(`${set.rotation}°`, {
-          left: set.x + w - 20,
-          top: set.y + h - 14,
+      if (s.rotation && s.rotation !== 0) {
+        const rotLabel = new fabric.FabricText(`${s.rotation}\u00B0`, {
+          left: s.x + w - 20,
+          top: s.y + h - 14,
           fontSize: 9,
           fill: '#fbbf24aa',
           fontFamily: 'system-ui, sans-serif',
           selectable: false,
           evented: false,
-          name: LABEL_PREFIX + set.id + '-rot',
+          name: LABEL_PREFIX + s.id + '-rot',
         })
         fc.add(rotLabel)
       }
     }
 
-    // Draw FIXED indicators
+    // Draw FIXED indicators (only for visible sets)
     for (const rule of rules) {
       if (rule.type !== 'FIXED') continue
-      const s = sets.find(ss => ss.id === rule.setA)
+      const s = sets.find(ss => ss.id === rule.setA && ss.onPlan !== false)
       if (!s) continue
       const lockIcon = new fabric.FabricText('\u{1F512}', {
         left: s.x + s.width * ppu - 16,
