@@ -204,6 +204,83 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Hide set from plan but keep its position (for toggling visibility)
+  hideSet: (id) => {
+    set({
+      sets: get().sets.map(s =>
+        s.id === id ? { ...s, hidden: true } : s
+      ),
+    })
+    get().autosave()
+  },
+
+  // Show a hidden set (restore visibility at same position)
+  showSet: (id) => {
+    set({
+      sets: get().sets.map(s =>
+        s.id === id ? { ...s, hidden: false } : s
+      ),
+    })
+    get().autosave()
+  },
+
+  // Cut one set into another: cutterSetId cuts into targetSetId
+  cutIntoSet: (cutterSetId, targetSetId) => {
+    const state = get()
+    const cutter = state.sets.find(s => s.id === cutterSetId)
+    const target = state.sets.find(s => s.id === targetSetId)
+    if (!cutter || !target) return
+
+    const ppu = state.pixelsPerUnit
+
+    // Get AABBs for both sets
+    const getAABB = (s) => {
+      const w = s.width * ppu
+      const h = s.height * ppu
+      const isRotated = (s.rotation || 0) % 180 !== 0
+      return { x: s.x, y: s.y, w: isRotated ? h : w, h: isRotated ? w : h }
+    }
+
+    const cutterRect = getAABB(cutter)
+    const targetRect = getAABB(target)
+
+    // Compute overlap
+    const ox1 = Math.max(cutterRect.x, targetRect.x)
+    const oy1 = Math.max(cutterRect.y, targetRect.y)
+    const ox2 = Math.min(cutterRect.x + cutterRect.w, targetRect.x + targetRect.w)
+    const oy2 = Math.min(cutterRect.y + cutterRect.h, targetRect.y + targetRect.h)
+
+    if (ox2 <= ox1 || oy2 <= oy1) return // no overlap
+
+    const overlapRect = { x: ox1, y: oy1, w: ox2 - ox1, h: oy2 - oy1 }
+
+    // Convert overlap to target's local coordinate space
+    const rot = (target.rotation || 0) % 360
+    const dx = (overlapRect.x - target.x) / ppu
+    const dy = (overlapRect.y - target.y) / ppu
+    const ow = overlapRect.w / ppu
+    const oh = overlapRect.h / ppu
+
+    let cutout
+    switch (rot) {
+      case 0: cutout = { x: dx, y: dy, w: ow, h: oh }; break
+      case 90: cutout = { x: dy, y: target.height - dx - ow, w: oh, h: ow }; break
+      case 180: cutout = { x: target.width - dx - ow, y: target.height - dy - oh, w: ow, h: oh }; break
+      case 270: cutout = { x: target.width - dy - oh, y: dx, w: oh, h: ow }; break
+      default: cutout = { x: dx, y: dy, w: ow, h: oh }
+    }
+
+    if (cutout.w < 0.3 || cutout.h < 0.3) return // too small
+
+    const existingCutouts = target.cutouts || []
+    set({
+      sets: state.sets.map(s =>
+        s.id === targetSetId ? { ...s, cutouts: [...existingCutouts, cutout] } : s
+      ),
+    })
+    get().autosave()
+  },
+
   // Lock/Unlock set to PDF position
   toggleLockToPdf: (id) => {
     const state = get()

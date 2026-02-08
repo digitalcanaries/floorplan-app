@@ -1,7 +1,7 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
-import { getAABB, getOverlapRect, canvasOverlapToLocalCutout, buildCutPolygon } from '../engine/geometry.js'
+import { getAABB, getOverlapRect, buildCutPolygon } from '../engine/geometry.js'
 
 const SET_PREFIX = 'set-rect-'
 const LABEL_PREFIX = 'set-label-'
@@ -16,8 +16,6 @@ export default function FloorCanvas({ onCanvasSize }) {
   const containerRef = useRef(null)
   const isPanning = useRef(false)
   const lastPan = useRef({ x: 0, y: 0 })
-  const [activeOverlap, setActiveOverlap] = useState(null)
-  const overlapsRef = useRef([])
 
   const {
     pdfImage, pdfRotation, pdfPosition, setPdfPosition,
@@ -366,8 +364,8 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.add(line)
     }
 
-    // Draw set shapes (only sets that are on the plan)
-    const visibleSets = sets.filter(s => s.onPlan !== false)
+    // Draw set shapes (only sets that are on the plan and not hidden)
+    const visibleSets = sets.filter(s => s.onPlan !== false && !s.hidden)
     for (const s of visibleSets) {
       const w = s.width * ppu
       const h = s.height * ppu
@@ -515,7 +513,6 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     // Draw overlap zones between visible sets
     const visibleAABBs = visibleSets.map(s => getAABB(s, ppu))
-    let foundOverlap = null
     for (let i = 0; i < visibleAABBs.length; i++) {
       for (let j = i + 1; j < visibleAABBs.length; j++) {
         const overlap = getOverlapRect(visibleAABBs[i], visibleAABBs[j])
@@ -535,24 +532,8 @@ export default function FloorCanvas({ onCanvasSize }) {
           name: OVERLAP_PREFIX + visibleAABBs[i].id + '-' + visibleAABBs[j].id,
         })
         fc.add(zone)
-
-        // Track overlap for the cut button if selected set is involved
-        if (visibleAABBs[i].id === selectedSetId || visibleAABBs[j].id === selectedSetId) {
-          const targetId = visibleAABBs[i].id === selectedSetId
-            ? visibleAABBs[j].id : visibleAABBs[i].id
-          const targetSet = sets.find(s => s.id === targetId)
-          if (targetSet && !targetSet.lockedToPdf) {
-            foundOverlap = {
-              selectedSetId: selectedSetId,
-              targetSetId: targetId,
-              overlapRect: overlap,
-            }
-          }
-        }
       }
     }
-    overlapsRef.current = foundOverlap
-    setActiveOverlap(foundOverlap)
 
     // Draw FIXED indicators (only for visible sets)
     for (const rule of rules) {
@@ -576,36 +557,6 @@ export default function FloorCanvas({ onCanvasSize }) {
   useEffect(() => {
     syncSets()
   }, [syncSets])
-
-  // Handle cutting a set
-  const handleCut = () => {
-    const overlap = overlapsRef.current
-    if (!overlap) return
-    const targetSet = sets.find(s => s.id === overlap.targetSetId)
-    if (!targetSet || targetSet.lockedToPdf) return
-
-    const cutout = canvasOverlapToLocalCutout(overlap.overlapRect, targetSet, pixelsPerUnit)
-    // Skip tiny cutouts
-    if (cutout.w < 0.5 || cutout.h < 0.5) return
-
-    const existingCutouts = targetSet.cutouts || []
-    updateSet(overlap.targetSetId, {
-      cutouts: [...existingCutouts, cutout],
-    })
-    setActiveOverlap(null)
-  }
-
-  // Convert canvas coords to screen coords for the cut button position
-  const getCutButtonPosition = () => {
-    const fc = fabricRef.current
-    if (!fc || !activeOverlap) return null
-    const vpt = fc.viewportTransform
-    const zoom = fc.getZoom()
-    const { overlapRect } = activeOverlap
-    const screenX = overlapRect.x * zoom + vpt[4]
-    const screenY = overlapRect.y * zoom + vpt[5]
-    return { x: screenX + (overlapRect.w * zoom) / 2, y: screenY - 10 }
-  }
 
   // Calibration visual indicators
   useEffect(() => {
@@ -634,8 +585,6 @@ export default function FloorCanvas({ onCanvasSize }) {
     fc.requestRenderAll()
   }, [calibrating, calibrationPoints])
 
-  const cutBtnPos = getCutButtonPosition()
-
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden bg-gray-900">
       <canvas ref={canvasRef} />
@@ -644,15 +593,6 @@ export default function FloorCanvas({ onCanvasSize }) {
           Click two points on the floor plan to calibrate scale
           ({calibrationPoints.length}/2 points selected)
         </div>
-      )}
-      {activeOverlap && cutBtnPos && (
-        <button
-          className="absolute z-20 bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer shadow-lg border border-red-400 -translate-x-1/2 -translate-y-full"
-          style={{ left: cutBtnPos.x, top: cutBtnPos.y }}
-          onClick={handleCut}
-        >
-          Cut Into Set
-        </button>
       )}
     </div>
   )

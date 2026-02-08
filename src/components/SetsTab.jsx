@@ -12,9 +12,11 @@ export default function SetsTab() {
     sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId, unit,
     pdfImage, toggleLockToPdf, lockAllToPdf, unlockAllFromPdf,
     duplicateSet, removeSetFromPlan, addSetToPlan, clearCutouts,
+    hideSet, showSet, cutIntoSet,
   } = useStore()
   const [form, setForm] = useState({ name: '', width: '', height: '', color: COLORS[0] })
   const [editing, setEditing] = useState(null)
+  const [cuttingSetId, setCuttingSetId] = useState(null) // which set's "cut into" picker is open
 
   const handleAdd = (e) => {
     e.preventDefault()
@@ -57,7 +59,13 @@ export default function SetsTab() {
     updateSet(setData.id, { rotation: newRot })
   }
 
-  const onPlanSets = sets.filter(s => s.onPlan !== false)
+  const handleCutInto = (cutterSetId, targetSetId) => {
+    cutIntoSet(cutterSetId, targetSetId)
+    setCuttingSetId(null)
+  }
+
+  const onPlanSets = sets.filter(s => s.onPlan !== false && !s.hidden)
+  const hiddenSets = sets.filter(s => s.onPlan !== false && s.hidden)
   const offPlanSets = sets.filter(s => s.onPlan === false)
 
   return (
@@ -123,72 +131,147 @@ export default function SetsTab() {
         </div>
       )}
 
-      {/* On-plan sets */}
+      {/* On-plan visible sets */}
       <div className="flex flex-col gap-1 overflow-y-auto">
         {sets.length === 0 && (
           <p className="text-gray-500 text-xs text-center py-4">No sets added yet</p>
         )}
         {onPlanSets.map(s => (
-          <div
-            key={s.id}
-            onClick={() => setSelectedSetId(s.id === selectedSetId ? null : s.id)}
-            className={`flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer text-sm
-              ${s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
-              ${s.lockedToPdf ? 'border border-amber-600/40' : ''}`}
-          >
-            <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
-            <span className="flex-1 truncate text-xs">{s.name}</span>
-            <span className="text-[10px] text-gray-400">{s.width}x{s.height}</span>
+          <div key={s.id}>
+            <div
+              onClick={() => setSelectedSetId(s.id === selectedSetId ? null : s.id)}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer text-sm
+                ${s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
+                ${s.lockedToPdf ? 'border border-amber-600/40' : ''}`}
+            >
+              <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
+              <span className="flex-1 truncate text-xs">{s.name}</span>
+              <span className="text-[10px] text-gray-400">{s.width}x{s.height}</span>
 
-            {/* Cut indicator + restore */}
-            {s.cutouts?.length > 0 && (
-              <button onClick={(e) => { e.stopPropagation(); clearCutouts(s.id) }}
-                className="text-[10px] text-red-400 hover:text-yellow-300" title="Restore original shape">
-                [cut] &#x21A9;
+              {/* Cut indicator + restore */}
+              {s.cutouts?.length > 0 && (
+                <button onClick={(e) => { e.stopPropagation(); clearCutouts(s.id) }}
+                  className="text-[10px] text-red-400 hover:text-yellow-300" title="Restore original shape">
+                  [cut] &#x21A9;
+                </button>
+              )}
+
+              {/* Cut into another set */}
+              <button onClick={(e) => { e.stopPropagation(); setCuttingSetId(cuttingSetId === s.id ? null : s.id) }}
+                className={`text-xs ${cuttingSetId === s.id ? 'text-red-400' : 'text-gray-500 hover:text-red-300'}`}
+                title="Cut this set into another set">
+                &#x2702;
               </button>
-            )}
 
-            {/* Lock to PDF button */}
-            {pdfImage && (
-              <button onClick={(e) => { e.stopPropagation(); toggleLockToPdf(s.id) }}
-                className={`text-xs ${s.lockedToPdf ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}`}
-                title={s.lockedToPdf ? 'Unlock from PDF' : 'Lock to PDF position'}>
-                {s.lockedToPdf ? '\u{1F4CC}' : '\u{1F4CD}'}
+              {/* Lock to PDF button */}
+              {pdfImage && (
+                <button onClick={(e) => { e.stopPropagation(); toggleLockToPdf(s.id) }}
+                  className={`text-xs ${s.lockedToPdf ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}`}
+                  title={s.lockedToPdf ? 'Unlock from PDF' : 'Lock to PDF position'}>
+                  {s.lockedToPdf ? '\u{1F4CC}' : '\u{1F4CD}'}
+                </button>
+              )}
+
+              {/* Rotate */}
+              <button onClick={(e) => handleRotate(e, s)}
+                className="text-xs text-yellow-400 hover:text-yellow-300" title={`Rotate (${s.rotation || 0}\u00B0)`}>
+                &#x21BB;
               </button>
+
+              {/* Duplicate */}
+              <button onClick={(e) => { e.stopPropagation(); duplicateSet(s.id) }}
+                className="text-xs text-cyan-400 hover:text-cyan-300" title="Duplicate set">
+                &#x29C9;
+              </button>
+
+              {/* Hide from plan (keep position) */}
+              <button onClick={(e) => { e.stopPropagation(); hideSet(s.id) }}
+                className="text-xs text-gray-500 hover:text-gray-300" title="Hide from plan (keep position)">
+                &#x1F441;
+              </button>
+
+              {/* Remove from plan (reset position) */}
+              <button onClick={(e) => { e.stopPropagation(); removeSetFromPlan(s.id) }}
+                className="text-xs text-orange-400 hover:text-orange-300" title="Remove from plan (keep in list)">
+                &#x2B07;
+              </button>
+
+              {/* Edit */}
+              <button onClick={(e) => { e.stopPropagation(); startEdit(s) }}
+                className="text-xs text-blue-400 hover:text-blue-300" title="Edit set">
+                &#x270E;
+              </button>
+
+              {/* Delete permanently */}
+              <button onClick={(e) => { e.stopPropagation(); deleteSet(s.id) }}
+                className="text-xs text-red-400 hover:text-red-300" title="Delete permanently">
+                &#x2715;
+              </button>
+            </div>
+
+            {/* Cut-into target picker */}
+            {cuttingSetId === s.id && (
+              <div className="ml-6 mt-1 mb-1 p-2 bg-gray-800 rounded border border-red-700/50">
+                <p className="text-[10px] text-gray-400 mb-1">Cut <span className="text-white">{s.name}</span> into:</p>
+                <div className="flex flex-col gap-0.5">
+                  {onPlanSets.filter(t => t.id !== s.id).map(t => (
+                    <button key={t.id}
+                      onClick={() => handleCutInto(s.id, t.id)}
+                      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-left hover:bg-red-900/30 transition-colors"
+                    >
+                      <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: t.color }} />
+                      <span className="text-gray-300">{t.name}</span>
+                      <span className="text-[9px] text-gray-500">{t.width}x{t.height}</span>
+                    </button>
+                  ))}
+                  {onPlanSets.filter(t => t.id !== s.id).length === 0 && (
+                    <p className="text-[10px] text-gray-500">No other sets on plan</p>
+                  )}
+                </div>
+                <button onClick={() => setCuttingSetId(null)}
+                  className="mt-1 text-[10px] text-gray-500 hover:text-gray-300">
+                  Cancel
+                </button>
+              </div>
             )}
-
-            {/* Rotate */}
-            <button onClick={(e) => handleRotate(e, s)}
-              className="text-xs text-yellow-400 hover:text-yellow-300" title={`Rotate (${s.rotation || 0}\u00B0)`}>
-              &#x21BB;
-            </button>
-
-            {/* Duplicate */}
-            <button onClick={(e) => { e.stopPropagation(); duplicateSet(s.id) }}
-              className="text-xs text-cyan-400 hover:text-cyan-300" title="Duplicate set">
-              &#x29C9;
-            </button>
-
-            {/* Remove from plan (not delete) */}
-            <button onClick={(e) => { e.stopPropagation(); removeSetFromPlan(s.id) }}
-              className="text-xs text-orange-400 hover:text-orange-300" title="Remove from plan (keep in list)">
-              &#x2B07;
-            </button>
-
-            {/* Edit */}
-            <button onClick={(e) => { e.stopPropagation(); startEdit(s) }}
-              className="text-xs text-blue-400 hover:text-blue-300" title="Edit set">
-              &#x270E;
-            </button>
-
-            {/* Delete permanently */}
-            <button onClick={(e) => { e.stopPropagation(); deleteSet(s.id) }}
-              className="text-xs text-red-400 hover:text-red-300" title="Delete permanently">
-              &#x2715;
-            </button>
           </div>
         ))}
       </div>
+
+      {/* Hidden sets */}
+      {hiddenSets.length > 0 && (
+        <>
+          <div className="flex items-center gap-2">
+            <div className="h-px bg-gray-600 flex-1" />
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Hidden</span>
+            <div className="h-px bg-gray-600 flex-1" />
+          </div>
+          <div className="flex flex-col gap-1 overflow-y-auto">
+            {hiddenSets.map(s => (
+              <div
+                key={s.id}
+                className="flex items-center gap-1.5 px-2 py-1.5 rounded text-sm bg-gray-800/50 opacity-60 hover:opacity-100"
+              >
+                <div className="w-3 h-3 rounded-sm shrink-0 opacity-50" style={{ backgroundColor: s.color }} />
+                <span className="flex-1 truncate text-xs text-gray-400">{s.name}</span>
+                <span className="text-[10px] text-gray-500">{s.width}x{s.height}</span>
+
+                {/* Show on plan */}
+                <button onClick={() => showSet(s.id)}
+                  className="text-xs text-green-400 hover:text-green-300" title="Show on plan">
+                  &#x1F441;
+                </button>
+
+                {/* Delete permanently */}
+                <button onClick={() => deleteSet(s.id)}
+                  className="text-xs text-red-400 hover:text-red-300" title="Delete permanently">
+                  &#x2715;
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Off-plan sets */}
       {offPlanSets.length > 0 && (
