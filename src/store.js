@@ -30,7 +30,9 @@ const useStore = create((set, get) => ({
   unit: saved?.unit || 'ft',
   gridVisible: saved?.gridVisible ?? true,
   snapToGrid: saved?.snapToGrid ?? true,
+  snapToSets: saved?.snapToSets ?? true,
   gridSize: saved?.gridSize || 50,
+  labelsVisible: saved?.labelsVisible ?? true,
 
   // Project info
   projectName: saved?.projectName || 'Untitled Project',
@@ -80,6 +82,14 @@ const useStore = create((set, get) => ({
     set({ snapToGrid: v })
     get().autosave()
   },
+  setSnapToSets: (v) => {
+    set({ snapToSets: v })
+    get().autosave()
+  },
+  setLabelsVisible: (v) => {
+    set({ labelsVisible: v })
+    get().autosave()
+  },
   setGridSize: (s) => {
     set({ gridSize: s })
     get().autosave()
@@ -106,7 +116,11 @@ const useStore = create((set, get) => ({
   // Set CRUD
   addSet: (s) => {
     const id = get().nextSetId
-    const newSet = { ...s, id, x: 100, y: 100, rotation: 0, lockedToPdf: false, onPlan: true }
+    const newSet = {
+      ...s, id, x: 100, y: 100, rotation: 0, lockedToPdf: false, onPlan: true,
+      category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
+      wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
+    }
     set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
     get().autosave()
     return id
@@ -121,6 +135,8 @@ const useStore = create((set, get) => ({
       rotation: 0,
       lockedToPdf: false,
       onPlan: true,
+      category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
+      wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
     }))
     set({
       sets: [...get().sets, ...created],
@@ -230,6 +246,7 @@ const useStore = create((set, get) => ({
     const cutter = state.sets.find(s => s.id === cutterSetId)
     const target = state.sets.find(s => s.id === targetSetId)
     if (!cutter || !target) return
+    if (target.noCut) return // noCut sets cannot be cut into
 
     const ppu = state.pixelsPerUnit
 
@@ -315,6 +332,27 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Z-order control
+  bringForward: (id) => {
+    const sets = get().sets
+    const maxZ = Math.max(...sets.map(s => s.zIndex || 0))
+    set({ sets: sets.map(s => s.id === id ? { ...s, zIndex: (s.zIndex || 0) + 1 } : s) })
+    get().autosave()
+  },
+  sendBackward: (id) => {
+    set({ sets: get().sets.map(s => s.id === id ? { ...s, zIndex: Math.max(0, (s.zIndex || 0) - 1) } : s) })
+    get().autosave()
+  },
+  bringToFront: (id) => {
+    const maxZ = Math.max(...get().sets.map(s => s.zIndex || 0))
+    set({ sets: get().sets.map(s => s.id === id ? { ...s, zIndex: maxZ + 1 } : s) })
+    get().autosave()
+  },
+  sendToBack: (id) => {
+    set({ sets: get().sets.map(s => s.id === id ? { ...s, zIndex: 0 } : s) })
+    get().autosave()
+  },
+
   // Lock/Unlock all on-plan sets to PDF
   lockAllToPdf: () => {
     const state = get()
@@ -373,7 +411,9 @@ const useStore = create((set, get) => ({
       unit: state.unit,
       gridVisible: state.gridVisible,
       snapToGrid: state.snapToGrid,
+      snapToSets: state.snapToSets,
       gridSize: state.gridSize,
+      labelsVisible: state.labelsVisible,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -398,7 +438,9 @@ const useStore = create((set, get) => ({
       unit: state.unit,
       gridVisible: state.gridVisible,
       snapToGrid: state.snapToGrid,
+      snapToSets: state.snapToSets,
       gridSize: state.gridSize,
+      labelsVisible: state.labelsVisible,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -445,7 +487,9 @@ const useStore = create((set, get) => ({
       unit: state.unit,
       gridVisible: state.gridVisible,
       snapToGrid: state.snapToGrid,
+      snapToSets: state.snapToSets,
       gridSize: state.gridSize,
+      labelsVisible: state.labelsVisible,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -463,7 +507,9 @@ const useStore = create((set, get) => ({
       unit: data.unit || 'ft',
       gridVisible: data.gridVisible ?? true,
       snapToGrid: data.snapToGrid ?? true,
+      snapToSets: data.snapToSets ?? true,
       gridSize: data.gridSize || 50,
+      labelsVisible: data.labelsVisible ?? true,
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,
       rules: data.rules || [],

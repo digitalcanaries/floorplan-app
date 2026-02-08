@@ -8,7 +8,8 @@ import UserMenu from './UserMenu.jsx'
 export default function TopBar({ canvasSize }) {
   const {
     sets, rules, pixelsPerUnit, setSets, pdfRotation, setPdfRotation,
-    gridVisible, setGridVisible, snapToGrid, setSnapToGrid,
+    gridVisible, setGridVisible, snapToGrid, setSnapToGrid, snapToSets, setSnapToSets,
+    labelsVisible, setLabelsVisible,
     exportProject, importProject, clearAll,
     calibrating, setCalibrating,
     projectName, setProjectName, lastSaved,
@@ -271,6 +272,16 @@ export default function TopBar({ canvasSize }) {
       <label className="flex items-center gap-1 text-xs cursor-pointer">
         <input type="checkbox" checked={snapToGrid} onChange={e => setSnapToGrid(e.target.checked)} />
         Snap
+      </label>
+
+      <label className="flex items-center gap-1 text-xs cursor-pointer">
+        <input type="checkbox" checked={snapToSets} onChange={e => setSnapToSets(e.target.checked)} />
+        Edge Snap
+      </label>
+
+      <label className="flex items-center gap-1 text-xs cursor-pointer">
+        <input type="checkbox" checked={labelsVisible} onChange={e => setLabelsVisible(e.target.checked)} />
+        Labels
       </label>
 
       <div className="h-5 w-px bg-gray-600" />

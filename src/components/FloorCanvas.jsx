@@ -7,6 +7,8 @@ const SET_PREFIX = 'set-rect-'
 const LABEL_PREFIX = 'set-label-'
 const RULE_PREFIX = 'rule-line-'
 const OVERLAP_PREFIX = 'overlap-zone-'
+const GAP_PREFIX = 'wall-gap-'
+const SNAP_LINE_NAME = 'snap-guide-line'
 const TOOLTIP_NAME = 'hover-tooltip'
 const TOOLTIP_BG_NAME = 'hover-tooltip-bg'
 
@@ -16,11 +18,13 @@ export default function FloorCanvas({ onCanvasSize }) {
   const containerRef = useRef(null)
   const isPanning = useRef(false)
   const lastPan = useRef({ x: 0, y: 0 })
+  const snapLinesRef = useRef([])
 
   const {
     pdfImage, pdfRotation, pdfPosition, setPdfPosition,
     pixelsPerUnit, setPixelsPerUnit,
-    gridVisible, snapToGrid, gridSize,
+    gridVisible, snapToGrid, snapToSets, gridSize,
+    labelsVisible,
     sets, updateSet, selectedSetId, setSelectedSetId,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
@@ -142,7 +146,9 @@ export default function FloorCanvas({ onCanvasSize }) {
       removeTooltip()
 
       const lockedLabel = setData.lockedToPdf ? ' [Locked]' : ''
-      const tooltipText = `${setData.name}  (${setData.width}${unit} x ${setData.height}${unit})${lockedLabel}`
+      const catLabel = setData.category && setData.category !== 'Set' ? ` [${setData.category}]` : ''
+      const gapLabel = setData.wallGap > 0 ? ` Gap:${setData.wallGap}${unit}` : ''
+      const tooltipText = `${setData.name}  (${setData.width}${unit} x ${setData.height}${unit})${catLabel}${gapLabel}${lockedLabel}`
       const padding = 6
 
       const label = new fabric.FabricText(tooltipText, {
@@ -320,6 +326,31 @@ export default function FloorCanvas({ onCanvasSize }) {
     fc.requestRenderAll()
   }, [gridVisible, gridSize])
 
+  // Helper: clear snap guide lines
+  const clearSnapLines = useCallback(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    fc.getObjects().filter(o => o.name === SNAP_LINE_NAME).forEach(o => fc.remove(o))
+    snapLinesRef.current = []
+  }, [])
+
+  // Helper: draw a snap guide line
+  const drawSnapLine = useCallback((x1, y1, x2, y2) => {
+    const fc = fabricRef.current
+    if (!fc) return
+    const line = new fabric.Line([x1, y1, x2, y2], {
+      stroke: '#22d3ee',
+      strokeWidth: 1,
+      strokeDashArray: [4, 4],
+      selectable: false,
+      evented: false,
+      name: SNAP_LINE_NAME,
+      opacity: 0.8,
+    })
+    fc.add(line)
+    snapLinesRef.current.push(line)
+  }, [])
+
   // Sync set rectangles to canvas
   const syncSets = useCallback(() => {
     const fc = fabricRef.current
@@ -327,9 +358,16 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     const ppu = pixelsPerUnit
 
-    // Remove old set objects, rule lines, and overlap zones
+    // Remove old set objects, rule lines, overlap zones, gap zones, snap lines
     fc.getObjects()
-      .filter(o => o.name?.startsWith(SET_PREFIX) || o.name?.startsWith(LABEL_PREFIX) || o.name?.startsWith(RULE_PREFIX) || o.name?.startsWith(OVERLAP_PREFIX))
+      .filter(o =>
+        o.name?.startsWith(SET_PREFIX) ||
+        o.name?.startsWith(LABEL_PREFIX) ||
+        o.name?.startsWith(RULE_PREFIX) ||
+        o.name?.startsWith(OVERLAP_PREFIX) ||
+        o.name?.startsWith(GAP_PREFIX) ||
+        o.name === SNAP_LINE_NAME
+      )
       .forEach(o => fc.remove(o))
 
     // Also remove any stale tooltips
@@ -365,13 +403,22 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
 
     // Draw set shapes (only sets that are on the plan and not hidden)
-    const visibleSets = sets.filter(s => s.onPlan !== false && !s.hidden)
+    // Sort by zIndex for rendering order
+    const visibleSets = sets
+      .filter(s => s.onPlan !== false && !s.hidden)
+      .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
+
     for (const s of visibleSets) {
       const w = s.width * ppu
       const h = s.height * ppu
       const isSelected = s.id === selectedSetId
       const isLocked = s.lockedToPdf
       const hasCutouts = s.cutouts && s.cutouts.length > 0
+      const setOpacity = s.opacity ?? 1
+
+      // Compute fill alpha based on opacity and lock state
+      const fillAlpha = isLocked ? Math.round(setOpacity * 0x55).toString(16).padStart(2, '0')
+        : Math.round(setOpacity * 0x40).toString(16).padStart(2, '0')
 
       let shape
       if (hasCutouts) {
@@ -380,7 +427,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         shape = new fabric.Polygon(pixelPoints, {
           left: s.x,
           top: s.y,
-          fill: isLocked ? s.color + '55' : s.color + '40',
+          fill: s.color + fillAlpha,
           stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
           strokeWidth: isSelected ? 3 : 2,
           strokeDashArray: isLocked ? [6, 3] : [],
@@ -405,7 +452,7 @@ export default function FloorCanvas({ onCanvasSize }) {
           top: s.y,
           width: w,
           height: h,
-          fill: isLocked ? s.color + '55' : s.color + '40',
+          fill: s.color + fillAlpha,
           stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
           strokeWidth: isSelected ? 3 : 2,
           strokeDashArray: isLocked ? [6, 3] : [],
@@ -424,21 +471,97 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       if (!isLocked) {
         const isPolygon = hasCutouts
+        // Collect other set AABBs for edge snapping
+        const otherSets = visibleSets.filter(o => o.id !== s.id)
+
         shape.on('moving', function () {
           let x = isPolygon ? this.left + this.pathOffset.x : this.left
           let y = isPolygon ? this.top + this.pathOffset.y : this.top
+
+          // Grid snapping
           if (snapToGrid) {
             x = Math.round(x / gridSize) * gridSize
             y = Math.round(y / gridSize) * gridSize
-            if (isPolygon) {
-              this.set({ left: x - this.pathOffset.x, top: y - this.pathOffset.y })
-            } else {
-              this.set({ left: x, top: y })
+          }
+
+          // Edge snapping to other sets
+          clearSnapLines()
+          if (snapToSets && otherSets.length > 0) {
+            const SNAP_THRESHOLD = 8
+            const myAABB = getAABB({ ...s, x, y }, ppu)
+            const myEdges = {
+              left: myAABB.x,
+              right: myAABB.x + myAABB.w,
+              top: myAABB.y,
+              bottom: myAABB.y + myAABB.h,
             }
+
+            let snapDx = 0, snapDy = 0
+            let foundSnapX = false, foundSnapY = false
+
+            for (const other of otherSets) {
+              const oAABB = getAABB(other, ppu)
+              const oEdges = {
+                left: oAABB.x,
+                right: oAABB.x + oAABB.w,
+                top: oAABB.y,
+                bottom: oAABB.y + oAABB.h,
+              }
+
+              // Snap X edges
+              if (!foundSnapX) {
+                const xPairs = [
+                  [myEdges.left, oEdges.left],
+                  [myEdges.left, oEdges.right],
+                  [myEdges.right, oEdges.left],
+                  [myEdges.right, oEdges.right],
+                ]
+                for (const [myE, oE] of xPairs) {
+                  if (Math.abs(myE - oE) < SNAP_THRESHOLD) {
+                    snapDx = oE - myE
+                    foundSnapX = true
+                    // Draw vertical snap line
+                    drawSnapLine(oE, Math.min(myEdges.top, oEdges.top) - 20, oE, Math.max(myEdges.bottom, oEdges.bottom) + 20)
+                    break
+                  }
+                }
+              }
+
+              // Snap Y edges
+              if (!foundSnapY) {
+                const yPairs = [
+                  [myEdges.top, oEdges.top],
+                  [myEdges.top, oEdges.bottom],
+                  [myEdges.bottom, oEdges.top],
+                  [myEdges.bottom, oEdges.bottom],
+                ]
+                for (const [myE, oE] of yPairs) {
+                  if (Math.abs(myE - oE) < SNAP_THRESHOLD) {
+                    snapDy = oE - myE
+                    foundSnapY = true
+                    // Draw horizontal snap line
+                    drawSnapLine(Math.min(myEdges.left, oEdges.left) - 20, oE, Math.max(myEdges.right, oEdges.right) + 20, oE)
+                    break
+                  }
+                }
+              }
+
+              if (foundSnapX && foundSnapY) break
+            }
+
+            x += snapDx
+            y += snapDy
+          }
+
+          if (isPolygon) {
+            this.set({ left: x - this.pathOffset.x, top: y - this.pathOffset.y })
+          } else {
+            this.set({ left: x, top: y })
           }
         })
 
         shape.on('modified', function () {
+          clearSnapLines()
           const fx = isPolygon ? this.left + this.pathOffset.x : this.left
           const fy = isPolygon ? this.top + this.pathOffset.y : this.top
           updateSet(s.id, { x: fx, y: fy })
@@ -456,58 +579,98 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       fc.add(shape)
 
-      // Label
-      const labelFontSize = Math.min(12, Math.max(8, w / 8))
-      const label = new fabric.FabricText(s.name, {
-        left: s.x + 4,
-        top: s.y + 4,
-        fontSize: labelFontSize,
-        fill: '#ffffff',
-        fontFamily: 'system-ui, sans-serif',
-        fontWeight: 'bold',
-        selectable: false,
-        evented: false,
-        name: LABEL_PREFIX + s.id,
-        shadow: new fabric.Shadow({ color: '#000000', blur: 3 }),
-      })
-      fc.add(label)
+      // Wall gap zone — dashed outline around set showing access area
+      if (s.wallGap && s.wallGap > 0) {
+        const gapPx = s.wallGap * ppu
+        const isRotated = (s.rotation || 0) % 180 !== 0
+        const gapW = (isRotated ? h : w) + gapPx * 2
+        const gapH = (isRotated ? w : h) + gapPx * 2
 
-      const dimLabel = new fabric.FabricText(`${s.width}x${s.height}`, {
-        left: s.x + 4,
-        top: s.y + 4 + labelFontSize + 2,
-        fontSize: Math.min(10, labelFontSize - 1),
-        fill: '#ffffffaa',
-        fontFamily: 'system-ui, sans-serif',
-        selectable: false,
-        evented: false,
-        name: LABEL_PREFIX + s.id + '-dim',
-      })
-      fc.add(dimLabel)
-
-      if (isLocked) {
-        const pinIcon = new fabric.FabricText('\u{1F4CC}', {
-          left: s.x + w - 18,
-          top: s.y + 2,
-          fontSize: 13,
+        const gapZone = new fabric.Rect({
+          left: s.x - gapPx,
+          top: s.y - gapPx,
+          width: gapW,
+          height: gapH,
+          fill: 'transparent',
+          stroke: '#f59e0b55',
+          strokeWidth: 1.5,
+          strokeDashArray: [8, 4],
           selectable: false,
           evented: false,
-          name: LABEL_PREFIX + s.id + '-pin',
+          name: GAP_PREFIX + s.id,
         })
-        fc.add(pinIcon)
+        fc.add(gapZone)
       }
 
-      if (s.rotation && s.rotation !== 0) {
-        const rotLabel = new fabric.FabricText(`${s.rotation}\u00B0`, {
-          left: s.x + w - 20,
-          top: s.y + h - 14,
-          fontSize: 9,
-          fill: '#fbbf24aa',
+      // Labels — only if global labelsVisible is on and per-set labelHidden is off
+      if (labelsVisible && !s.labelHidden) {
+        const labelFontSize = Math.min(12, Math.max(8, w / 8))
+        const label = new fabric.FabricText(s.name, {
+          left: s.x + 4,
+          top: s.y + 4,
+          fontSize: labelFontSize,
+          fill: '#ffffff',
+          fontFamily: 'system-ui, sans-serif',
+          fontWeight: 'bold',
+          selectable: false,
+          evented: false,
+          name: LABEL_PREFIX + s.id,
+          shadow: new fabric.Shadow({ color: '#000000', blur: 3 }),
+        })
+        fc.add(label)
+
+        const dimLabel = new fabric.FabricText(`${s.width}x${s.height}`, {
+          left: s.x + 4,
+          top: s.y + 4 + labelFontSize + 2,
+          fontSize: Math.min(10, labelFontSize - 1),
+          fill: '#ffffffaa',
           fontFamily: 'system-ui, sans-serif',
           selectable: false,
           evented: false,
-          name: LABEL_PREFIX + s.id + '-rot',
+          name: LABEL_PREFIX + s.id + '-dim',
         })
-        fc.add(rotLabel)
+        fc.add(dimLabel)
+
+        // Category badge for non-Set types
+        if (s.category && s.category !== 'Set') {
+          const catLabel = new fabric.FabricText(s.category, {
+            left: s.x + 4,
+            top: s.y + 4 + labelFontSize + 2 + Math.min(10, labelFontSize - 1) + 2,
+            fontSize: 8,
+            fill: '#fbbf24aa',
+            fontFamily: 'system-ui, sans-serif',
+            selectable: false,
+            evented: false,
+            name: LABEL_PREFIX + s.id + '-cat',
+          })
+          fc.add(catLabel)
+        }
+
+        if (isLocked) {
+          const pinIcon = new fabric.FabricText('\u{1F4CC}', {
+            left: s.x + w - 18,
+            top: s.y + 2,
+            fontSize: 13,
+            selectable: false,
+            evented: false,
+            name: LABEL_PREFIX + s.id + '-pin',
+          })
+          fc.add(pinIcon)
+        }
+
+        if (s.rotation && s.rotation !== 0) {
+          const rotLabel = new fabric.FabricText(`${s.rotation}\u00B0`, {
+            left: s.x + w - 20,
+            top: s.y + h - 14,
+            fontSize: 9,
+            fill: '#fbbf24aa',
+            fontFamily: 'system-ui, sans-serif',
+            selectable: false,
+            evented: false,
+            name: LABEL_PREFIX + s.id + '-rot',
+          })
+          fc.add(rotLabel)
+        }
       }
     }
 
@@ -552,7 +715,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
 
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, gridSize])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible])
 
   useEffect(() => {
     syncSets()
