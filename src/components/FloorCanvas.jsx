@@ -1,10 +1,12 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
+import { getAABB, getOverlapRect, canvasOverlapToLocalCutout, buildCutPolygon } from '../engine/geometry.js'
 
 const SET_PREFIX = 'set-rect-'
 const LABEL_PREFIX = 'set-label-'
 const RULE_PREFIX = 'rule-line-'
+const OVERLAP_PREFIX = 'overlap-zone-'
 const TOOLTIP_NAME = 'hover-tooltip'
 const TOOLTIP_BG_NAME = 'hover-tooltip-bg'
 
@@ -14,6 +16,8 @@ export default function FloorCanvas({ onCanvasSize }) {
   const containerRef = useRef(null)
   const isPanning = useRef(false)
   const lastPan = useRef({ x: 0, y: 0 })
+  const [activeOverlap, setActiveOverlap] = useState(null)
+  const overlapsRef = useRef([])
 
   const {
     pdfImage, pdfRotation, pdfPosition, setPdfPosition,
@@ -325,9 +329,9 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     const ppu = pixelsPerUnit
 
-    // Remove old set objects and rule lines
+    // Remove old set objects, rule lines, and overlap zones
     fc.getObjects()
-      .filter(o => o.name?.startsWith(SET_PREFIX) || o.name?.startsWith(LABEL_PREFIX) || o.name?.startsWith(RULE_PREFIX))
+      .filter(o => o.name?.startsWith(SET_PREFIX) || o.name?.startsWith(LABEL_PREFIX) || o.name?.startsWith(RULE_PREFIX) || o.name?.startsWith(OVERLAP_PREFIX))
       .forEach(o => fc.remove(o))
 
     // Also remove any stale tooltips
@@ -362,63 +366,97 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.add(line)
     }
 
-    // Draw set rectangles (only sets that are on the plan)
+    // Draw set shapes (only sets that are on the plan)
     const visibleSets = sets.filter(s => s.onPlan !== false)
     for (const s of visibleSets) {
       const w = s.width * ppu
       const h = s.height * ppu
       const isSelected = s.id === selectedSetId
       const isLocked = s.lockedToPdf
+      const hasCutouts = s.cutouts && s.cutouts.length > 0
 
-      const rect = new fabric.Rect({
-        left: s.x,
-        top: s.y,
-        width: w,
-        height: h,
-        fill: isLocked ? s.color + '55' : s.color + '40',
-        stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
-        strokeWidth: isSelected ? 3 : 2,
-        strokeDashArray: isLocked ? [6, 3] : [],
-        angle: s.rotation || 0,
-        originX: 'left',
-        originY: 'top',
-        name: SET_PREFIX + s.id,
-        hasControls: false,
-        lockRotation: true,
-        cornerSize: 0,
-        selectable: !isLocked,
-        evented: true,
-        hoverCursor: isLocked ? 'default' : 'move',
-      })
+      let shape
+      if (hasCutouts) {
+        const localPoints = buildCutPolygon(s.width, s.height, s.cutouts)
+        const pixelPoints = localPoints.map(p => ({ x: p.x * ppu, y: p.y * ppu }))
+        shape = new fabric.Polygon(pixelPoints, {
+          left: s.x,
+          top: s.y,
+          fill: isLocked ? s.color + '55' : s.color + '40',
+          stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
+          strokeWidth: isSelected ? 3 : 2,
+          strokeDashArray: isLocked ? [6, 3] : [],
+          angle: s.rotation || 0,
+          originX: 'left',
+          originY: 'top',
+          name: SET_PREFIX + s.id,
+          hasControls: false,
+          lockRotation: true,
+          cornerSize: 0,
+          selectable: !isLocked,
+          evented: true,
+          hoverCursor: isLocked ? 'default' : 'move',
+          objectCaching: false,
+        })
+        // Fabric.js Polygon offsets by pathOffset — compensate
+        const po = shape.pathOffset
+        shape.set({ left: s.x - po.x, top: s.y - po.y })
+      } else {
+        shape = new fabric.Rect({
+          left: s.x,
+          top: s.y,
+          width: w,
+          height: h,
+          fill: isLocked ? s.color + '55' : s.color + '40',
+          stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
+          strokeWidth: isSelected ? 3 : 2,
+          strokeDashArray: isLocked ? [6, 3] : [],
+          angle: s.rotation || 0,
+          originX: 'left',
+          originY: 'top',
+          name: SET_PREFIX + s.id,
+          hasControls: false,
+          lockRotation: true,
+          cornerSize: 0,
+          selectable: !isLocked,
+          evented: true,
+          hoverCursor: isLocked ? 'default' : 'move',
+        })
+      }
 
       if (!isLocked) {
-        // Drag handler — only for unlocked sets
-        rect.on('moving', function () {
-          let x = this.left
-          let y = this.top
+        const isPolygon = hasCutouts
+        shape.on('moving', function () {
+          let x = isPolygon ? this.left + this.pathOffset.x : this.left
+          let y = isPolygon ? this.top + this.pathOffset.y : this.top
           if (snapToGrid) {
             x = Math.round(x / gridSize) * gridSize
             y = Math.round(y / gridSize) * gridSize
-            this.set({ left: x, top: y })
+            if (isPolygon) {
+              this.set({ left: x - this.pathOffset.x, top: y - this.pathOffset.y })
+            } else {
+              this.set({ left: x, top: y })
+            }
           }
         })
 
-        rect.on('modified', function () {
-          updateSet(s.id, { x: this.left, y: this.top })
+        shape.on('modified', function () {
+          const fx = isPolygon ? this.left + this.pathOffset.x : this.left
+          const fy = isPolygon ? this.top + this.pathOffset.y : this.top
+          updateSet(s.id, { x: fx, y: fy })
         })
 
-        // Double-click to rotate 90 degrees — only unlocked
-        rect.on('mousedblclick', function () {
+        shape.on('mousedblclick', function () {
           const newRot = ((s.rotation || 0) + 90) % 360
           updateSet(s.id, { rotation: newRot })
         })
       }
 
-      rect.on('mousedown', function () {
+      shape.on('mousedown', function () {
         setSelectedSetId(s.id)
       })
 
-      fc.add(rect)
+      fc.add(shape)
 
       // Label
       const labelFontSize = Math.min(12, Math.max(8, w / 8))
@@ -436,7 +474,6 @@ export default function FloorCanvas({ onCanvasSize }) {
       })
       fc.add(label)
 
-      // Dimensions label
       const dimLabel = new fabric.FabricText(`${s.width}x${s.height}`, {
         left: s.x + 4,
         top: s.y + 4 + labelFontSize + 2,
@@ -449,7 +486,6 @@ export default function FloorCanvas({ onCanvasSize }) {
       })
       fc.add(dimLabel)
 
-      // Lock indicator — pin icon in top-right corner
       if (isLocked) {
         const pinIcon = new fabric.FabricText('\u{1F4CC}', {
           left: s.x + w - 18,
@@ -462,7 +498,6 @@ export default function FloorCanvas({ onCanvasSize }) {
         fc.add(pinIcon)
       }
 
-      // Rotation indicator
       if (s.rotation && s.rotation !== 0) {
         const rotLabel = new fabric.FabricText(`${s.rotation}\u00B0`, {
           left: s.x + w - 20,
@@ -477,6 +512,47 @@ export default function FloorCanvas({ onCanvasSize }) {
         fc.add(rotLabel)
       }
     }
+
+    // Draw overlap zones between visible sets
+    const visibleAABBs = visibleSets.map(s => getAABB(s, ppu))
+    let foundOverlap = null
+    for (let i = 0; i < visibleAABBs.length; i++) {
+      for (let j = i + 1; j < visibleAABBs.length; j++) {
+        const overlap = getOverlapRect(visibleAABBs[i], visibleAABBs[j])
+        if (!overlap || overlap.w < 2 || overlap.h < 2) continue
+
+        const zone = new fabric.Rect({
+          left: overlap.x,
+          top: overlap.y,
+          width: overlap.w,
+          height: overlap.h,
+          fill: '#EF444430',
+          stroke: '#EF4444',
+          strokeWidth: 1.5,
+          strokeDashArray: [6, 3],
+          selectable: false,
+          evented: false,
+          name: OVERLAP_PREFIX + visibleAABBs[i].id + '-' + visibleAABBs[j].id,
+        })
+        fc.add(zone)
+
+        // Track overlap for the cut button if selected set is involved
+        if (visibleAABBs[i].id === selectedSetId || visibleAABBs[j].id === selectedSetId) {
+          const targetId = visibleAABBs[i].id === selectedSetId
+            ? visibleAABBs[j].id : visibleAABBs[i].id
+          const targetSet = sets.find(s => s.id === targetId)
+          if (targetSet && !targetSet.lockedToPdf) {
+            foundOverlap = {
+              selectedSetId: selectedSetId,
+              targetSetId: targetId,
+              overlapRect: overlap,
+            }
+          }
+        }
+      }
+    }
+    overlapsRef.current = foundOverlap
+    setActiveOverlap(foundOverlap)
 
     // Draw FIXED indicators (only for visible sets)
     for (const rule of rules) {
@@ -500,6 +576,36 @@ export default function FloorCanvas({ onCanvasSize }) {
   useEffect(() => {
     syncSets()
   }, [syncSets])
+
+  // Handle cutting a set
+  const handleCut = () => {
+    const overlap = overlapsRef.current
+    if (!overlap) return
+    const targetSet = sets.find(s => s.id === overlap.targetSetId)
+    if (!targetSet || targetSet.lockedToPdf) return
+
+    const cutout = canvasOverlapToLocalCutout(overlap.overlapRect, targetSet, pixelsPerUnit)
+    // Skip tiny cutouts
+    if (cutout.w < 0.5 || cutout.h < 0.5) return
+
+    const existingCutouts = targetSet.cutouts || []
+    updateSet(overlap.targetSetId, {
+      cutouts: [...existingCutouts, cutout],
+    })
+    setActiveOverlap(null)
+  }
+
+  // Convert canvas coords to screen coords for the cut button position
+  const getCutButtonPosition = () => {
+    const fc = fabricRef.current
+    if (!fc || !activeOverlap) return null
+    const vpt = fc.viewportTransform
+    const zoom = fc.getZoom()
+    const { overlapRect } = activeOverlap
+    const screenX = overlapRect.x * zoom + vpt[4]
+    const screenY = overlapRect.y * zoom + vpt[5]
+    return { x: screenX + (overlapRect.w * zoom) / 2, y: screenY - 10 }
+  }
 
   // Calibration visual indicators
   useEffect(() => {
@@ -528,6 +634,8 @@ export default function FloorCanvas({ onCanvasSize }) {
     fc.requestRenderAll()
   }, [calibrating, calibrationPoints])
 
+  const cutBtnPos = getCutButtonPosition()
+
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden bg-gray-900">
       <canvas ref={canvasRef} />
@@ -536,6 +644,15 @@ export default function FloorCanvas({ onCanvasSize }) {
           Click two points on the floor plan to calibrate scale
           ({calibrationPoints.length}/2 points selected)
         </div>
+      )}
+      {activeOverlap && cutBtnPos && (
+        <button
+          className="absolute z-20 bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer shadow-lg border border-red-400 -translate-x-1/2 -translate-y-full"
+          style={{ left: cutBtnPos.x, top: cutBtnPos.y }}
+          onClick={handleCut}
+        >
+          Cut Into Set
+        </button>
       )}
     </div>
   )

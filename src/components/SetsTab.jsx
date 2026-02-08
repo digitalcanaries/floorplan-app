@@ -11,7 +11,7 @@ export default function SetsTab() {
   const {
     sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId, unit,
     pdfImage, toggleLockToPdf, lockAllToPdf, unlockAllFromPdf,
-    duplicateSet, removeSetFromPlan, addSetToPlan,
+    duplicateSet, removeSetFromPlan, addSetToPlan, clearCutouts,
   } = useStore()
   const [form, setForm] = useState({ name: '', width: '', height: '', color: COLORS[0] })
   const [editing, setEditing] = useState(null)
@@ -139,6 +139,14 @@ export default function SetsTab() {
             <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
             <span className="flex-1 truncate text-xs">{s.name}</span>
             <span className="text-[10px] text-gray-400">{s.width}x{s.height}</span>
+
+            {/* Cut indicator + restore */}
+            {s.cutouts?.length > 0 && (
+              <button onClick={(e) => { e.stopPropagation(); clearCutouts(s.id) }}
+                className="text-[10px] text-red-400 hover:text-yellow-300" title="Restore original shape">
+                [cut] &#x21A9;
+              </button>
+            )}
 
             {/* Lock to PDF button */}
             {pdfImage && (

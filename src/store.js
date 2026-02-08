@@ -169,6 +169,7 @@ const useStore = create((set, get) => ({
       x: original.x + 30,
       y: original.y + 30,
       lockedToPdf: false,
+      cutouts: original.cutouts ? JSON.parse(JSON.stringify(original.cutouts)) : undefined,
     }
     // Remove offset fields from duplicate
     delete newSet.pdfOffsetX
@@ -224,6 +225,16 @@ const useStore = create((set, get) => ({
       }
     })
     set({ sets: updatedSets })
+    get().autosave()
+  },
+
+  // Clear cutouts from a set (restore to full rectangle)
+  clearCutouts: (id) => {
+    set({
+      sets: get().sets.map(s =>
+        s.id === id ? { ...s, cutouts: undefined } : s
+      ),
+    })
     get().autosave()
   },
 
