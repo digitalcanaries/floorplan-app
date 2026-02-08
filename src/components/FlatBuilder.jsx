@@ -1,13 +1,13 @@
 import { useState } from 'react'
 
-const DEPTH_PRESETS = [
-  { value: 0.25, label: '3"' },
-  { value: 0.333, label: '4"' },
-  { value: 0.5, label: '6"' },
-  { value: 1, label: "1'" },
-  { value: 1.5, label: "1.5'" },
-  { value: 2, label: "2'" },
-  { value: 3, label: "3'" },
+const WINDOW_DEPTH_PRESETS = [
+  { value: 3, label: '3"' },
+  { value: 4, label: '4"' },
+  { value: 6, label: '6"' },
+  { value: 12, label: '12"' },
+  { value: 18, label: '18"' },
+  { value: 24, label: '24"' },
+  { value: 36, label: '36"' },
 ]
 const FLAT_WIDTH_PRESETS = [1, 2, 3, 4]
 const FLAT_HEIGHT_PRESETS = [8, 10, 12]
@@ -239,7 +239,7 @@ function FlatForm({ onSave }) {
 function WindowForm({ onSave }) {
   const [width, setWidth] = useState(4)
   const [height, setHeight] = useState(4)
-  const [depth, setDepth] = useState(0.5) // wall depth in ft for plan view
+  const [depthInches, setDepthInches] = useState(6) // wall depth in inches for plan view
   const [panes, setPanes] = useState(1)
   const [dividerWidth, setDividerWidth] = useState(0.333) // 4 inches
   const [surroundWidth, setSurroundWidth] = useState(0.333)
@@ -248,6 +248,7 @@ function WindowForm({ onSave }) {
   const [baySections, setBaySections] = useState(3) // bay window section count
   const [name, setName] = useState('')
 
+  const depthFt = depthInches / 12 // convert to feet for saving
   const iconType = windowStyle === 'bay' ? 'window-bay' : 'window'
   const autoName = windowStyle === 'bay'
     ? `${width}' ${baySections}-Section Bay Window`
@@ -262,7 +263,7 @@ function WindowForm({ onSave }) {
       subcategory: windowStyle === 'bay' ? 'Bay Window' : panes > 1 ? 'Multi Pane' : 'Single Pane',
       name: name || autoName,
       width,
-      height: depth, // plan-view: height of the set IS the depth (projection from wall)
+      height: depthFt, // plan-view: height of the set IS the depth (projection from wall, in feet)
       thickness: 0.292,
       icon_type: iconType,
       properties: {
@@ -270,7 +271,7 @@ function WindowForm({ onSave }) {
         divider: panes > 1 ? dividerWidth : 0,
         surround: surroundWidth,
         elevationHeight: height, // store full elevation height for reference
-        depth,
+        depth: depthFt,
         ...(windowStyle === 'bay' ? { bayAngle, baySections } : {}),
       },
     })
@@ -372,19 +373,19 @@ function WindowForm({ onSave }) {
         />
       </div>
 
-      {/* Depth (plan view projection) */}
+      {/* Depth (plan view projection) — in inches */}
       <div>
         <label className="text-[11px] text-gray-400 block mb-1">
-          Depth (ft) — {windowStyle === 'bay' ? 'bay projection from wall' : 'frame depth / wall thickness on plan'}
+          Depth (inches) — {windowStyle === 'bay' ? 'bay projection from wall' : 'frame depth / wall thickness on plan'}
         </label>
         <div className="flex gap-1 flex-wrap mb-1.5">
-          {DEPTH_PRESETS.map(d => (
+          {WINDOW_DEPTH_PRESETS.map(d => (
             <button
               key={d.value}
               type="button"
-              onClick={() => setDepth(d.value)}
+              onClick={() => setDepthInches(d.value)}
               className={`px-2 py-1 rounded text-xs ${
-                depth === d.value ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                depthInches === d.value ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
               }`}
             >
               {d.label}
@@ -393,15 +394,15 @@ function WindowForm({ onSave }) {
         </div>
         <input
           type="number"
-          value={depth}
-          onChange={e => setDepth(parseFloat(e.target.value) || 0)}
-          min="0.1"
-          max="6"
-          step="0.083"
+          value={depthInches}
+          onChange={e => setDepthInches(parseFloat(e.target.value) || 0)}
+          min="2"
+          max="72"
+          step="1"
           className="w-full px-2 py-1.5 bg-gray-900 border border-gray-600 rounded text-xs text-white focus:outline-none focus:border-indigo-500"
         />
         <span className="text-[9px] text-gray-500 mt-0.5 block">
-          {Math.round(depth * 12)}" — sets the footprint depth on plan view
+          {windowStyle === 'bay' ? 'Bay windows typically project 12"–36"' : 'Standard windows: 4"–6" deep'}
         </span>
       </div>
 
@@ -523,7 +524,7 @@ function WindowForm({ onSave }) {
       <div className="bg-gray-900/70 rounded p-3 border border-gray-700">
         <h4 className="text-[11px] text-gray-300 font-medium mb-2">Preview</h4>
         {windowStyle === 'bay' ? (
-          <BayWindowPreview width={width} depth={depth} bayAngle={bayAngle} baySections={baySections} />
+          <BayWindowPreview width={width} depth={depthFt} bayAngle={bayAngle} baySections={baySections} />
         ) : (
           <WindowPreview width={width} height={height} panes={panes} dividerWidth={dividerWidth} surroundWidth={surroundWidth} />
         )}
@@ -618,14 +619,22 @@ function BayWindowPreview({ width, depth, bayAngle, baySections }) {
   )
 }
 
+const DOOR_DEPTH_PRESETS = [
+  { value: 4, label: '4"' },
+  { value: 4.5, label: '4.5"' },
+  { value: 5, label: '5"' },
+  { value: 6, label: '6"' },
+]
+
 function DoorForm({ onSave }) {
   const [width, setWidth] = useState(3)
   const [height, setHeight] = useState(8)
-  const [depth, setDepth] = useState(0.333) // door frame depth for plan view
+  const [depthInches, setDepthInches] = useState(4) // door frame depth in inches
   const [style, setStyle] = useState('single') // single, double, arch
   const [swing, setSwing] = useState('left')
   const [name, setName] = useState('')
 
+  const depthFt = depthInches / 12 // convert to feet for saving
   const iconType = style === 'double' ? 'door-double' : style === 'arch' ? 'door-arch' : 'door'
   const autoName = style === 'double'
     ? `${width}'×${height}' Double Door`
@@ -640,10 +649,10 @@ function DoorForm({ onSave }) {
       subcategory: style === 'double' ? 'Double Door' : style === 'arch' ? 'Arch' : 'Single Door',
       name: name || autoName,
       width,
-      height: depth, // plan-view: height of the set IS the depth
+      height: depthFt, // plan-view: height of the set IS the depth (in feet)
       thickness: 0.292,
       icon_type: iconType,
-      properties: { style, swing: style === 'double' ? 'both' : swing || 'left', elevationHeight: height, depth },
+      properties: { style, swing: style === 'double' ? 'both' : swing || 'left', elevationHeight: height, depth: depthFt },
     })
   }
 
@@ -750,17 +759,17 @@ function DoorForm({ onSave }) {
         />
       </div>
 
-      {/* Depth (plan view) */}
+      {/* Depth (plan view) — in inches */}
       <div>
-        <label className="text-[11px] text-gray-400 block mb-1">Depth (ft) — frame depth on plan view</label>
+        <label className="text-[11px] text-gray-400 block mb-1">Frame Depth (inches) — plan view footprint</label>
         <div className="flex gap-1 flex-wrap mb-1.5">
-          {DEPTH_PRESETS.slice(0, 4).map(d => (
+          {DOOR_DEPTH_PRESETS.map(d => (
             <button
               key={d.value}
               type="button"
-              onClick={() => setDepth(d.value)}
+              onClick={() => setDepthInches(d.value)}
               className={`px-2 py-1 rounded text-xs ${
-                depth === d.value ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                depthInches === d.value ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
               }`}
             >
               {d.label}
@@ -769,15 +778,15 @@ function DoorForm({ onSave }) {
         </div>
         <input
           type="number"
-          value={depth}
-          onChange={e => setDepth(parseFloat(e.target.value) || 0)}
-          min="0.1"
-          max="4"
-          step="0.083"
+          value={depthInches}
+          onChange={e => setDepthInches(parseFloat(e.target.value) || 0)}
+          min="2"
+          max="12"
+          step="0.5"
           className="w-full px-2 py-1.5 bg-gray-900 border border-gray-600 rounded text-xs text-white focus:outline-none focus:border-indigo-500"
         />
         <span className="text-[9px] text-gray-500 mt-0.5 block">
-          {Math.round(depth * 12)}" — sets the footprint depth on plan view
+          Standard door frames: 4"–6" deep
         </span>
       </div>
 
