@@ -31,7 +31,8 @@ export default function FloorCanvas({ onCanvasSize }) {
     sets, updateSet, selectedSetId, setSelectedSetId,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
-    unit,
+    unit, viewMode,
+    undo, redo,
   } = useStore()
 
   // Initialize fabric canvas
@@ -609,7 +610,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         const isRotated = (s.rotation || 0) % 180 !== 0
         const iconW = isRotated ? h : w
         const iconH = isRotated ? w : h
-        const iconObjects = drawComponentIcon(s.iconType, s, iconW, iconH, ppu, s.componentProperties || {})
+        const iconObjects = drawComponentIcon(s.iconType, s, iconW, iconH, ppu, s.componentProperties || {}, viewMode)
         iconObjects.forEach(obj => fc.add(obj))
       }
 
@@ -885,7 +886,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
 
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode])
 
   useEffect(() => {
     syncSets()
@@ -961,6 +962,29 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     fc.requestRenderAll()
   }, [calibrating, calibrationPoints])
+
+  // Keyboard shortcuts: Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Skip when typing in input fields
+      const tag = e.target.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault()
+        redo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault()
+        redo()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
 
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden bg-gray-900">

@@ -463,7 +463,7 @@ function DoorForm({ onSave }) {
       height,
       thickness: 0.292,
       icon_type: iconType,
-      properties: { style, swing: style === 'double' ? 'both' : swing },
+      properties: { style, swing: style === 'double' ? 'both' : swing || 'left' },
     })
   }
 
@@ -570,8 +570,8 @@ function DoorForm({ onSave }) {
         />
       </div>
 
-      {/* Swing direction (only for single doors) */}
-      {style === 'single' && (
+      {/* Swing direction (single + arch doors) */}
+      {(style === 'single' || style === 'arch') && (
         <div>
           <label className="text-[11px] text-gray-400 block mb-1">Swing Direction</label>
           <div className="flex gap-1.5">
@@ -592,6 +592,15 @@ function DoorForm({ onSave }) {
               }`}
             >
               Right
+            </button>
+            <button
+              type="button"
+              onClick={() => setSwing('both')}
+              className={`flex-1 px-2 py-1.5 rounded text-xs ${
+                swing === 'both' ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+              }`}
+            >
+              Both
             </button>
           </div>
         </div>

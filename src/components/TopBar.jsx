@@ -15,6 +15,8 @@ export default function TopBar({ canvasSize }) {
     calibrating, setCalibrating,
     projectName, setProjectName, lastSaved,
     saveProjectAs, getSavedProjects, loadSavedProject, deleteSavedProject,
+    undo, redo, _past, _future,
+    viewMode, setViewMode,
   } = useStore()
 
   const loadInputRef = useRef(null)
@@ -300,6 +302,28 @@ export default function TopBar({ canvasSize }) {
         <input type="checkbox" checked={showOverlaps} onChange={e => setShowOverlaps(e.target.checked)} />
         Overlaps
       </label>
+
+      <div className="h-5 w-px bg-gray-600" />
+
+      {/* Undo / Redo */}
+      <button onClick={undo} disabled={_past.length === 0}
+        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs" title="Undo (Ctrl+Z)">
+        ↩ Undo
+      </button>
+      <button onClick={redo} disabled={_future.length === 0}
+        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 rounded text-xs" title="Redo (Ctrl+Shift+Z)">
+        ↪ Redo
+      </button>
+
+      <div className="h-5 w-px bg-gray-600" />
+
+      {/* View Mode toggle */}
+      <select value={viewMode} onChange={e => setViewMode(e.target.value)}
+        className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
+        title="Icon view mode">
+        <option value="plan">Plan View</option>
+        <option value="elevation">Elevation</option>
+      </select>
 
       <div className="h-5 w-px bg-gray-600" />
 

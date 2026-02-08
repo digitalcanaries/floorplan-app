@@ -35,6 +35,13 @@ const useStore = create((set, get) => ({
   labelsVisible: saved?.labelsVisible ?? true,
   labelMode: saved?.labelMode ?? 'inline',
   showOverlaps: saved?.showOverlaps ?? true,
+  viewMode: saved?.viewMode ?? 'plan',
+
+  // Undo/redo history (not persisted)
+  _past: [],
+  _future: [],
+  _maxHistory: 50,
+  _recording: true,
 
   // Project info
   projectName: saved?.projectName || 'Untitled Project',
@@ -119,12 +126,80 @@ const useStore = create((set, get) => ({
     return points
   },
 
+  // View mode
+  setViewMode: (mode) => {
+    set({ viewMode: mode })
+    get().autosave()
+  },
+
+  // Undo/redo
+  _pushHistory: () => {
+    const state = get()
+    if (!state._recording) return
+    const snapshot = {
+      sets: JSON.parse(JSON.stringify(state.sets)),
+      rules: JSON.parse(JSON.stringify(state.rules)),
+      nextSetId: state.nextSetId,
+      nextRuleId: state.nextRuleId,
+    }
+    const past = [...state._past, snapshot]
+    if (past.length > state._maxHistory) past.shift()
+    set({ _past: past, _future: [] })
+  },
+
+  undo: () => {
+    const { _past, _future, sets, rules, nextSetId, nextRuleId } = get()
+    if (_past.length === 0) return
+    const currentSnapshot = {
+      sets: JSON.parse(JSON.stringify(sets)),
+      rules: JSON.parse(JSON.stringify(rules)),
+      nextSetId, nextRuleId,
+    }
+    const previous = _past[_past.length - 1]
+    set({
+      _recording: false,
+      sets: JSON.parse(JSON.stringify(previous.sets)),
+      rules: JSON.parse(JSON.stringify(previous.rules)),
+      nextSetId: previous.nextSetId,
+      nextRuleId: previous.nextRuleId,
+      _past: _past.slice(0, -1),
+      _future: [currentSnapshot, ..._future],
+      selectedSetId: null,
+      _recording: true,
+    })
+    get().autosave()
+  },
+
+  redo: () => {
+    const { _past, _future, sets, rules, nextSetId, nextRuleId } = get()
+    if (_future.length === 0) return
+    const currentSnapshot = {
+      sets: JSON.parse(JSON.stringify(sets)),
+      rules: JSON.parse(JSON.stringify(rules)),
+      nextSetId, nextRuleId,
+    }
+    const next = _future[0]
+    set({
+      _recording: false,
+      sets: JSON.parse(JSON.stringify(next.sets)),
+      rules: JSON.parse(JSON.stringify(next.rules)),
+      nextSetId: next.nextSetId,
+      nextRuleId: next.nextRuleId,
+      _past: [..._past, currentSnapshot],
+      _future: _future.slice(1),
+      selectedSetId: null,
+      _recording: true,
+    })
+    get().autosave()
+  },
+
   // Sidebar
   setSidebarTab: (t) => set({ sidebarTab: t }),
   setSelectedSetId: (id) => set({ selectedSetId: id }),
 
   // Set CRUD
   addSet: (s) => {
+    get()._pushHistory()
     const id = get().nextSetId
     const maxZ = get().sets.length > 0 ? Math.max(...get().sets.map(s => s.zIndex || 0)) : 0
     const newSet = {
@@ -141,6 +216,7 @@ const useStore = create((set, get) => ({
     return id
   },
   bulkAddSets: (newSets) => {
+    get()._pushHistory()
     let nextId = get().nextSetId
     const created = newSets.map((s, i) => ({
       ...s,
@@ -164,10 +240,12 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
   updateSet: (id, updates) => {
+    get()._pushHistory()
     set({ sets: get().sets.map(s => s.id === id ? { ...s, ...updates } : s) })
     get().autosave()
   },
   deleteSet: (id) => {
+    get()._pushHistory()
     set({
       sets: get().sets.filter(s => s.id !== id),
       rules: get().rules.filter(r => r.setA !== id && r.setB !== id),
@@ -176,6 +254,7 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
   setSets: (sets) => {
+    get()._pushHistory()
     set({ sets })
     get().autosave()
   },
@@ -185,6 +264,7 @@ const useStore = create((set, get) => ({
     const state = get()
     const original = state.sets.find(s => s.id === id)
     if (!original) return
+    get()._pushHistory()
 
     // Find the next number suffix for this base name
     const baseName = original.name.replace(/\s*\(\d+\)\s*$/, '')
@@ -221,6 +301,7 @@ const useStore = create((set, get) => ({
 
   // Remove set from the plan (hide from canvas) but keep in set list
   removeSetFromPlan: (id) => {
+    get()._pushHistory()
     set({
       sets: get().sets.map(s =>
         s.id === id ? { ...s, onPlan: false, lockedToPdf: false } : s
@@ -231,6 +312,7 @@ const useStore = create((set, get) => ({
 
   // Add set back to the plan
   addSetToPlan: (id) => {
+    get()._pushHistory()
     set({
       sets: get().sets.map(s =>
         s.id === id ? { ...s, onPlan: true, x: 100, y: 100 } : s
@@ -241,6 +323,7 @@ const useStore = create((set, get) => ({
 
   // Hide set from plan but keep its position (for toggling visibility)
   hideSet: (id) => {
+    get()._pushHistory()
     set({
       sets: get().sets.map(s =>
         s.id === id ? { ...s, hidden: true } : s
@@ -251,6 +334,7 @@ const useStore = create((set, get) => ({
 
   // Show a hidden set (restore visibility at same position)
   showSet: (id) => {
+    get()._pushHistory()
     set({
       sets: get().sets.map(s =>
         s.id === id ? { ...s, hidden: false } : s
@@ -266,6 +350,7 @@ const useStore = create((set, get) => ({
     const target = state.sets.find(s => s.id === targetSetId)
     if (!cutter || !target) return
     if (target.noCut) return // noCut sets cannot be cut into
+    get()._pushHistory()
 
     const ppu = state.pixelsPerUnit
 
@@ -319,6 +404,7 @@ const useStore = create((set, get) => ({
 
   // Lock/Unlock set to PDF position
   toggleLockToPdf: (id) => {
+    get()._pushHistory()
     const state = get()
     const pdfPos = state.pdfPosition
     const updatedSets = state.sets.map(s => {
@@ -343,6 +429,7 @@ const useStore = create((set, get) => ({
 
   // Clear cutouts from a set (restore to full rectangle)
   clearCutouts: (id) => {
+    get()._pushHistory()
     set({
       sets: get().sets.map(s =>
         s.id === id ? { ...s, cutouts: undefined } : s
@@ -353,27 +440,32 @@ const useStore = create((set, get) => ({
 
   // Z-order control
   bringForward: (id) => {
+    get()._pushHistory()
     const sets = get().sets
     const maxZ = Math.max(...sets.map(s => s.zIndex || 0))
     set({ sets: sets.map(s => s.id === id ? { ...s, zIndex: (s.zIndex || 0) + 1 } : s) })
     get().autosave()
   },
   sendBackward: (id) => {
+    get()._pushHistory()
     set({ sets: get().sets.map(s => s.id === id ? { ...s, zIndex: Math.max(0, (s.zIndex || 0) - 1) } : s) })
     get().autosave()
   },
   bringToFront: (id) => {
+    get()._pushHistory()
     const maxZ = Math.max(...get().sets.map(s => s.zIndex || 0))
     set({ sets: get().sets.map(s => s.id === id ? { ...s, zIndex: maxZ + 1 } : s) })
     get().autosave()
   },
   sendToBack: (id) => {
+    get()._pushHistory()
     set({ sets: get().sets.map(s => s.id === id ? { ...s, zIndex: 0 } : s) })
     get().autosave()
   },
 
   // Lock/Unlock all on-plan sets to PDF
   lockAllToPdf: () => {
+    get()._pushHistory()
     const state = get()
     const pdfPos = state.pdfPosition
     const updatedSets = state.sets.map(s => {
@@ -390,6 +482,7 @@ const useStore = create((set, get) => ({
   },
 
   unlockAllFromPdf: () => {
+    get()._pushHistory()
     const updatedSets = get().sets.map(s => {
       if (!s.lockedToPdf) return s
       const { pdfOffsetX, pdfOffsetY, ...rest } = s
@@ -401,16 +494,19 @@ const useStore = create((set, get) => ({
 
   // Rule CRUD
   addRule: (r) => {
+    get()._pushHistory()
     const id = get().nextRuleId
     set({ rules: [...get().rules, { ...r, id }], nextRuleId: id + 1 })
     get().autosave()
     return id
   },
   updateRule: (id, updates) => {
+    get()._pushHistory()
     set({ rules: get().rules.map(r => r.id === id ? { ...r, ...updates } : r) })
     get().autosave()
   },
   deleteRule: (id) => {
+    get()._pushHistory()
     set({ rules: get().rules.filter(r => r.id !== id) })
     get().autosave()
   },
@@ -435,6 +531,7 @@ const useStore = create((set, get) => ({
       labelsVisible: state.labelsVisible,
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
+      viewMode: state.viewMode,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -464,6 +561,7 @@ const useStore = create((set, get) => ({
       labelsVisible: state.labelsVisible,
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
+      viewMode: state.viewMode,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -515,6 +613,7 @@ const useStore = create((set, get) => ({
       labelsVisible: state.labelsVisible,
       labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
+      viewMode: state.viewMode,
       sets: state.sets,
       nextSetId: state.nextSetId,
       rules: state.rules,
@@ -537,11 +636,13 @@ const useStore = create((set, get) => ({
       labelsVisible: data.labelsVisible ?? true,
       labelMode: data.labelMode ?? 'inline',
       showOverlaps: data.showOverlaps ?? true,
+      viewMode: data.viewMode ?? 'plan',
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,
       rules: data.rules || [],
       nextRuleId: data.nextRuleId || 1,
       selectedSetId: null,
+      _past: [], _future: [],
     })
     get().autosave()
   },
@@ -559,6 +660,7 @@ const useStore = create((set, get) => ({
       rules: [],
       nextRuleId: 1,
       selectedSetId: null,
+      _past: [], _future: [],
     })
     localStorage.removeItem(AUTOSAVE_KEY)
   },

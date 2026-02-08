@@ -15,7 +15,7 @@ export const ICON_PREFIX = 'comp-icon-'
  * @param {object} properties - Component properties (panes, style, etc)
  * @returns {Array} Array of fabric.js objects
  */
-export function drawComponentIcon(iconType, set, w, h, ppu, properties = {}) {
+export function drawComponentIcon(iconType, set, w, h, ppu, properties = {}, viewMode = 'plan') {
   const x = set.x
   const y = set.y
   const color = set.color || '#888888'
@@ -24,22 +24,37 @@ export function drawComponentIcon(iconType, set, w, h, ppu, properties = {}) {
   const lineColor = hexToRgba(color, 0.6 * alpha)
   const fillColor = hexToRgba(color, 0.15 * alpha)
   const prefix = ICON_PREFIX + set.id + '-'
+  const isPlan = viewMode === 'plan'
 
   switch (iconType) {
     case 'window':
-      return drawWindowIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+      return isPlan
+        ? drawPlanWindowIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawWindowIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'door':
-      return drawDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+      return isPlan
+        ? drawPlanDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'door-double':
-      return drawDoubleDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+      return isPlan
+        ? drawPlanDoubleDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawDoubleDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'door-arch':
-      return drawArchDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+      return isPlan
+        ? drawPlanDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawArchDoorIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'flat':
-      return drawFlatIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+      return isPlan
+        ? drawPlanFlatIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawFlatIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'flat-double':
-      return drawDoubleFlatIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+      return isPlan
+        ? drawPlanDoubleFlatIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawDoubleFlatIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'flat-braced':
-      return drawBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+      return isPlan
+        ? drawPlanBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+        : drawBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'column':
       return drawColumnIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'stair':
@@ -140,49 +155,60 @@ function drawDoorIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
   // Threshold line (along the wider dimension)
   const isWide = w >= h
   if (isWide) {
-    // Door opens upward — hinge on left or right
-    const hingeX = swing === 'right' ? x + w : x
-    const arcEndX = swing === 'right' ? x : x + w
-
     // Threshold line at bottom
     objects.push(new fabric.Line(
       [x, y + h, x + w, y + h],
       { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'threshold' }
     ))
 
-    // Door panel (closed position along bottom)
-    objects.push(new fabric.Line(
-      [hingeX, y + h, arcEndX, y + h],
-      { stroke: lineColor, strokeWidth: 2.5, selectable: false, evented: false, name: prefix + 'panel' }
-    ))
-
-    // Swing arc (quarter circle)
-    const radius = w
-    const startAngle = swing === 'right' ? 180 : 0
-    const endAngle = swing === 'right' ? 270 : -90
-    objects.push(createArc(prefix + 'arc', hingeX, y + h, radius, startAngle, endAngle, lineColor))
+    if (swing === 'both') {
+      // Door panel (full width)
+      objects.push(new fabric.Line(
+        [x, y + h, x + w, y + h],
+        { stroke: lineColor, strokeWidth: 2.5, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      // Arc from left hinge
+      objects.push(createArc(prefix + 'arc-l', x, y + h, w, 0, -90, lineColor))
+      // Arc from right hinge
+      objects.push(createArc(prefix + 'arc-r', x + w, y + h, w, 180, 270, lineColor))
+    } else {
+      const hingeX = swing === 'right' ? x + w : x
+      const arcEndX = swing === 'right' ? x : x + w
+      objects.push(new fabric.Line(
+        [hingeX, y + h, arcEndX, y + h],
+        { stroke: lineColor, strokeWidth: 2.5, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      const radius = w
+      const startAngle = swing === 'right' ? 180 : 0
+      const endAngle = swing === 'right' ? 270 : -90
+      objects.push(createArc(prefix + 'arc', hingeX, y + h, radius, startAngle, endAngle, lineColor))
+    }
   } else {
-    // Tall door — opens to the right, hinge at top or bottom
-    const hingeY = swing === 'right' ? y : y + h
-    const arcEndY = swing === 'right' ? y + h : y
-
     // Threshold line at left
     objects.push(new fabric.Line(
       [x, y, x, y + h],
       { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'threshold' }
     ))
 
-    // Door panel
-    objects.push(new fabric.Line(
-      [x, hingeY, x, arcEndY],
-      { stroke: lineColor, strokeWidth: 2.5, selectable: false, evented: false, name: prefix + 'panel' }
-    ))
-
-    // Swing arc
-    const radius = h
-    const startAngle = swing === 'right' ? 270 : 0
-    const endAngle = swing === 'right' ? 360 : 90
-    objects.push(createArc(prefix + 'arc', x, hingeY, radius, startAngle, endAngle, lineColor))
+    if (swing === 'both') {
+      objects.push(new fabric.Line(
+        [x, y, x, y + h],
+        { stroke: lineColor, strokeWidth: 2.5, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      objects.push(createArc(prefix + 'arc-t', x, y, h, 0, 90, lineColor))
+      objects.push(createArc(prefix + 'arc-b', x, y + h, h, 270, 360, lineColor))
+    } else {
+      const hingeY = swing === 'right' ? y : y + h
+      const arcEndY = swing === 'right' ? y + h : y
+      objects.push(new fabric.Line(
+        [x, hingeY, x, arcEndY],
+        { stroke: lineColor, strokeWidth: 2.5, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      const radius = h
+      const startAngle = swing === 'right' ? 270 : 0
+      const endAngle = swing === 'right' ? 360 : 90
+      objects.push(createArc(prefix + 'arc', x, hingeY, radius, startAngle, endAngle, lineColor))
+    }
   }
 
   return objects
@@ -538,6 +564,249 @@ function drawStairIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
       ],
       { fill: lineColor, selectable: false, evented: false, name: prefix + 'arrowhead' }
     ))
+  }
+
+  return objects
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// PLAN VIEW (Top-Down) Icons — standard architectural conventions
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Plan-view window — two parallel frame lines + thin glass centre line
+ */
+function drawPlanWindowIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+  const glassColor = hexToRgba('#87CEEB', 0.4)
+
+  if (isWide) {
+    const frameThick = Math.max(1, h * 0.15)
+    const midY = y + h / 2
+    // Top frame line
+    objects.push(new fabric.Line(
+      [x, y + frameThick, x + w, y + frameThick],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'frame-t' }
+    ))
+    // Bottom frame line
+    objects.push(new fabric.Line(
+      [x, y + h - frameThick, x + w, y + h - frameThick],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'frame-b' }
+    ))
+    // Glass centre line
+    objects.push(new fabric.Line(
+      [x, midY, x + w, midY],
+      { stroke: glassColor, strokeWidth: 1, selectable: false, evented: false, name: prefix + 'glass' }
+    ))
+    // Pane dividers
+    const panes = props.panes || 1
+    if (panes > 1) {
+      const innerW = w
+      for (let i = 1; i < panes; i++) {
+        const dx = x + (innerW / panes) * i
+        objects.push(new fabric.Line(
+          [dx, y + frameThick, dx, y + h - frameThick],
+          { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'div-' + i }
+        ))
+      }
+    }
+  } else {
+    const frameThick = Math.max(1, w * 0.15)
+    const midX = x + w / 2
+    objects.push(new fabric.Line(
+      [x + frameThick, y, x + frameThick, y + h],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'frame-l' }
+    ))
+    objects.push(new fabric.Line(
+      [x + w - frameThick, y, x + w - frameThick, y + h],
+      { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'frame-r' }
+    ))
+    objects.push(new fabric.Line(
+      [midX, y, midX, y + h],
+      { stroke: glassColor, strokeWidth: 1, selectable: false, evented: false, name: prefix + 'glass' }
+    ))
+    const panes = props.panes || 1
+    if (panes > 1) {
+      for (let i = 1; i < panes; i++) {
+        const dy = y + (h / panes) * i
+        objects.push(new fabric.Line(
+          [x + frameThick, dy, x + w - frameThick, dy],
+          { stroke: lineColor, strokeWidth: 1.5, selectable: false, evented: false, name: prefix + 'div-' + i }
+        ))
+      }
+    }
+  }
+
+  return objects
+}
+
+/**
+ * Plan-view single door — door panel line + quarter-circle swing arc
+ */
+function drawPlanDoorIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const swing = props.swing || 'left'
+  const isWide = w >= h
+
+  if (isWide) {
+    if (swing === 'both') {
+      // Panel line at bottom
+      objects.push(new fabric.Line(
+        [x, y + h, x + w, y + h],
+        { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      // Arc from left hinge (swings upward)
+      objects.push(createArc(prefix + 'arc-l', x, y + h, w, 0, -90, lineColor))
+      // Arc from right hinge (swings upward)
+      objects.push(createArc(prefix + 'arc-r', x + w, y + h, w, 180, 270, lineColor))
+    } else {
+      const hingeX = swing === 'right' ? x + w : x
+      const freeEndX = swing === 'right' ? x : x + w
+      objects.push(new fabric.Line(
+        [hingeX, y + h, freeEndX, y + h],
+        { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      const startAngle = swing === 'right' ? 180 : 0
+      const endAngle = swing === 'right' ? 270 : -90
+      objects.push(createArc(prefix + 'arc', hingeX, y + h, w, startAngle, endAngle, lineColor))
+    }
+  } else {
+    if (swing === 'both') {
+      objects.push(new fabric.Line(
+        [x, y, x, y + h],
+        { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      objects.push(createArc(prefix + 'arc-t', x, y, h, 0, 90, lineColor))
+      objects.push(createArc(prefix + 'arc-b', x, y + h, h, 270, 360, lineColor))
+    } else {
+      const hingeY = swing === 'right' ? y : y + h
+      const freeEndY = swing === 'right' ? y + h : y
+      objects.push(new fabric.Line(
+        [x, hingeY, x, freeEndY],
+        { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel' }
+      ))
+      const startAngle = swing === 'right' ? 270 : 0
+      const endAngle = swing === 'right' ? 360 : 90
+      objects.push(createArc(prefix + 'arc', x, hingeY, h, startAngle, endAngle, lineColor))
+    }
+  }
+
+  return objects
+}
+
+/**
+ * Plan-view double door — two opposing arcs meeting at centre
+ */
+function drawPlanDoubleDoorIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+
+  if (isWide) {
+    const midX = x + w / 2
+    // Left panel
+    objects.push(new fabric.Line(
+      [x, y + h, midX, y + h],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel-l' }
+    ))
+    // Right panel
+    objects.push(new fabric.Line(
+      [midX, y + h, x + w, y + h],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel-r' }
+    ))
+    const radius = w / 2
+    objects.push(createArc(prefix + 'arc-l', x, y + h, radius, 0, -90, lineColor))
+    objects.push(createArc(prefix + 'arc-r', x + w, y + h, radius, 180, 270, lineColor))
+  } else {
+    const midY = y + h / 2
+    objects.push(new fabric.Line(
+      [x, y, x, midY],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel-t' }
+    ))
+    objects.push(new fabric.Line(
+      [x, midY, x, y + h],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'panel-b' }
+    ))
+    const radius = h / 2
+    objects.push(createArc(prefix + 'arc-t', x, y, radius, 0, 90, lineColor))
+    objects.push(createArc(prefix + 'arc-b', x, y + h, radius, 270, 360, lineColor))
+  }
+
+  return objects
+}
+
+/**
+ * Plan-view single flat — subtle fill (wall IS the footprint)
+ */
+function drawPlanFlatIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: 'transparent',
+    selectable: false, evented: false, name: prefix + 'fill',
+  }))
+  return objects
+}
+
+/**
+ * Plan-view double flat — fill + inner dividing line
+ */
+function drawPlanDoubleFlatIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: 'transparent',
+    selectable: false, evented: false, name: prefix + 'fill',
+  }))
+
+  if (isWide) {
+    objects.push(new fabric.Line(
+      [x + 2, y + h / 2, x + w - 2, y + h / 2],
+      { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'inner' }
+    ))
+  } else {
+    objects.push(new fabric.Line(
+      [x + w / 2, y + 2, x + w / 2, y + h - 2],
+      { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'inner' }
+    ))
+  }
+
+  return objects
+}
+
+/**
+ * Plan-view braced access wall — two thin wall-leaf rectangles with gap
+ */
+function drawPlanBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+  const wallThick = Math.min(w, h) * 0.2
+
+  if (isWide) {
+    objects.push(new fabric.Rect({
+      left: x, top: y, width: w, height: wallThick,
+      fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
+      selectable: false, evented: false, name: prefix + 'leaf-t',
+    }))
+    objects.push(new fabric.Rect({
+      left: x, top: y + h - wallThick, width: w, height: wallThick,
+      fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
+      selectable: false, evented: false, name: prefix + 'leaf-b',
+    }))
+  } else {
+    objects.push(new fabric.Rect({
+      left: x, top: y, width: wallThick, height: h,
+      fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
+      selectable: false, evented: false, name: prefix + 'leaf-l',
+    }))
+    objects.push(new fabric.Rect({
+      left: x + w - wallThick, top: y, width: wallThick, height: h,
+      fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
+      selectable: false, evented: false, name: prefix + 'leaf-r',
+    }))
   }
 
   return objects
