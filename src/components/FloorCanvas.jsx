@@ -7,6 +7,7 @@ const SET_PREFIX = 'set-rect-'
 const LABEL_PREFIX = 'set-label-'
 const RULE_PREFIX = 'rule-line-'
 const OVERLAP_PREFIX = 'overlap-zone-'
+const CUTAWAY_PREFIX = 'cutaway-ghost-'
 const GAP_PREFIX = 'wall-gap-'
 const SNAP_LINE_NAME = 'snap-guide-line'
 const TOOLTIP_NAME = 'hover-tooltip'
@@ -365,6 +366,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         o.name?.startsWith(LABEL_PREFIX) ||
         o.name?.startsWith(RULE_PREFIX) ||
         o.name?.startsWith(OVERLAP_PREFIX) ||
+        o.name?.startsWith(CUTAWAY_PREFIX) ||
         o.name?.startsWith(GAP_PREFIX) ||
         o.name === SNAP_LINE_NAME
       )
@@ -422,6 +424,25 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       let shape
       if (hasCutouts) {
+        // Ghost rectangle showing the cut-away area at very low opacity
+        const ghostRect = new fabric.Rect({
+          left: s.x,
+          top: s.y,
+          width: w,
+          height: h,
+          fill: s.color + '0D',
+          stroke: s.color + '30',
+          strokeWidth: 1,
+          strokeDashArray: [4, 4],
+          angle: s.rotation || 0,
+          originX: 'left',
+          originY: 'top',
+          name: CUTAWAY_PREFIX + s.id,
+          selectable: false,
+          evented: false,
+        })
+        fc.add(ghostRect)
+
         const localPoints = buildCutPolygon(s.width, s.height, s.cutouts)
         const pixelPoints = localPoints.map(p => ({ x: p.x * ppu, y: p.y * ppu }))
         shape = new fabric.Polygon(pixelPoints, {
