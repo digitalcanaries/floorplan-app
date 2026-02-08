@@ -1,6 +1,9 @@
 import { useRef, useState, useEffect } from 'react'
 import useStore from '../store.js'
 import { autoLayout, tryAlternate } from '../engine/autoLayout.js'
+import { apiFetch } from '../api.js'
+import useAuthStore from '../authStore.js'
+import UserMenu from './UserMenu.jsx'
 
 export default function TopBar({ canvasSize }) {
   const {
@@ -19,6 +22,12 @@ export default function TopBar({ canvasSize }) {
   const [nameInput, setNameInput] = useState(projectName)
   const [savedProjects, setSavedProjectsList] = useState({})
   const [saveFlash, setSaveFlash] = useState(false)
+  const [serverProjects, setServerProjects] = useState([])
+  const [serverProjectId, setServerProjectId] = useState(null)
+  const [shareUsername, setShareUsername] = useState('')
+  const [shareError, setShareError] = useState(null)
+  const [shareSuccess, setShareSuccess] = useState(null)
+  const { user } = useAuthStore()
 
   // Flash the autosave indicator briefly when lastSaved changes
   useEffect(() => {
@@ -69,6 +78,97 @@ export default function TopBar({ canvasSize }) {
     }
   }
 
+  // Save to server
+  const handleServerSave = async () => {
+    const data = exportProject()
+    try {
+      if (serverProjectId) {
+        await apiFetch(`/projects/${serverProjectId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: projectName, data }),
+        })
+      } else {
+        const result = await apiFetch('/projects', {
+          method: 'POST',
+          body: JSON.stringify({ name: projectName, data }),
+        })
+        setServerProjectId(result.id)
+      }
+      setSaveFlash(true)
+      setTimeout(() => setSaveFlash(false), 1500)
+    } catch (e) {
+      alert('Save failed: ' + e.message)
+    }
+  }
+
+  // Save to server with new name
+  const handleServerSaveAs = async () => {
+    const name = prompt('Project name:', projectName)
+    if (!name || !name.trim()) return
+    setProjectName(name.trim())
+    const data = exportProject()
+    try {
+      const result = await apiFetch('/projects', {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim(), data }),
+      })
+      setServerProjectId(result.id)
+      setShowSaveMenu(false)
+    } catch (e) {
+      alert('Save failed: ' + e.message)
+    }
+  }
+
+  // Load server projects list
+  const loadServerProjects = async () => {
+    try {
+      const list = await apiFetch('/projects')
+      setServerProjects(list)
+    } catch { setServerProjects([]) }
+  }
+
+  // Load a server project
+  const handleServerLoad = async (id) => {
+    try {
+      const project = await apiFetch(`/projects/${id}`)
+      importProject(project.data)
+      setProjectName(project.name)
+      setServerProjectId(id)
+      setShowLoadMenu(false)
+    } catch (e) {
+      alert('Load failed: ' + e.message)
+    }
+  }
+
+  // Delete a server project
+  const handleServerDelete = async (id) => {
+    if (!confirm('Delete this project from the server?')) return
+    try {
+      await apiFetch(`/projects/${id}`, { method: 'DELETE' })
+      loadServerProjects()
+      if (serverProjectId === id) setServerProjectId(null)
+    } catch (e) {
+      alert('Delete failed: ' + e.message)
+    }
+  }
+
+  // Share project
+  const handleShare = async (id) => {
+    if (!shareUsername.trim()) return
+    setShareError(null)
+    setShareSuccess(null)
+    try {
+      await apiFetch(`/projects/${id}/share`, {
+        method: 'POST',
+        body: JSON.stringify({ username: shareUsername.trim() }),
+      })
+      setShareSuccess(`Shared with ${shareUsername.trim()}`)
+      setShareUsername('')
+    } catch (e) {
+      setShareError(e.message)
+    }
+  }
+
   // Load from file
   const handleLoadFile = (e) => {
     const file = e.target.files[0]
@@ -99,8 +199,11 @@ export default function TopBar({ canvasSize }) {
 
   const openLoadMenu = () => {
     setSavedProjectsList(getSavedProjects())
+    loadServerProjects()
     setShowLoadMenu(true)
     setShowSaveMenu(false)
+    setShareError(null)
+    setShareSuccess(null)
   }
 
   const handleNameSubmit = () => {
@@ -190,7 +293,7 @@ export default function TopBar({ canvasSize }) {
       {/* Save dropdown */}
       <div className="relative">
         <div className="flex">
-          <button onClick={handleQuickSave}
+          <button onClick={handleServerSave}
             className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded-l text-xs border-r border-green-800">
             Save
           </button>
@@ -201,17 +304,21 @@ export default function TopBar({ canvasSize }) {
         </div>
         {showSaveMenu && (
           <div className="absolute right-0 top-full mt-1 bg-gray-700 border border-gray-600 rounded shadow-lg z-50 min-w-40">
-            <button onClick={() => { handleQuickSave(); setShowSaveMenu(false) }}
+            <button onClick={() => { handleServerSave(); setShowSaveMenu(false) }}
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600">
-              Save Project
+              Save to Server
             </button>
-            <button onClick={handleSaveAs}
+            <button onClick={handleServerSaveAs}
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600">
-              Save As...
+              Save As New...
             </button>
             <div className="h-px bg-gray-600" />
+            <button onClick={() => { handleQuickSave(); setShowSaveMenu(false) }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-gray-400">
+              Save to Browser
+            </button>
             <button onClick={() => { handleSaveFile(); setShowSaveMenu(false) }}
-              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600">
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-gray-400">
               Export to File
             </button>
           </div>
@@ -225,13 +332,61 @@ export default function TopBar({ canvasSize }) {
           Load
         </button>
         {showLoadMenu && (
-          <div className="absolute right-0 top-full mt-1 bg-gray-700 border border-gray-600 rounded shadow-lg z-50 min-w-52 max-h-60 overflow-y-auto">
-            <button onClick={() => { loadInputRef.current?.click(); setShowLoadMenu(false) }}
-              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 border-b border-gray-600">
-              Load from File...
-            </button>
+          <div className="absolute right-0 top-full mt-1 bg-gray-700 border border-gray-600 rounded shadow-lg z-50 min-w-64 max-h-[70vh] overflow-y-auto">
+            {/* Server projects */}
+            <div className="px-3 py-1.5 text-[10px] text-gray-400 uppercase tracking-wide border-b border-gray-600">
+              Server Projects
+            </div>
+            {serverProjects.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-500">No server projects</div>
+            ) : (
+              serverProjects.map(p => (
+                <div key={p.id} className="px-3 py-1.5 hover:bg-gray-600 group">
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleServerLoad(p.id)}
+                      className="flex-1 text-left text-xs truncate"
+                    >
+                      <span className="text-white">{p.name}</span>
+                      {p.shared_from && (
+                        <span className="text-blue-400 ml-1 text-[10px]">from {p.shared_from}</span>
+                      )}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleServerDelete(p.id) }}
+                      className="text-red-400 hover:text-red-300 text-[10px] opacity-0 group-hover:opacity-100"
+                    >
+                      &#x2715;
+                    </button>
+                  </div>
+                  {/* Share row */}
+                  <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <input
+                      placeholder="Share to username..."
+                      value={shareUsername}
+                      onChange={e => setShareUsername(e.target.value)}
+                      onClick={e => e.stopPropagation()}
+                      className="flex-1 px-1.5 py-0.5 bg-gray-800 text-white rounded text-[10px] border border-gray-600 focus:outline-none focus:border-blue-500"
+                    />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleShare(p.id) }}
+                      className="text-blue-400 hover:text-blue-300 text-[10px] px-1"
+                    >
+                      Share
+                    </button>
+                  </div>
+                  {shareError && <div className="text-red-400 text-[10px] mt-0.5">{shareError}</div>}
+                  {shareSuccess && <div className="text-green-400 text-[10px] mt-0.5">{shareSuccess}</div>}
+                </div>
+              ))
+            )}
+
+            {/* Browser saves */}
+            <div className="px-3 py-1.5 text-[10px] text-gray-400 uppercase tracking-wide border-b border-t border-gray-600 mt-1">
+              Browser Saves
+            </div>
             {Object.keys(savedProjects).length === 0 ? (
-              <div className="px-3 py-2 text-xs text-gray-400">No saved projects</div>
+              <div className="px-3 py-2 text-xs text-gray-500">No browser saves</div>
             ) : (
               Object.entries(savedProjects).map(([name, data]) => (
                 <div key={name} className="flex items-center gap-1 px-3 py-1.5 hover:bg-gray-600 group">
@@ -257,6 +412,12 @@ export default function TopBar({ canvasSize }) {
                 </div>
               ))
             )}
+
+            <div className="border-t border-gray-600" />
+            <button onClick={() => { loadInputRef.current?.click(); setShowLoadMenu(false) }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-gray-400">
+              Load from File...
+            </button>
           </div>
         )}
       </div>
@@ -271,6 +432,9 @@ export default function TopBar({ canvasSize }) {
         className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs">
         Clear All
       </button>
+
+      <div className="h-5 w-px bg-gray-600" />
+      <UserMenu />
 
       {/* Click away to close menus */}
       {(showSaveMenu || showLoadMenu) && (

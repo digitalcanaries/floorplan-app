@@ -2,6 +2,14 @@ services:
   floorplan:
     build: .
     ports:
-      - "3080:80"
+      - "3080:3080"
+    volumes:
+      - floorplan-data:/app/data
     restart: unless-stopped
     container_name: floorplan-app
+    environment:
+      - JWT_SECRET=floorplan-secret-key-change-me
+      - ADMIN_PASSWORD=admin
+
+volumes:
+  floorplan-data:
