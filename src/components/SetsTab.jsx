@@ -273,6 +273,7 @@ export default function SetsTab() {
           <div key={s.id}>
             <div
               onClick={() => setSelectedSetId(s.id === selectedSetId ? null : s.id)}
+              title={`${s.name} — ${s.width}${unit} x ${s.height}${unit}${s.category && s.category !== 'Set' ? ` [${s.category}]` : ''}${s.wallGap > 0 ? ` Gap: ${s.wallGap}${unit}` : ''}${s.lockedToPdf ? ' [Locked]' : ''}${s.noCut ? ' [No Cut]' : ''}${s.rotation ? ` ${s.rotation}\u00B0` : ''}`}
               className={`flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer text-sm
                 ${s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
                 ${s.lockedToPdf ? 'border border-amber-600/40' : ''}`}
