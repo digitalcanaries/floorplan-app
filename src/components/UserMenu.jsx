@@ -2,12 +2,14 @@ import { useState, useRef, useEffect } from 'react'
 import useAuthStore from '../authStore.js'
 import { apiFetch } from '../api.js'
 import ChangePasswordModal from './ChangePasswordModal.jsx'
+import HelpGuide from './HelpGuide.jsx'
 
 export default function UserMenu() {
   const { user, logout } = useAuthStore()
   const [open, setOpen] = useState(false)
   const [showAdmin, setShowAdmin] = useState(false)
   const [showChangePassword, setShowChangePassword] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const menuRef = useRef(null)
 
   useEffect(() => {
@@ -30,6 +32,13 @@ export default function UserMenu() {
 
       {open && (
         <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded shadow-xl z-50 min-w-[160px]">
+          <button
+            onClick={() => { setShowHelp(true); setOpen(false) }}
+            className="w-full text-left px-4 py-2 text-sm text-indigo-300 hover:bg-gray-700 transition-colors"
+          >
+            Help &amp; User Guide
+          </button>
+          <hr className="border-gray-700" />
           <button
             onClick={() => { setShowChangePassword(true); setOpen(false) }}
             className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 transition-colors"
@@ -59,6 +68,7 @@ export default function UserMenu() {
       )}
 
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+      {showHelp && <HelpGuide onClose={() => setShowHelp(false)} />}
     </div>
   )
 }

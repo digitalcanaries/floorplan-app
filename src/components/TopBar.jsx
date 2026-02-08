@@ -4,6 +4,7 @@ import { autoLayout, tryAlternate } from '../engine/autoLayout.js'
 import { apiFetch } from '../api.js'
 import useAuthStore from '../authStore.js'
 import UserMenu from './UserMenu.jsx'
+import HelpGuide from './HelpGuide.jsx'
 
 export default function TopBar({ canvasSize }) {
   const {
@@ -29,6 +30,7 @@ export default function TopBar({ canvasSize }) {
   const [shareError, setShareError] = useState(null)
   const [shareSuccess, setShareSuccess] = useState(null)
   const { user } = useAuthStore()
+  const [showHelp, setShowHelp] = useState(false)
 
   // Flash the autosave indicator briefly when lastSaved changes
   useEffect(() => {
@@ -449,8 +451,15 @@ export default function TopBar({ canvasSize }) {
         Clear All
       </button>
 
+      <button onClick={() => setShowHelp(true)}
+        className="px-2 py-1 bg-gray-700 hover:bg-indigo-600 rounded text-xs font-bold" title="Help & User Guide">
+        ?
+      </button>
+
       <div className="h-5 w-px bg-gray-600" />
       <UserMenu />
+
+      {showHelp && <HelpGuide onClose={() => setShowHelp(false)} />}
 
       {/* Click away to close menus */}
       {(showSaveMenu || showLoadMenu) && (
