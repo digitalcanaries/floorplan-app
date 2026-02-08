@@ -111,7 +111,23 @@ const sections = [
     content: [
       {
         heading: 'Global Labels Toggle',
-        text: 'The "Labels" checkbox in the toolbar shows/hides all set labels on the canvas (name, dimensions, category badge, lock icon, rotation).',
+        text: 'The "Labels" checkbox in the toolbar shows/hides all set labels on the canvas (name, dimensions, category badge, rotation).',
+      },
+      {
+        heading: 'Label Display Mode',
+        text: 'When labels are enabled, use the dropdown next to the Labels checkbox to choose how labels are displayed: "On Sets" places labels directly on each set, "Right Side" moves all labels to the right margin with arrow lines, and "Left Side" moves them to the left margin.',
+      },
+      {
+        heading: 'Callout Mode (Right/Left Side)',
+        text: 'In callout mode, labels are stacked vertically along the chosen margin. Each label is connected to its set by a colour-coded dashed line with an arrowhead. This provides a clean architectural drawing style, ideal for printing or when sets are too small for readable labels.',
+      },
+      {
+        heading: 'Per-Set Label Position',
+        text: 'When in "On Sets" mode, each set has a position dropdown (TL, T, TR, L, C, R, BL, B, BR) in the sidebar to place the label at top-left, top, top-right, left, center, right, bottom-left, bottom, or bottom-right within the set.',
+      },
+      {
+        heading: 'Bulk Label Position',
+        text: 'When multiple sets are selected, use the "Label pos" dropdown in the bulk actions bar to change the label position for all selected sets at once.',
       },
       {
         heading: 'Per-Set Label Toggle',

@@ -10,7 +10,7 @@ export default function TopBar({ canvasSize }) {
   const {
     sets, rules, pixelsPerUnit, setSets, pdfRotation, setPdfRotation,
     gridVisible, setGridVisible, snapToGrid, setSnapToGrid, snapToSets, setSnapToSets,
-    labelsVisible, setLabelsVisible, showOverlaps, setShowOverlaps,
+    labelsVisible, setLabelsVisible, labelMode, setLabelMode, showOverlaps, setShowOverlaps,
     exportProject, importProject, clearAll,
     calibrating, setCalibrating,
     projectName, setProjectName, lastSaved,
@@ -285,6 +285,16 @@ export default function TopBar({ canvasSize }) {
         <input type="checkbox" checked={labelsVisible} onChange={e => setLabelsVisible(e.target.checked)} />
         Labels
       </label>
+
+      {labelsVisible && (
+        <select value={labelMode} onChange={e => setLabelMode(e.target.value)}
+          className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
+          title="Label display mode">
+          <option value="inline">On Sets</option>
+          <option value="callout-right">Right Side</option>
+          <option value="callout-left">Left Side</option>
+        </select>
+      )}
 
       <label className="flex items-center gap-1 text-xs cursor-pointer">
         <input type="checkbox" checked={showOverlaps} onChange={e => setShowOverlaps(e.target.checked)} />

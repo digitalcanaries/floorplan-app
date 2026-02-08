@@ -33,6 +33,7 @@ const useStore = create((set, get) => ({
   snapToSets: saved?.snapToSets ?? true,
   gridSize: saved?.gridSize || 50,
   labelsVisible: saved?.labelsVisible ?? true,
+  labelMode: saved?.labelMode ?? 'inline',
   showOverlaps: saved?.showOverlaps ?? true,
 
   // Project info
@@ -91,6 +92,10 @@ const useStore = create((set, get) => ({
     set({ labelsVisible: v })
     get().autosave()
   },
+  setLabelMode: (mode) => {
+    set({ labelMode: mode })
+    get().autosave()
+  },
   setShowOverlaps: (v) => {
     set({ showOverlaps: v })
     get().autosave()
@@ -124,6 +129,7 @@ const useStore = create((set, get) => ({
     const newSet = {
       ...s, id, x: 100, y: 100, rotation: 0, lockedToPdf: false, onPlan: true,
       category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
+      labelPosition: s.labelPosition || 'top-left',
       wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
     }
     set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
@@ -141,6 +147,7 @@ const useStore = create((set, get) => ({
       lockedToPdf: false,
       onPlan: true,
       category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
+      labelPosition: s.labelPosition || 'top-left',
       wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
     }))
     set({
@@ -419,6 +426,7 @@ const useStore = create((set, get) => ({
       snapToSets: state.snapToSets,
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
+      labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -447,6 +455,7 @@ const useStore = create((set, get) => ({
       snapToSets: state.snapToSets,
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
+      labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -497,6 +506,7 @@ const useStore = create((set, get) => ({
       snapToSets: state.snapToSets,
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
+      labelMode: state.labelMode,
       showOverlaps: state.showOverlaps,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -518,6 +528,7 @@ const useStore = create((set, get) => ({
       snapToSets: data.snapToSets ?? true,
       gridSize: data.gridSize || 50,
       labelsVisible: data.labelsVisible ?? true,
+      labelMode: data.labelMode ?? 'inline',
       showOverlaps: data.showOverlaps ?? true,
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,

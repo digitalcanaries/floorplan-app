@@ -33,6 +33,7 @@ export default function SetsTab() {
     duplicateSet, removeSetFromPlan, addSetToPlan, clearCutouts,
     hideSet, showSet, cutIntoSet,
     bringForward, sendBackward, bringToFront, sendToBack,
+    labelMode,
   } = useStore()
   const [form, setForm] = useState({
     name: '', width: '', height: '', color: COLORS[0],
@@ -519,6 +520,32 @@ export default function SetsTab() {
             </div>
           )}
 
+          {/* Bulk label position */}
+          {labelMode === 'inline' && (
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-gray-400">Label pos:</span>
+              <select defaultValue=""
+                onChange={e => {
+                  if (e.target.value) {
+                    for (const id of multiSelected) updateSet(id, { labelPosition: e.target.value })
+                    e.target.value = ''
+                  }
+                }}
+                className="text-[10px] bg-gray-700 border border-gray-600 rounded text-gray-300 px-1 py-0.5">
+                <option value="" disabled>Choose...</option>
+                <option value="top-left">Top Left</option>
+                <option value="top">Top</option>
+                <option value="top-right">Top Right</option>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+                <option value="bottom-left">Bottom Left</option>
+                <option value="bottom">Bottom</option>
+                <option value="bottom-right">Bottom Right</option>
+              </select>
+            </div>
+          )}
+
           {/* Bulk actions row */}
           <div className="flex gap-1 flex-wrap">
             <button onClick={() => bulkSetNoCut(true)}
@@ -649,6 +676,25 @@ export default function SetsTab() {
                 title={s.labelHidden ? 'Show label' : 'Hide label'}>
                 Aa
               </button>
+
+              {/* Label position (only in inline mode) */}
+              {!s.labelHidden && labelMode === 'inline' && (
+                <select value={s.labelPosition || 'top-left'}
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => { e.stopPropagation(); updateSet(s.id, { labelPosition: e.target.value }) }}
+                  className="text-[9px] bg-gray-700 border border-gray-600 rounded text-gray-400 px-0.5 py-0 w-8"
+                  title="Label position">
+                  <option value="top-left">TL</option>
+                  <option value="top">T</option>
+                  <option value="top-right">TR</option>
+                  <option value="left">L</option>
+                  <option value="center">C</option>
+                  <option value="right">R</option>
+                  <option value="bottom-left">BL</option>
+                  <option value="bottom">B</option>
+                  <option value="bottom-right">BR</option>
+                </select>
+              )}
 
               {/* Duplicate */}
               <button onClick={(e) => { e.stopPropagation(); duplicateSet(s.id) }}

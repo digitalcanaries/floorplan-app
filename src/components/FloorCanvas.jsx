@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
-import { getAABB, getOverlapRect, buildCutPolygon } from '../engine/geometry.js'
+import { getAABB, getOverlapRect, buildCutPolygon, getLabelPosition } from '../engine/geometry.js'
 
 const SET_PREFIX = 'set-rect-'
 const LABEL_PREFIX = 'set-label-'
@@ -9,6 +9,7 @@ const RULE_PREFIX = 'rule-line-'
 const OVERLAP_PREFIX = 'overlap-zone-'
 const CUTAWAY_PREFIX = 'cutaway-ghost-'
 const GAP_PREFIX = 'wall-gap-'
+const LEADER_PREFIX = 'leader-line-'
 const SNAP_LINE_NAME = 'snap-guide-line'
 const TOOLTIP_NAME = 'hover-tooltip'
 const TOOLTIP_BG_NAME = 'hover-tooltip-bg'
@@ -25,7 +26,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     pdfImage, pdfRotation, pdfPosition, setPdfPosition,
     pixelsPerUnit, setPixelsPerUnit,
     gridVisible, snapToGrid, snapToSets, gridSize,
-    labelsVisible, showOverlaps,
+    labelsVisible, labelMode, showOverlaps,
     sets, updateSet, selectedSetId, setSelectedSetId,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
@@ -368,6 +369,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         o.name?.startsWith(OVERLAP_PREFIX) ||
         o.name?.startsWith(CUTAWAY_PREFIX) ||
         o.name?.startsWith(GAP_PREFIX) ||
+        o.name?.startsWith(LEADER_PREFIX) ||
         o.name === SNAP_LINE_NAME
       )
       .forEach(o => fc.remove(o))
@@ -623,16 +625,22 @@ export default function FloorCanvas({ onCanvasSize }) {
         fc.add(gapZone)
       }
 
-      // Labels — only if global labelsVisible is on and per-set labelHidden is off
-      if (labelsVisible && !s.labelHidden) {
+      // Labels — inline mode only (callout mode renders labels separately below)
+      if (labelsVisible && !s.labelHidden && labelMode === 'inline') {
         const labelFontSize = Math.min(12, Math.max(8, w / 8))
+        const dimFontSize = Math.min(10, labelFontSize - 1)
+        const catHeight = (s.category && s.category !== 'Set') ? 8 : 0
+        const totalHeight = labelFontSize + 2 + dimFontSize + (catHeight > 0 ? 2 + catHeight : 0)
+        const pos = getLabelPosition({ x: s.x, y: s.y, w, h }, s.labelPosition || 'top-left', totalHeight)
+
         const label = new fabric.FabricText(s.name, {
-          left: s.x + 4,
-          top: s.y + 4,
+          left: pos.left,
+          top: pos.top,
           fontSize: labelFontSize,
           fill: '#ffffff',
           fontFamily: 'system-ui, sans-serif',
           fontWeight: 'bold',
+          originX: pos.originX,
           selectable: false,
           evented: false,
           name: LABEL_PREFIX + s.id,
@@ -641,11 +649,12 @@ export default function FloorCanvas({ onCanvasSize }) {
         fc.add(label)
 
         const dimLabel = new fabric.FabricText(`${s.width}x${s.height}`, {
-          left: s.x + 4,
-          top: s.y + 4 + labelFontSize + 2,
-          fontSize: Math.min(10, labelFontSize - 1),
+          left: pos.left,
+          top: pos.top + labelFontSize + 2,
+          fontSize: dimFontSize,
           fill: '#ffffffaa',
           fontFamily: 'system-ui, sans-serif',
+          originX: pos.originX,
           selectable: false,
           evented: false,
           name: LABEL_PREFIX + s.id + '-dim',
@@ -655,28 +664,17 @@ export default function FloorCanvas({ onCanvasSize }) {
         // Category badge for non-Set types
         if (s.category && s.category !== 'Set') {
           const catLabel = new fabric.FabricText(s.category, {
-            left: s.x + 4,
-            top: s.y + 4 + labelFontSize + 2 + Math.min(10, labelFontSize - 1) + 2,
+            left: pos.left,
+            top: pos.top + labelFontSize + 2 + dimFontSize + 2,
             fontSize: 8,
             fill: '#fbbf24aa',
             fontFamily: 'system-ui, sans-serif',
+            originX: pos.originX,
             selectable: false,
             evented: false,
             name: LABEL_PREFIX + s.id + '-cat',
           })
           fc.add(catLabel)
-        }
-
-        if (isLocked) {
-          const pinIcon = new fabric.FabricText('\u{1F4CC}', {
-            left: s.x + w - 18,
-            top: s.y + 2,
-            fontSize: 13,
-            selectable: false,
-            evented: false,
-            name: LABEL_PREFIX + s.id + '-pin',
-          })
-          fc.add(pinIcon)
         }
 
         if (s.rotation && s.rotation !== 0) {
@@ -737,8 +735,146 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.add(lockIcon)
     }
 
+    // Callout mode — labels stacked on left or right margin with leader lines
+    if (labelsVisible && labelMode !== 'inline') {
+      const side = labelMode === 'callout-right' ? 'right' : 'left'
+      const canvasW = fc.getWidth()
+      const calloutSets = visibleSets.filter(s => !s.labelHidden)
+        .map(s => ({ ...s, aabb: getAABB(s, ppu) }))
+        .sort((a, b) => a.aabb.y - b.aabb.y)
+
+      const fontSize = 11
+      const dimFontSize = 9
+      const lineHeight = fontSize + 2 + dimFontSize + 4
+      const marginWidth = 160
+      const marginPad = 16
+      const startY = 20
+
+      // Calculate gap - reduce if too many labels
+      let gap = 8
+      const totalNeeded = calloutSets.length * lineHeight + (calloutSets.length - 1) * gap
+      const canvasH = fc.getHeight()
+      if (totalNeeded > canvasH - 40) {
+        gap = Math.max(2, (canvasH - 40 - calloutSets.length * lineHeight) / Math.max(1, calloutSets.length - 1))
+      }
+
+      calloutSets.forEach((s, i) => {
+        const labelY = startY + i * (lineHeight + gap)
+        const labelX = side === 'right' ? canvasW - marginPad : marginPad
+        const originX = side === 'right' ? 'right' : 'left'
+
+        // Background rect for readability
+        const bgWidth = marginWidth
+        const bgX = side === 'right' ? canvasW - marginPad - bgWidth : marginPad
+        const bg = new fabric.Rect({
+          left: bgX,
+          top: labelY - 2,
+          width: bgWidth,
+          height: lineHeight,
+          fill: 'rgba(26, 26, 46, 0.85)',
+          stroke: s.color + '60',
+          strokeWidth: 1,
+          rx: 3,
+          ry: 3,
+          selectable: false,
+          evented: false,
+          name: LABEL_PREFIX + s.id + '-callout-bg',
+        })
+        fc.add(bg)
+
+        // Name label
+        const nameLabel = new fabric.FabricText(s.name, {
+          left: labelX,
+          top: labelY,
+          fontSize,
+          fill: '#ffffff',
+          fontFamily: 'system-ui, sans-serif',
+          fontWeight: 'bold',
+          originX,
+          selectable: false,
+          evented: false,
+          name: LABEL_PREFIX + s.id + '-callout',
+          shadow: new fabric.Shadow({ color: '#000000', blur: 2 }),
+        })
+        fc.add(nameLabel)
+
+        // Dimensions
+        const dimText = `${s.width}x${s.height}${s.category && s.category !== 'Set' ? '  ' + s.category : ''}`
+        const dimLabel = new fabric.FabricText(dimText, {
+          left: labelX,
+          top: labelY + fontSize + 2,
+          fontSize: dimFontSize,
+          fill: '#ffffffaa',
+          fontFamily: 'system-ui, sans-serif',
+          originX,
+          selectable: false,
+          evented: false,
+          name: LABEL_PREFIX + s.id + '-callout-dim',
+        })
+        fc.add(dimLabel)
+
+        // Leader line from label to set center
+        const setCenterX = s.aabb.x + s.aabb.w / 2
+        const setCenterY = s.aabb.y + s.aabb.h / 2
+        const lineStartX = side === 'right' ? canvasW - marginPad - marginWidth : marginPad + marginWidth
+        const lineStartY = labelY + lineHeight / 2
+
+        const leaderLine = new fabric.Line(
+          [lineStartX, lineStartY, setCenterX, setCenterY],
+          {
+            stroke: s.color + 'CC',
+            strokeWidth: 1,
+            strokeDashArray: [4, 3],
+            selectable: false,
+            evented: false,
+            name: LEADER_PREFIX + s.id,
+          }
+        )
+        fc.add(leaderLine)
+
+        // Arrowhead at set end
+        const dx = setCenterX - lineStartX
+        const dy = setCenterY - lineStartY
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI)
+        const arrowSize = 7
+        const arrowhead = new fabric.Polygon(
+          [
+            { x: 0, y: 0 },
+            { x: -arrowSize, y: -arrowSize / 2.5 },
+            { x: -arrowSize, y: arrowSize / 2.5 },
+          ],
+          {
+            left: setCenterX,
+            top: setCenterY,
+            originX: 'center',
+            originY: 'center',
+            angle,
+            fill: s.color + 'CC',
+            selectable: false,
+            evented: false,
+            name: LEADER_PREFIX + s.id + '-arrow',
+          }
+        )
+        fc.add(arrowhead)
+
+        // Small dot at label end
+        const dot = new fabric.Circle({
+          left: lineStartX,
+          top: lineStartY,
+          radius: 2.5,
+          originX: 'center',
+          originY: 'center',
+          fill: s.color + 'CC',
+          selectable: false,
+          evented: false,
+          name: LEADER_PREFIX + s.id + '-dot',
+        })
+        fc.add(dot)
+      })
+    }
+
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, showOverlaps])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps])
 
   useEffect(() => {
     syncSets()

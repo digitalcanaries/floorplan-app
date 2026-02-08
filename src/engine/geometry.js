@@ -257,6 +257,27 @@ function traceBoundary(grid, xs, ys, cols, rows) {
   return points
 }
 
+/**
+ * Get label position relative to a set's bounding box.
+ * Returns { left, top, originX } for fabric.js text positioning.
+ */
+export function getLabelPosition(aabb, position, totalHeight) {
+  const { x, y, w, h } = aabb
+  const pad = 4
+  switch (position) {
+    case 'center':       return { left: x + w / 2, top: y + (h - totalHeight) / 2, originX: 'center' }
+    case 'top':          return { left: x + w / 2, top: y + pad, originX: 'center' }
+    case 'top-right':    return { left: x + w - pad, top: y + pad, originX: 'right' }
+    case 'left':         return { left: x + pad, top: y + (h - totalHeight) / 2, originX: 'left' }
+    case 'right':        return { left: x + w - pad, top: y + (h - totalHeight) / 2, originX: 'right' }
+    case 'bottom-left':  return { left: x + pad, top: y + h - pad - totalHeight, originX: 'left' }
+    case 'bottom':       return { left: x + w / 2, top: y + h - pad - totalHeight, originX: 'center' }
+    case 'bottom-right': return { left: x + w - pad, top: y + h - pad - totalHeight, originX: 'right' }
+    case 'top-left':
+    default:             return { left: x + pad, top: y + pad, originX: 'left' }
+  }
+}
+
 function round(v) {
   return Math.round(v * 1000) / 1000
 }
