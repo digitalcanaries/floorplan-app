@@ -63,6 +63,30 @@ export function drawComponentIcon(iconType, set, w, h, ppu, properties = {}, vie
       return drawColumnIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     case 'stair':
       return drawStairIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'sink':
+      return drawSinkIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'stove':
+      return drawStoveIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'fridge':
+      return drawFridgeIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'counter':
+      return drawCounterIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'bathtub':
+      return drawBathtubIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'toilet':
+      return drawToiletIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'shower':
+      return drawShowerIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'table':
+      return drawTableIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'sofa':
+      return drawSofaIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'bed':
+      return drawBedIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'fireplace':
+      return drawFireplaceIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
+    case 'cabinet':
+      return drawCabinetIcon(prefix, x, y, w, h, lineColor, fillColor, properties)
     default:
       return []
   }
@@ -1028,6 +1052,565 @@ function drawPlanBayWindowIcon(prefix, x, y, w, h, lineColor, fillColor, props) 
       selectable: false, evented: false,
       name: prefix + 'fill',
     }))
+  }
+
+  return objects
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// ARCHITECTURAL / FURNITURE ICONS — plan-view (top-down) standard symbols
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Sink icon — rectangle with oval basin(s)
+ */
+function drawSinkIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const basins = props.basins || 1
+  const isWide = w >= h
+
+  // Counter outline fill
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: 'transparent',
+    selectable: false, evented: false, name: prefix + 'fill',
+  }))
+
+  if (isWide) {
+    const basinW = (w - 8) / basins
+    const basinH = h * 0.6
+    const basinY = y + (h - basinH) / 2
+    for (let i = 0; i < basins; i++) {
+      const bx = x + 4 + i * basinW
+      objects.push(new fabric.Ellipse({
+        left: bx + 2, top: basinY,
+        rx: (basinW - 4) / 2, ry: basinH / 2,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 1.2,
+        selectable: false, evented: false, name: prefix + 'basin-' + i,
+      }))
+    }
+    // Tap dot at top centre
+    objects.push(new fabric.Circle({
+      left: x + w / 2 - 2, top: y + 3, radius: 2,
+      fill: lineColor, selectable: false, evented: false, name: prefix + 'tap',
+    }))
+  } else {
+    const basinW = w * 0.6
+    const basinH = (h - 8) / basins
+    const basinX = x + (w - basinW) / 2
+    for (let i = 0; i < basins; i++) {
+      const by = y + 4 + i * basinH
+      objects.push(new fabric.Ellipse({
+        left: basinX, top: by + 2,
+        rx: basinW / 2, ry: (basinH - 4) / 2,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 1.2,
+        selectable: false, evented: false, name: prefix + 'basin-' + i,
+      }))
+    }
+    objects.push(new fabric.Circle({
+      left: x + 3, top: y + h / 2 - 2, radius: 2,
+      fill: lineColor, selectable: false, evented: false, name: prefix + 'tap',
+    }))
+  }
+
+  return objects
+}
+
+/**
+ * Stove / Range icon — rectangle with 4 burner circles
+ */
+function drawStoveIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const burners = props.burners || 4
+
+  // Body fill
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: 'transparent',
+    selectable: false, evented: false, name: prefix + 'fill',
+  }))
+
+  // Burner circles in a 2×2 grid (or layout based on burner count)
+  const cols = burners <= 2 ? burners : 2
+  const rows = Math.ceil(burners / cols)
+  const cellW = w / cols
+  const cellH = h / rows
+  const radius = Math.min(cellW, cellH) * 0.3
+
+  let idx = 0
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (idx >= burners) break
+      const cx = x + cellW * c + cellW / 2
+      const cy = y + cellH * r + cellH / 2
+      objects.push(new fabric.Circle({
+        left: cx - radius, top: cy - radius, radius,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 1.2,
+        selectable: false, evented: false, name: prefix + 'burner-' + idx,
+      }))
+      // Inner ring
+      objects.push(new fabric.Circle({
+        left: cx - radius * 0.5, top: cy - radius * 0.5, radius: radius * 0.5,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 0.8,
+        selectable: false, evented: false, name: prefix + 'ring-' + idx,
+      }))
+      idx++
+    }
+  }
+
+  return objects
+}
+
+/**
+ * Fridge / Refrigerator icon — rectangle with inner line for door
+ */
+function drawFridgeIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+    selectable: false, evented: false, name: prefix + 'body',
+  }))
+
+  const isWide = w >= h
+  if (isWide) {
+    // Door line at 1/3
+    const dx = x + w * 0.33
+    objects.push(new fabric.Line(
+      [dx, y + 2, dx, y + h - 2],
+      { stroke: lineColor, strokeWidth: 1, selectable: false, evented: false, name: prefix + 'door' }
+    ))
+    // Handle dot
+    objects.push(new fabric.Circle({
+      left: dx + 3, top: y + h / 2 - 1.5, radius: 1.5,
+      fill: lineColor, selectable: false, evented: false, name: prefix + 'handle',
+    }))
+  } else {
+    const dy = y + h * 0.33
+    objects.push(new fabric.Line(
+      [x + 2, dy, x + w - 2, dy],
+      { stroke: lineColor, strokeWidth: 1, selectable: false, evented: false, name: prefix + 'door' }
+    ))
+    objects.push(new fabric.Circle({
+      left: x + w / 2 - 1.5, top: dy + 3, radius: 1.5,
+      fill: lineColor, selectable: false, evented: false, name: prefix + 'handle',
+    }))
+  }
+
+  return objects
+}
+
+/**
+ * Counter / Worktop icon — filled rectangle with edge line
+ */
+function drawCounterIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
+    selectable: false, evented: false, name: prefix + 'fill',
+  }))
+  return objects
+}
+
+/**
+ * Bathtub icon — rounded rectangle with drain circle
+ */
+function drawBathtubIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+  const inset = Math.min(w, h) * 0.12
+
+  // Outer tub shape
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 1.5,
+    rx: Math.min(w, h) * 0.15, ry: Math.min(w, h) * 0.15,
+    selectable: false, evented: false, name: prefix + 'outer',
+  }))
+
+  // Inner basin
+  objects.push(new fabric.Rect({
+    left: x + inset, top: y + inset,
+    width: w - inset * 2, height: h - inset * 2,
+    fill: 'transparent', stroke: lineColor, strokeWidth: 0.8,
+    rx: Math.min(w, h) * 0.1, ry: Math.min(w, h) * 0.1,
+    selectable: false, evented: false, name: prefix + 'inner',
+  }))
+
+  // Drain circle
+  if (isWide) {
+    objects.push(new fabric.Circle({
+      left: x + w * 0.85 - 3, top: y + h / 2 - 3, radius: 3,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 1,
+      selectable: false, evented: false, name: prefix + 'drain',
+    }))
+    // Tap
+    objects.push(new fabric.Circle({
+      left: x + w * 0.15 - 2, top: y + h / 2 - 2, radius: 2,
+      fill: lineColor, selectable: false, evented: false, name: prefix + 'tap',
+    }))
+  } else {
+    objects.push(new fabric.Circle({
+      left: x + w / 2 - 3, top: y + h * 0.85 - 3, radius: 3,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 1,
+      selectable: false, evented: false, name: prefix + 'drain',
+    }))
+    objects.push(new fabric.Circle({
+      left: x + w / 2 - 2, top: y + h * 0.15 - 2, radius: 2,
+      fill: lineColor, selectable: false, evented: false, name: prefix + 'tap',
+    }))
+  }
+
+  return objects
+}
+
+/**
+ * Toilet icon — tank rectangle + oval bowl
+ */
+function drawToiletIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+
+  if (isWide) {
+    const tankW = w * 0.3
+    // Tank (rectangle at left)
+    objects.push(new fabric.Rect({
+      left: x + 1, top: y + h * 0.15, width: tankW, height: h * 0.7,
+      fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+      selectable: false, evented: false, name: prefix + 'tank',
+    }))
+    // Bowl (ellipse)
+    const bowlRx = (w - tankW - 4) / 2
+    const bowlRy = h * 0.4
+    objects.push(new fabric.Ellipse({
+      left: x + tankW + 2, top: y + h / 2 - bowlRy,
+      rx: bowlRx, ry: bowlRy,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 1.2,
+      selectable: false, evented: false, name: prefix + 'bowl',
+    }))
+  } else {
+    const tankH = h * 0.3
+    // Tank (rectangle at top)
+    objects.push(new fabric.Rect({
+      left: x + w * 0.15, top: y + 1, width: w * 0.7, height: tankH,
+      fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+      selectable: false, evented: false, name: prefix + 'tank',
+    }))
+    // Bowl (ellipse)
+    const bowlRx = w * 0.4
+    const bowlRy = (h - tankH - 4) / 2
+    objects.push(new fabric.Ellipse({
+      left: x + w / 2 - bowlRx, top: y + tankH + 2,
+      rx: bowlRx, ry: bowlRy,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 1.2,
+      selectable: false, evented: false, name: prefix + 'bowl',
+    }))
+  }
+
+  return objects
+}
+
+/**
+ * Shower icon — square with corner drain and water pattern
+ */
+function drawShowerIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+
+  // Shower base
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+    selectable: false, evented: false, name: prefix + 'base',
+  }))
+
+  // Drain circle (centre)
+  const drainR = Math.min(w, h) * 0.06
+  objects.push(new fabric.Circle({
+    left: x + w / 2 - drainR, top: y + h / 2 - drainR, radius: drainR,
+    fill: lineColor, selectable: false, evented: false, name: prefix + 'drain',
+  }))
+
+  // Cross pattern for water/tile indication
+  objects.push(new fabric.Line(
+    [x + 4, y + 4, x + w - 4, y + h - 4],
+    { stroke: lineColor, strokeWidth: 0.5, strokeDashArray: [3, 3], selectable: false, evented: false, name: prefix + 'x1' }
+  ))
+  objects.push(new fabric.Line(
+    [x + w - 4, y + 4, x + 4, y + h - 4],
+    { stroke: lineColor, strokeWidth: 0.5, strokeDashArray: [3, 3], selectable: false, evented: false, name: prefix + 'x2' }
+  ))
+
+  // Shower head indicator (small circle near wall)
+  objects.push(new fabric.Circle({
+    left: x + w / 2 - 3, top: y + 4, radius: 3,
+    fill: 'transparent', stroke: lineColor, strokeWidth: 1,
+    selectable: false, evented: false, name: prefix + 'head',
+  }))
+
+  return objects
+}
+
+/**
+ * Table icon — rectangle or circle outline
+ */
+function drawTableIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const shape = props.shape || 'rect'
+
+  if (shape === 'round') {
+    const cx = x + w / 2
+    const cy = y + h / 2
+    const rx = (w - 4) / 2
+    const ry = (h - 4) / 2
+    objects.push(new fabric.Ellipse({
+      left: cx - rx, top: cy - ry, rx, ry,
+      fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+      selectable: false, evented: false, name: prefix + 'top',
+    }))
+  } else {
+    objects.push(new fabric.Rect({
+      left: x + 2, top: y + 2, width: w - 4, height: h - 4,
+      fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+      selectable: false, evented: false, name: prefix + 'top',
+    }))
+  }
+
+  // Chair indicators (small rectangles around edges)
+  const chairSize = Math.min(w, h) * 0.12
+  const isWide = w >= h
+
+  if (isWide) {
+    // Chairs along top and bottom
+    const count = Math.max(2, Math.floor(w / (chairSize * 4)))
+    const spacing = w / (count + 1)
+    for (let i = 1; i <= count; i++) {
+      const cx = x + spacing * i - chairSize / 2
+      objects.push(new fabric.Rect({
+        left: cx, top: y - chairSize - 1, width: chairSize, height: chairSize,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 0.7,
+        selectable: false, evented: false, name: prefix + 'chair-t-' + i,
+      }))
+      objects.push(new fabric.Rect({
+        left: cx, top: y + h + 1, width: chairSize, height: chairSize,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 0.7,
+        selectable: false, evented: false, name: prefix + 'chair-b-' + i,
+      }))
+    }
+  } else {
+    const count = Math.max(2, Math.floor(h / (chairSize * 4)))
+    const spacing = h / (count + 1)
+    for (let i = 1; i <= count; i++) {
+      const cy = y + spacing * i - chairSize / 2
+      objects.push(new fabric.Rect({
+        left: x - chairSize - 1, top: cy, width: chairSize, height: chairSize,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 0.7,
+        selectable: false, evented: false, name: prefix + 'chair-l-' + i,
+      }))
+      objects.push(new fabric.Rect({
+        left: x + w + 1, top: cy, width: chairSize, height: chairSize,
+        fill: 'transparent', stroke: lineColor, strokeWidth: 0.7,
+        selectable: false, evented: false, name: prefix + 'chair-r-' + i,
+      }))
+    }
+  }
+
+  return objects
+}
+
+/**
+ * Sofa / Couch icon — rectangle with back cushion line
+ */
+function drawSofaIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+  const backDepth = Math.min(w, h) * 0.25
+
+  // Main seat area
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+    rx: 2, ry: 2,
+    selectable: false, evented: false, name: prefix + 'seat',
+  }))
+
+  if (isWide) {
+    // Back cushion along top
+    objects.push(new fabric.Rect({
+      left: x + 2, top: y + 2, width: w - 4, height: backDepth,
+      fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
+      selectable: false, evented: false, name: prefix + 'back',
+    }))
+    // Arm rests
+    objects.push(new fabric.Line(
+      [x + backDepth, y + 2, x + backDepth, y + h - 2],
+      { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'arm-l' }
+    ))
+    objects.push(new fabric.Line(
+      [x + w - backDepth, y + 2, x + w - backDepth, y + h - 2],
+      { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'arm-r' }
+    ))
+  } else {
+    // Back cushion along left
+    objects.push(new fabric.Rect({
+      left: x + 2, top: y + 2, width: backDepth, height: h - 4,
+      fill: fillColor, stroke: lineColor, strokeWidth: 0.8,
+      selectable: false, evented: false, name: prefix + 'back',
+    }))
+    objects.push(new fabric.Line(
+      [x + 2, y + backDepth, x + w - 2, y + backDepth],
+      { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'arm-t' }
+    ))
+    objects.push(new fabric.Line(
+      [x + 2, y + h - backDepth, x + w - 2, y + h - backDepth],
+      { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'arm-b' }
+    ))
+  }
+
+  return objects
+}
+
+/**
+ * Bed icon — rectangle with pillow area
+ */
+function drawBedIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+
+  // Mattress
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+    selectable: false, evented: false, name: prefix + 'mattress',
+  }))
+
+  if (isWide) {
+    // Pillow area at left
+    const pillowW = w * 0.2
+    objects.push(new fabric.Rect({
+      left: x + 3, top: y + 4, width: pillowW, height: h - 8,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 0.8,
+      rx: 3, ry: 3,
+      selectable: false, evented: false, name: prefix + 'pillow',
+    }))
+    // Blanket fold line
+    objects.push(new fabric.Line(
+      [x + pillowW + 8, y + 3, x + pillowW + 8, y + h - 3],
+      { stroke: lineColor, strokeWidth: 0.6, strokeDashArray: [4, 3], selectable: false, evented: false, name: prefix + 'fold' }
+    ))
+  } else {
+    // Pillow area at top
+    const pillowH = h * 0.2
+    objects.push(new fabric.Rect({
+      left: x + 4, top: y + 3, width: w - 8, height: pillowH,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 0.8,
+      rx: 3, ry: 3,
+      selectable: false, evented: false, name: prefix + 'pillow',
+    }))
+    objects.push(new fabric.Line(
+      [x + 3, y + pillowH + 8, x + w - 3, y + pillowH + 8],
+      { stroke: lineColor, strokeWidth: 0.6, strokeDashArray: [4, 3], selectable: false, evented: false, name: prefix + 'fold' }
+    ))
+  }
+
+  return objects
+}
+
+/**
+ * Fireplace icon — rectangle with hearth and opening
+ */
+function drawFireplaceIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const isWide = w >= h
+
+  // Mantle / surround
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 1.5,
+    selectable: false, evented: false, name: prefix + 'surround',
+  }))
+
+  if (isWide) {
+    // Firebox opening (indented rectangle)
+    const fbW = w * 0.6
+    const fbH = h * 0.5
+    objects.push(new fabric.Rect({
+      left: x + (w - fbW) / 2, top: y + 2,
+      width: fbW, height: fbH,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 1,
+      selectable: false, evented: false, name: prefix + 'firebox',
+    }))
+    // Hearth (extends forward)
+    objects.push(new fabric.Line(
+      [x + w * 0.15, y + h - 2, x + w * 0.85, y + h - 2],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'hearth' }
+    ))
+  } else {
+    const fbW = w * 0.5
+    const fbH = h * 0.6
+    objects.push(new fabric.Rect({
+      left: x + 2, top: y + (h - fbH) / 2,
+      width: fbW, height: fbH,
+      fill: 'transparent', stroke: lineColor, strokeWidth: 1,
+      selectable: false, evented: false, name: prefix + 'firebox',
+    }))
+    objects.push(new fabric.Line(
+      [x + w - 2, y + h * 0.15, x + w - 2, y + h * 0.85],
+      { stroke: lineColor, strokeWidth: 2, selectable: false, evented: false, name: prefix + 'hearth' }
+    ))
+  }
+
+  return objects
+}
+
+/**
+ * Cabinet / Wardrobe icon — rectangle with door line(s)
+ */
+function drawCabinetIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
+  const objects = []
+  const doors = props.doors || 2
+
+  objects.push(new fabric.Rect({
+    left: x + 1, top: y + 1, width: w - 2, height: h - 2,
+    fill: fillColor, stroke: lineColor, strokeWidth: 1.2,
+    selectable: false, evented: false, name: prefix + 'body',
+  }))
+
+  const isWide = w >= h
+  if (isWide) {
+    // Vertical door lines
+    for (let i = 1; i < doors; i++) {
+      const dx = x + (w / doors) * i
+      objects.push(new fabric.Line(
+        [dx, y + 2, dx, y + h - 2],
+        { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'door-' + i }
+      ))
+    }
+    // Handle dots
+    for (let i = 0; i < doors; i++) {
+      const hx = x + (w / doors) * i + (w / doors) / 2
+      objects.push(new fabric.Circle({
+        left: hx - 1.5, top: y + h / 2 - 1.5, radius: 1.5,
+        fill: lineColor, selectable: false, evented: false, name: prefix + 'handle-' + i,
+      }))
+    }
+  } else {
+    for (let i = 1; i < doors; i++) {
+      const dy = y + (h / doors) * i
+      objects.push(new fabric.Line(
+        [x + 2, dy, x + w - 2, dy],
+        { stroke: lineColor, strokeWidth: 0.8, selectable: false, evented: false, name: prefix + 'door-' + i }
+      ))
+    }
+    for (let i = 0; i < doors; i++) {
+      const hy = y + (h / doors) * i + (h / doors) / 2
+      objects.push(new fabric.Circle({
+        left: x + w / 2 - 1.5, top: hy - 1.5, radius: 1.5,
+        fill: lineColor, selectable: false, evented: false, name: prefix + 'handle-' + i,
+      }))
+    }
   }
 
   return objects

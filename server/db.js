@@ -132,11 +132,57 @@ if (componentCount.cnt === 0) {
     { category: 'Door', subcategory: 'Arch', name: '6\'×10\' Arch Door', width: 6, height: 0.333, thickness: 0.292, icon_type: 'door-arch', properties: { style: 'arch', depth: 0.333, elevationHeight: 10 } },
 
     // === ARCHITECTURAL ===
-    { category: 'Other', subcategory: 'Column', name: '1\'×1\' Column', width: 1, height: 1, thickness: 1, icon_type: 'column', properties: { shape: 'round' } },
-    { category: 'Other', subcategory: 'Column', name: '1.5\'×1.5\' Column', width: 1.5, height: 1.5, thickness: 1.5, icon_type: 'column', properties: { shape: 'round' } },
-    { category: 'Other', subcategory: 'Column', name: '2\'×2\' Column', width: 2, height: 2, thickness: 2, icon_type: 'column', properties: { shape: 'square' } },
+    { category: 'Other', subcategory: 'Column', name: '1\'×1\' Round Column', width: 1, height: 1, thickness: 1, icon_type: 'column', properties: { shape: 'round' } },
+    { category: 'Other', subcategory: 'Column', name: '1.5\'×1.5\' Round Column', width: 1.5, height: 1.5, thickness: 1.5, icon_type: 'column', properties: { shape: 'round' } },
+    { category: 'Other', subcategory: 'Column', name: '2\'×2\' Square Column', width: 2, height: 2, thickness: 2, icon_type: 'column', properties: { shape: 'square' } },
     { category: 'Other', subcategory: 'Stair', name: '3\'×8\' Staircase', width: 3, height: 8, thickness: 0.75, icon_type: 'stair', properties: { treads: 12 } },
     { category: 'Other', subcategory: 'Stair', name: '4\'×10\' Staircase', width: 4, height: 10, thickness: 0.75, icon_type: 'stair', properties: { treads: 15 } },
+    { category: 'Other', subcategory: 'Stair', name: '4\'×12\' Grand Staircase', width: 4, height: 12, thickness: 0.75, icon_type: 'stair', properties: { treads: 18 } },
+    { category: 'Other', subcategory: 'Fireplace', name: '4\'×2\' Fireplace', width: 4, height: 2, thickness: 2, icon_type: 'fireplace', properties: {} },
+    { category: 'Other', subcategory: 'Fireplace', name: '6\'×3\' Grand Fireplace', width: 6, height: 3, thickness: 3, icon_type: 'fireplace', properties: {} },
+
+    // === KITCHEN ===
+    { category: 'Other', subcategory: 'Kitchen', name: '2\'×2\' Single Sink', width: 2, height: 2, thickness: 0.292, icon_type: 'sink', properties: { basins: 1 } },
+    { category: 'Other', subcategory: 'Kitchen', name: '3\'×2\' Double Sink', width: 3, height: 2, thickness: 0.292, icon_type: 'sink', properties: { basins: 2 } },
+    { category: 'Other', subcategory: 'Kitchen', name: '2.5\'×2\' Stove (4 Burner)', width: 2.5, height: 2, thickness: 0.292, icon_type: 'stove', properties: { burners: 4 } },
+    { category: 'Other', subcategory: 'Kitchen', name: '3\'×2\' Stove (6 Burner)', width: 3, height: 2, thickness: 0.292, icon_type: 'stove', properties: { burners: 6 } },
+    { category: 'Other', subcategory: 'Kitchen', name: '3\'×2.5\' Refrigerator', width: 3, height: 2.5, thickness: 0.292, icon_type: 'fridge', properties: {} },
+    { category: 'Other', subcategory: 'Kitchen', name: '2.5\'×2\' Compact Fridge', width: 2.5, height: 2, thickness: 0.292, icon_type: 'fridge', properties: {} },
+    { category: 'Other', subcategory: 'Kitchen', name: '4\'×2\' Counter Section', width: 4, height: 2, thickness: 0.292, icon_type: 'counter', properties: {} },
+    { category: 'Other', subcategory: 'Kitchen', name: '6\'×2\' Counter Section', width: 6, height: 2, thickness: 0.292, icon_type: 'counter', properties: {} },
+    { category: 'Other', subcategory: 'Kitchen', name: '8\'×2\' Counter Section', width: 8, height: 2, thickness: 0.292, icon_type: 'counter', properties: {} },
+    { category: 'Other', subcategory: 'Kitchen', name: '3\'×3\' Kitchen Island', width: 3, height: 3, thickness: 3, icon_type: 'counter', properties: {} },
+    { category: 'Other', subcategory: 'Kitchen', name: '4\'×3\' Kitchen Island', width: 4, height: 3, thickness: 3, icon_type: 'counter', properties: {} },
+
+    // === BATHROOM ===
+    { category: 'Other', subcategory: 'Bathroom', name: '5\'×2.5\' Bathtub', width: 5, height: 2.5, thickness: 2, icon_type: 'bathtub', properties: {} },
+    { category: 'Other', subcategory: 'Bathroom', name: '6\'×3\' Bathtub', width: 6, height: 3, thickness: 2.5, icon_type: 'bathtub', properties: {} },
+    { category: 'Other', subcategory: 'Bathroom', name: '1.5\'×2.5\' Toilet', width: 1.5, height: 2.5, thickness: 0.5, icon_type: 'toilet', properties: {} },
+    { category: 'Other', subcategory: 'Bathroom', name: '3\'×3\' Shower Stall', width: 3, height: 3, thickness: 3, icon_type: 'shower', properties: {} },
+    { category: 'Other', subcategory: 'Bathroom', name: '4\'×3\' Shower', width: 4, height: 3, thickness: 3, icon_type: 'shower', properties: {} },
+    { category: 'Other', subcategory: 'Bathroom', name: '4\'×4\' Walk-In Shower', width: 4, height: 4, thickness: 4, icon_type: 'shower', properties: {} },
+    { category: 'Other', subcategory: 'Bathroom', name: '2\'×1.5\' Vanity Sink', width: 2, height: 1.5, thickness: 0.292, icon_type: 'sink', properties: { basins: 1 } },
+    { category: 'Other', subcategory: 'Bathroom', name: '4\'×2\' Double Vanity', width: 4, height: 2, thickness: 0.292, icon_type: 'sink', properties: { basins: 2 } },
+
+    // === FURNITURE ===
+    { category: 'Other', subcategory: 'Furniture', name: '4\'×3\' Dining Table', width: 4, height: 3, thickness: 2.5, icon_type: 'table', properties: { shape: 'rect' } },
+    { category: 'Other', subcategory: 'Furniture', name: '6\'×3\' Dining Table', width: 6, height: 3, thickness: 2.5, icon_type: 'table', properties: { shape: 'rect' } },
+    { category: 'Other', subcategory: 'Furniture', name: '8\'×4\' Conference Table', width: 8, height: 4, thickness: 2.5, icon_type: 'table', properties: { shape: 'rect' } },
+    { category: 'Other', subcategory: 'Furniture', name: '4\' Round Table', width: 4, height: 4, thickness: 2.5, icon_type: 'table', properties: { shape: 'round' } },
+    { category: 'Other', subcategory: 'Furniture', name: '5\' Round Table', width: 5, height: 5, thickness: 2.5, icon_type: 'table', properties: { shape: 'round' } },
+    { category: 'Other', subcategory: 'Furniture', name: '3\'×2\' Desk', width: 3, height: 2, thickness: 2.5, icon_type: 'table', properties: { shape: 'rect' } },
+    { category: 'Other', subcategory: 'Furniture', name: '5\'×2\' Desk', width: 5, height: 2, thickness: 2.5, icon_type: 'table', properties: { shape: 'rect' } },
+    { category: 'Other', subcategory: 'Furniture', name: '6\'×3\' Sofa', width: 6, height: 3, thickness: 3, icon_type: 'sofa', properties: {} },
+    { category: 'Other', subcategory: 'Furniture', name: '7\'×3\' Sofa', width: 7, height: 3, thickness: 3, icon_type: 'sofa', properties: {} },
+    { category: 'Other', subcategory: 'Furniture', name: '8\'×3\' Sectional Sofa', width: 8, height: 3, thickness: 3, icon_type: 'sofa', properties: {} },
+    { category: 'Other', subcategory: 'Furniture', name: '5\'×6.5\' Queen Bed', width: 5, height: 6.5, thickness: 2, icon_type: 'bed', properties: {} },
+    { category: 'Other', subcategory: 'Furniture', name: '6.5\'×6.5\' King Bed', width: 6.5, height: 6.5, thickness: 2, icon_type: 'bed', properties: {} },
+    { category: 'Other', subcategory: 'Furniture', name: '3.25\'×6.5\' Twin Bed', width: 3.25, height: 6.5, thickness: 2, icon_type: 'bed', properties: {} },
+    { category: 'Other', subcategory: 'Furniture', name: '4.5\'×6.5\' Full Bed', width: 4.5, height: 6.5, thickness: 2, icon_type: 'bed', properties: {} },
+    { category: 'Other', subcategory: 'Furniture', name: '3\'×6\' 2-Door Wardrobe', width: 3, height: 2, thickness: 6, icon_type: 'cabinet', properties: { doors: 2 } },
+    { category: 'Other', subcategory: 'Furniture', name: '5\'×2\' 3-Door Wardrobe', width: 5, height: 2, thickness: 6, icon_type: 'cabinet', properties: { doors: 3 } },
+    { category: 'Other', subcategory: 'Furniture', name: '2\'×1.5\' Nightstand', width: 2, height: 1.5, thickness: 2.5, icon_type: 'cabinet', properties: { doors: 1 } },
+    { category: 'Other', subcategory: 'Furniture', name: '3\'×1.5\' Bookshelf', width: 3, height: 1, thickness: 6, icon_type: 'cabinet', properties: { doors: 3 } },
   ])
   console.log('Default component types seeded')
 }
