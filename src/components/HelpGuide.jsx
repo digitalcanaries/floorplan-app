@@ -147,13 +147,75 @@ const sections = [
       },
       {
         heading: 'Hover Tooltips',
-        text: 'Hover over any set on the canvas to see a tooltip with its name, dimensions, category, access gap, and lock status.',
+        text: 'Hover over any set on the canvas to see a tooltip with its name, dimensions, category, access gap, and lock status. You can toggle hover tooltips on/off in the Layers tab under Display Options, or leave them on for quick reference.',
+      },
+      {
+        heading: 'Dimension Lines',
+        text: 'Toggle "Dims" in the toolbar (or in Layers > Display Options) to show dimension lines. Each set displays its width and height in your chosen unit. Distance lines also appear between adjacent sets showing the gap between them.',
+      },
+    ],
+  },
+  {
+    title: 'Layers Panel',
+    icon: '6',
+    content: [
+      {
+        heading: 'Opening the Layers Tab',
+        text: 'Click the "Layers" tab in the sidebar to access the layers panel. This provides display options, category layer visibility, group management, annotations, and area calculations.',
+      },
+      {
+        heading: 'Display Options',
+        text: 'Toggle Grid, Labels, Overlaps, Dimension Lines, and Hover Tooltips from the Display Options section at the top of the Layers tab.',
+      },
+      {
+        heading: 'Category Layer Visibility',
+        text: 'Each category (Set, Wall, Window, Door, Furniture, Bathroom, Stair, Column, Other) has a visibility toggle. Click the eye icon to hide/show all sets in that category on the canvas. Useful for isolating walls-only or furniture-only views.',
+      },
+      {
+        heading: 'Area Summary',
+        text: 'The bottom of the Layers tab shows total area per category (count of sets and sum of width x height), plus an overall bounding box showing the total footprint of all placed sets.',
+      },
+    ],
+  },
+  {
+    title: 'Groups',
+    icon: '7',
+    content: [
+      {
+        heading: 'Creating a Group',
+        text: 'Select multiple sets using checkboxes, then click "Group" in the bulk actions bar and enter a name. Groups appear in the Layers tab. You can also create a group from the Layers tab by typing a name and clicking "+".',
+      },
+      {
+        heading: 'Managing Groups',
+        text: 'In the Layers tab, each group shows its member sets. Click the collapse/expand arrow to toggle visibility. Use the trash icon to delete a group (sets remain, only the group is removed).',
+      },
+    ],
+  },
+  {
+    title: 'Annotations',
+    icon: '8',
+    content: [
+      {
+        heading: 'Adding Annotations',
+        text: 'In the Layers tab under Annotations, type your annotation text and click "+" to add it. Annotations appear as draggable text labels on the canvas.',
+      },
+      {
+        heading: 'Editing Annotations',
+        text: 'Double-click an annotation on the canvas to edit its text via a prompt. In the Layers tab, you can also change the font size, colour, and text of each annotation.',
+      },
+      {
+        heading: 'Positioning Annotations',
+        text: 'Drag annotations anywhere on the canvas. They are independent of sets and remain in place even when sets are moved. Use annotations for ceiling heights, room labels, dimension notes, or any custom text.',
+      },
+      {
+        heading: 'Deleting Annotations',
+        text: 'Click the trash icon next to an annotation in the Layers tab to remove it.',
       },
     ],
   },
   {
     title: 'Cut-Into Feature',
-    icon: '6',
+    icon: '9',
     content: [
       {
         heading: 'Cutting One Set Into Another',
@@ -171,7 +233,7 @@ const sections = [
   },
   {
     title: 'Multi-Select & Bulk Actions',
-    icon: '7',
+    icon: '10',
     content: [
       {
         heading: 'Selecting Multiple Sets',
@@ -179,13 +241,13 @@ const sections = [
       },
       {
         heading: 'Bulk Actions Bar',
-        text: 'When multiple sets are selected, a purple action bar appears with options to change category, colour, or No Cut flag for all selected sets at once. You can also bulk hide, remove from plan, or delete.',
+        text: 'When multiple sets are selected, a purple action bar appears with options to change category, colour, or No Cut flag for all selected sets at once. You can also bulk hide, remove from plan, delete, or create a group from the selection.',
       },
     ],
   },
   {
     title: 'Category Filtering',
-    icon: '8',
+    icon: '11',
     content: [
       {
         heading: 'Filter by Category',
@@ -195,7 +257,7 @@ const sections = [
   },
   {
     title: 'Build Tab & Component Library',
-    icon: '9',
+    icon: '12',
     content: [
       {
         heading: 'Component Library',
@@ -233,7 +295,7 @@ const sections = [
   },
   {
     title: 'Rules & Auto Layout',
-    icon: '10',
+    icon: '13',
     content: [
       {
         heading: 'Rules',
@@ -251,7 +313,7 @@ const sections = [
   },
   {
     title: 'Saving & Loading',
-    icon: '11',
+    icon: '14',
     content: [
       {
         heading: 'Autosave',
@@ -267,7 +329,11 @@ const sections = [
       },
       {
         heading: 'Load',
-        text: 'Click "Load" to see server projects and browser saves. Server projects show a share option on hover.',
+        text: 'Click "Load" to see server projects, browser saves, and templates. Server projects show a share option on hover.',
+      },
+      {
+        heading: 'Templates',
+        text: 'The Load menu includes a "Templates" section with pre-built floor plans you can load instantly. The 883 Islington Ave template loads the full warehouse and office layout (37,104 SF) with all rooms, walls, loading docks, and annotations pre-configured.',
       },
       {
         heading: 'Share Projects',
@@ -275,13 +341,21 @@ const sections = [
       },
       {
         heading: 'Export PNG',
-        text: 'Click "Export PNG" to download a screenshot of the current canvas as a PNG image.',
+        text: 'Click "PNG" to download a screenshot of the current canvas as a PNG image.',
+      },
+      {
+        heading: 'Print / PDF Export',
+        text: 'Click "Print/PDF" to open a printable page in a new window with a professional title block (project name, date, scale), a scale bar, colour-coded legend of all categories, and an area summary table. Use your browser\'s print dialog (Ctrl+P) to save as PDF or print.',
+      },
+      {
+        heading: 'Load from File',
+        text: 'Use "Load from File" at the bottom of the Load menu to import a previously exported JSON project file.',
       },
     ],
   },
   {
     title: 'Resizable Sidebar',
-    icon: '12',
+    icon: '15',
     content: [
       {
         heading: 'Resize the Sidebar',
@@ -295,21 +369,33 @@ const sections = [
     content: [
       {
         heading: 'Canvas Navigation',
-        text: 'Scroll wheel: Zoom in/out. Ctrl+Drag: Pan the canvas.',
+        text: 'Scroll wheel: Zoom in/out. Ctrl+Drag (or Cmd+Drag on Mac): Pan the canvas.',
       },
       {
         heading: 'Set Interaction',
         text: 'Click: Select set. Double-click: Rotate 90 degrees. Drag: Move set.',
       },
       {
+        heading: 'Copy / Paste / Duplicate',
+        text: 'Ctrl+C: Copy selected set to clipboard. Ctrl+V: Paste copied set at an offset position. Ctrl+D: Duplicate selected set instantly. These work with the currently selected set on the canvas.',
+      },
+      {
+        heading: 'Delete',
+        text: 'Delete or Backspace: Delete the currently selected set from the project.',
+      },
+      {
+        heading: 'Undo / Redo',
+        text: 'Ctrl+Z: Undo the last action. Ctrl+Shift+Z (or Ctrl+Y): Redo. Up to 50 undo steps are stored.',
+      },
+      {
         heading: 'Multi-Select',
-        text: 'Shift+Click: Add/remove from multi-selection.',
+        text: 'Shift+Click: Add/remove individual sets from multi-selection in the sidebar.',
       },
     ],
   },
   {
     title: 'User Management (Admin)',
-    icon: 'A',
+    icon: '16',
     content: [
       {
         heading: 'Manage Users',
