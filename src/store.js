@@ -131,6 +131,9 @@ const useStore = create((set, get) => ({
       category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
       labelPosition: s.labelPosition || 'top-left',
       wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
+      iconType: s.iconType || 'rect', thickness: s.thickness ?? null,
+      componentTypeId: s.componentTypeId || null,
+      componentProperties: s.componentProperties || null,
     }
     set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
     get().autosave()
@@ -149,6 +152,9 @@ const useStore = create((set, get) => ({
       category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
       labelPosition: s.labelPosition || 'top-left',
       wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? 0,
+      iconType: s.iconType || 'rect', thickness: s.thickness ?? null,
+      componentTypeId: s.componentTypeId || null,
+      componentProperties: s.componentProperties || null,
     }))
     set({
       sets: [...get().sets, ...created],

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import useStore from '../store.js'
 import PdfUploader from './PdfUploader.jsx'
 import SetsTab from './SetsTab.jsx'
+import BuildTab from './BuildTab.jsx'
 import RulesTab from './RulesTab.jsx'
 
 const MIN_WIDTH = 200
@@ -67,6 +68,14 @@ export default function Sidebar() {
             Sets
           </button>
           <button
+            onClick={() => setSidebarTab('build')}
+            className={`flex-1 px-3 py-2 text-sm font-medium ${
+              sidebarTab === 'build' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Build
+          </button>
+          <button
             onClick={() => setSidebarTab('rules')}
             className={`flex-1 px-3 py-2 text-sm font-medium ${
               sidebarTab === 'rules' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
@@ -77,7 +86,7 @@ export default function Sidebar() {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {sidebarTab === 'sets' ? <SetsTab /> : <RulesTab />}
+          {sidebarTab === 'sets' ? <SetsTab /> : sidebarTab === 'build' ? <BuildTab /> : <RulesTab />}
         </div>
       </div>
       {/* Resize handle on right edge */}

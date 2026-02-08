@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import authRoutes from './routes/auth.js'
 import projectRoutes from './routes/projects.js'
 import adminRoutes from './routes/admin.js'
+import componentRoutes from './routes/components.js'
 
 // Import db to ensure tables are created on startup
 import './db.js'
@@ -21,6 +22,7 @@ app.use(express.json({ limit: '50mb' }))
 app.use('/api', authRoutes)
 app.use('/api/projects', projectRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/components', componentRoutes)
 
 // Serve static frontend (Vite build output)
 const distPath = path.join(__dirname, '..', 'dist')

@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
 import { getAABB, getOverlapRect, buildCutPolygon, getLabelPosition } from '../engine/geometry.js'
+import { drawComponentIcon, ICON_PREFIX } from '../engine/componentIcons.js'
 
 const SET_PREFIX = 'set-rect-'
 const LABEL_PREFIX = 'set-label-'
@@ -370,6 +371,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         o.name?.startsWith(CUTAWAY_PREFIX) ||
         o.name?.startsWith(GAP_PREFIX) ||
         o.name?.startsWith(LEADER_PREFIX) ||
+        o.name?.startsWith(ICON_PREFIX) ||
         o.name === SNAP_LINE_NAME
       )
       .forEach(o => fc.remove(o))
@@ -601,6 +603,15 @@ export default function FloorCanvas({ onCanvasSize }) {
       })
 
       fc.add(shape)
+
+      // Component icon detail lines (windows, doors, flats, etc.)
+      if (s.iconType && s.iconType !== 'rect') {
+        const isRotated = (s.rotation || 0) % 180 !== 0
+        const iconW = isRotated ? h : w
+        const iconH = isRotated ? w : h
+        const iconObjects = drawComponentIcon(s.iconType, s, iconW, iconH, ppu, s.componentProperties || {})
+        iconObjects.forEach(obj => fc.add(obj))
+      }
 
       // Wall gap zone — dashed outline around set showing access area
       if (s.wallGap && s.wallGap > 0) {

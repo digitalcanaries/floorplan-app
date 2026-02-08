@@ -194,8 +194,46 @@ const sections = [
     ],
   },
   {
-    title: 'Rules & Auto Layout',
+    title: 'Build Tab & Component Library',
     icon: '9',
+    content: [
+      {
+        heading: 'Component Library',
+        text: 'Switch to the "Build" tab in the sidebar to access the architectural component library. Components are grouped by category: Walls (Hollywood flats, double flats, braced access walls), Windows (single pane, multi-pane, picture windows), Doors (single, double, arch), and Other (columns, staircases). Click "Add" to place any component on the canvas.',
+      },
+      {
+        heading: 'Hollywood (Hard) Flats',
+        text: 'Standard film/TV set flats built with 1x3 lumber on edge and 1/8" luan plywood. Standard widths: 1\', 2\', 3\', 4\' — Heights: 8\', 10\', 12\'. Thickness is approximately 3.5 inches. Toggles (horizontal braces) every 2\' to 2\'6".',
+      },
+      {
+        heading: 'Double & Braced Flats',
+        text: 'Double flats have luan on both sides (~4" thick). Braced access walls use two single-sided flats with a 2\' gap between for running power cables and equipment access.',
+      },
+      {
+        heading: 'Custom Flat Builder',
+        text: 'Click "+ Flat" to create a custom flat. Choose Hollywood or Broadway style, set width and height, and select single, double, or braced construction. The builder shows a material estimate including lumber pieces, linear feet, and luan sheet count.',
+      },
+      {
+        heading: 'Custom Window Builder',
+        text: 'Click "+ Window" to create a custom window. Set width, height, number of panes (1-4), and divider/surround widths (3" or 4"). A visual preview shows the window configuration.',
+      },
+      {
+        heading: 'Custom Door Builder',
+        text: 'Click "+ Door" to create a custom door. Choose single, double, or arch style, set dimensions, and select swing direction. Custom components are saved to the server library.',
+      },
+      {
+        heading: 'Suggest Flats',
+        text: 'When a set of category "Set" is selected, the Build tab shows a "Suggest Flats" section. Click "Calculate Flat Layout" to see a breakdown of standard flats needed to build each wall of the set. Choose the flat height (8\', 10\', or 12\') and click "Add All Flats to Canvas" to place them.',
+      },
+      {
+        heading: 'Architectural Icons',
+        text: 'Components placed from the library render with architectural icons on the canvas. Windows show pane dividers and glass tinting. Doors show swing arcs. Flats show framing lines. Braced walls show the access gap with dashed indicators. Columns show circles or cross patterns.',
+      },
+    ],
+  },
+  {
+    title: 'Rules & Auto Layout',
+    icon: '10',
     content: [
       {
         heading: 'Rules',
@@ -213,7 +251,7 @@ const sections = [
   },
   {
     title: 'Saving & Loading',
-    icon: '10',
+    icon: '11',
     content: [
       {
         heading: 'Autosave',
@@ -243,7 +281,7 @@ const sections = [
   },
   {
     title: 'Resizable Sidebar',
-    icon: '11',
+    icon: '12',
     content: [
       {
         heading: 'Resize the Sidebar',
