@@ -902,17 +902,6 @@ function SceneContent({ controlMode }) {
 
   const startPos = useMemo(() => sceneCenter, [sceneCenter])
 
-  // Debug: log what we're rendering
-  useEffect(() => {
-    console.log('[Scene3D] ppu:', ppu, 'defaultWallHeight:', defaultWallHeight)
-    console.log('[Scene3D] wallSets:', wallSets.length)
-    console.log('[Scene3D] roomSets:', roomSets.length, roomSets.map(s => ({ id: s.id, name: s.name, cat: s.category, w: s.width, h: s.height, x: s.x, y: s.y })))
-    console.log('[Scene3D] doorSets:', doorSets.length)
-    console.log('[Scene3D] windowSets:', windowSets.length)
-    console.log('[Scene3D] specialSets:', specialSets.length)
-    console.log('[Scene3D] sceneCenter:', sceneCenter)
-  }, [wallSets, roomSets, doorSets, windowSets, specialSets, ppu, defaultWallHeight, sceneCenter])
-
   return (
     <>
       {/* Lighting */}
