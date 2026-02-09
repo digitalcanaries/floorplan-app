@@ -448,10 +448,12 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
 function SetMesh({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
   const elevation = set.elevation || 0
+  const wallHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
+  const t = 0.292 // standard flat wall thickness
 
   const color = useMemo(() => {
     if (set.color && set.color !== '#ffffff') return set.color
-    return '#CCCCCC'
+    return '#E8E0D8'
   }, [set.color])
 
   // Columns are cylinders
@@ -501,36 +503,36 @@ function SetMesh({ set, ppu, defaultWallHeight }) {
     )
   }
 
-  // Default (category: 'Set') — render as a colored floor plane (room area marker)
-  // The actual walls come from Wall category pieces placed by the user
+  // Default (category: 'Set') — render as 4 thin walls forming a hollow room
+  const w = set.width
+  const d = set.height
   return (
     <group position={[cx, elevation, cz]} rotation={[0, rotY, 0]}>
-      {/* Floor plane showing the room area */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
-        <planeGeometry args={[set.width, set.height]} />
-        <meshStandardMaterial
-          color={color}
-          transparent
-          opacity={0.25}
-          side={THREE.DoubleSide}
-        />
+      {/* Floor plane */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} receiveShadow>
+        <planeGeometry args={[w, d]} />
+        <meshStandardMaterial color={color} transparent opacity={0.15} side={THREE.DoubleSide} />
       </mesh>
-      {/* Thin border lines on the floor to show room edges */}
-      {[
-        // Front edge
-        { pos: [0, 0.03, -set.height / 2], size: [set.width, 0.02, 0.08] },
-        // Back edge
-        { pos: [0, 0.03, set.height / 2], size: [set.width, 0.02, 0.08] },
-        // Left edge
-        { pos: [-set.width / 2, 0.03, 0], size: [0.08, 0.02, set.height] },
-        // Right edge
-        { pos: [set.width / 2, 0.03, 0], size: [0.08, 0.02, set.height] },
-      ].map((edge, i) => (
-        <mesh key={i} position={edge.pos}>
-          <boxGeometry args={edge.size} />
-          <meshStandardMaterial color={color} opacity={0.6} transparent />
-        </mesh>
-      ))}
+      {/* Front wall (negative Z face) */}
+      <mesh position={[0, wallHeight / 2, -d / 2 + t / 2]} castShadow receiveShadow>
+        <boxGeometry args={[w, wallHeight, t]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* Back wall (positive Z face) */}
+      <mesh position={[0, wallHeight / 2, d / 2 - t / 2]} castShadow receiveShadow>
+        <boxGeometry args={[w, wallHeight, t]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* Left wall (negative X face) */}
+      <mesh position={[-w / 2 + t / 2, wallHeight / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[t, wallHeight, d - t * 2]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
+      {/* Right wall (positive X face) */}
+      <mesh position={[w / 2 - t / 2, wallHeight / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[t, wallHeight, d - t * 2]} />
+        <meshStandardMaterial color={color} roughness={0.8} />
+      </mesh>
     </group>
   )
 }
@@ -740,6 +742,16 @@ function SceneContent({ controlMode }) {
   }, [visibleSets, ppu])
 
   const startPos = useMemo(() => sceneCenter, [sceneCenter])
+
+  // Debug: log what we're rendering
+  useEffect(() => {
+    console.log('[Scene3D] ppu:', ppu, 'defaultWallHeight:', defaultWallHeight)
+    console.log('[Scene3D] wallSets:', wallSets.length, wallSets.map(s => ({ id: s.id, name: s.name, cat: s.category, icon: s.iconType, w: s.width, h: s.height, wh: s.wallHeight, thick: s.thickness, x: s.x, y: s.y })))
+    console.log('[Scene3D] doorSets:', doorSets.length)
+    console.log('[Scene3D] windowSets:', windowSets.length)
+    console.log('[Scene3D] otherSets:', otherSets.length, otherSets.map(s => ({ id: s.id, name: s.name, cat: s.category, w: s.width, h: s.height, x: s.x, y: s.y })))
+    console.log('[Scene3D] sceneCenter:', sceneCenter)
+  }, [wallSets, doorSets, windowSets, otherSets, ppu, defaultWallHeight, sceneCenter])
 
   return (
     <>
