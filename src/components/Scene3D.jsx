@@ -434,16 +434,14 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
   )
 }
 
-// ─── Generic Set Mesh — renders as hollow wall outline (walkable room) ──────
-function SetMesh({ set, ppu, defaultWallHeight, allSets }) {
+// ─── Generic Set Mesh ──────────────────────────────────────────────────────
+function SetMesh({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
-  const wallHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
   const elevation = set.elevation || 0
-  const wallThickness = set.thickness || 0.292 // standard flat thickness
 
   const color = useMemo(() => {
     if (set.color && set.color !== '#ffffff') return set.color
-    return '#E8E0D8'
+    return '#CCCCCC'
   }, [set.color])
 
   // Columns are cylinders
@@ -493,58 +491,34 @@ function SetMesh({ set, ppu, defaultWallHeight, allSets }) {
     )
   }
 
-  // Default: Render as 4 thin walls forming a hollow room outline
-  // Find doors/windows that overlap each wall side to cut openings
-  const widthFt = set.width
-  const depthFt = set.height
-  const t = wallThickness
-
-  // Build 4 wall sides: front (neg Z), back (pos Z), left (neg X), right (pos X)
-  // Each wall is a thin box positioned at the edge of the set footprint
-  const walls = useMemo(() => {
-    // Check each side for door/window openings
-    const findOpeningsOnSide = (sideAxis, sidePos, wallLen) => {
-      if (!allSets) return []
-      return allSets.filter(s => {
-        if (s.id === set.id) return false
-        if (s.category !== 'Door' && s.category !== 'Window') return false
-        if (s.onPlan === false || s.hidden) return false
-
-        const sPos = get3DPosition(s, ppu)
-        const isRotS = (s.rotation || 0) % 180 !== 0
-        const sw = isRotS ? s.height : s.width
-        const sh = isRotS ? s.width : s.height
-        const sx1 = s.x / ppu, sy1 = s.y / ppu
-        const sx2 = sx1 + sw, sy2 = sy1 + sh
-
-        const isRotW = (set.rotation || 0) % 180 !== 0
-        const ww = isRotW ? set.height : set.width
-        const wh = isRotW ? set.width : set.height
-        const wx1 = set.x / ppu, wy1 = set.y / ppu
-        const wx2 = wx1 + ww, wy2 = wy1 + wh
-
-        return sx1 < wx2 && sx2 > wx1 && sy1 < wy2 && sy2 > wy1
-      })
-    }
-
-    return [
-      // Front wall (along X axis, at -Z edge)
-      { pos: [0, wallHeight / 2, -depthFt / 2 + t / 2], size: [widthFt, wallHeight, t], axis: 'z' },
-      // Back wall (along X axis, at +Z edge)
-      { pos: [0, wallHeight / 2, depthFt / 2 - t / 2], size: [widthFt, wallHeight, t], axis: 'z' },
-      // Left wall (along Z axis, at -X edge)
-      { pos: [-widthFt / 2 + t / 2, wallHeight / 2, 0], size: [t, wallHeight, depthFt - t * 2], axis: 'x' },
-      // Right wall (along Z axis, at +X edge)
-      { pos: [widthFt / 2 - t / 2, wallHeight / 2, 0], size: [t, wallHeight, depthFt - t * 2], axis: 'x' },
-    ]
-  }, [widthFt, depthFt, wallHeight, t, set, allSets, ppu])
-
+  // Default (category: 'Set') — render as a colored floor plane (room area marker)
+  // The actual walls come from Wall category pieces placed by the user
   return (
     <group position={[cx, elevation, cz]} rotation={[0, rotY, 0]}>
-      {walls.map((wall, i) => (
-        <mesh key={i} position={wall.pos} castShadow receiveShadow>
-          <boxGeometry args={wall.size} />
-          <meshStandardMaterial color={color} roughness={0.8} />
+      {/* Floor plane showing the room area */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
+        <planeGeometry args={[set.width, set.height]} />
+        <meshStandardMaterial
+          color={color}
+          transparent
+          opacity={0.25}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Thin border lines on the floor to show room edges */}
+      {[
+        // Front edge
+        { pos: [0, 0.03, -set.height / 2], size: [set.width, 0.02, 0.08] },
+        // Back edge
+        { pos: [0, 0.03, set.height / 2], size: [set.width, 0.02, 0.08] },
+        // Left edge
+        { pos: [-set.width / 2, 0.03, 0], size: [0.08, 0.02, set.height] },
+        // Right edge
+        { pos: [set.width / 2, 0.03, 0], size: [0.08, 0.02, set.height] },
+      ].map((edge, i) => (
+        <mesh key={i} position={edge.pos}>
+          <boxGeometry args={edge.size} />
+          <meshStandardMaterial color={color} opacity={0.6} transparent />
         </mesh>
       ))}
     </group>
@@ -809,7 +783,7 @@ function SceneContent({ controlMode }) {
 
       {/* Other sets (rooms, furniture, columns, stairs, etc.) */}
       {otherSets.map(s => (
-        <SetMesh key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} allSets={visibleSets} />
+        <SetMesh key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
       ))}
 
       {/* 3D Labels */}
