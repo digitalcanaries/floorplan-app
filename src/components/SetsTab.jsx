@@ -686,6 +686,13 @@ export default function SetsTab() {
 
               <span className="text-[10px] text-gray-400">{s.width}x{s.height}</span>
 
+              {/* Wall height indicator */}
+              {WALL_CATEGORIES.includes(s.category) && (
+                <span className="text-[9px] text-sky-400" title={`Wall height: ${s.wallHeight || defaultWallHeight}${unit}`}>
+                  H:{s.wallHeight || defaultWallHeight}
+                </span>
+              )}
+
               {/* Wall gap indicator */}
               {s.wallGap > 0 && (
                 <span className="text-[9px] text-amber-500" title={`${s.wallGap}${unit} access gap`}>

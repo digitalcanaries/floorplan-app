@@ -138,11 +138,11 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
 }
 
 // ─── Door/Window 3D Mesh ─────────────────────────────────────────────
-function DoorMesh3D({ set, ppu }) {
+function DoorMesh3D({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
   const doorWidth = set.width
   const doorDepth = set.height  // plan-view depth (typically thin)
-  const doorHeight = DOOR_HEIGHT
+  const doorHeight = set.componentProperties?.elevationHeight || set.wallHeight || DOOR_HEIGHT
 
   // Door frame (dark wood outline)
   return (
@@ -176,16 +176,20 @@ function DoorMesh3D({ set, ppu }) {
   )
 }
 
-function WindowMesh3D({ set, ppu }) {
+function WindowMesh3D({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
   const winWidth = set.width
   const winDepth = set.height  // plan-view depth
-  const winHeight = WINDOW_HEAD_HEIGHT - WINDOW_SILL_HEIGHT
+  // Use actual elevation height from component properties, falling back to defaults
+  const elevH = set.componentProperties?.elevationHeight
+  const sillHeight = elevH ? Math.max(WINDOW_SILL_HEIGHT, 0) : WINDOW_SILL_HEIGHT
+  const headHeight = elevH ? (sillHeight + elevH) : WINDOW_HEAD_HEIGHT
+  const winHeight = headHeight - sillHeight
 
   return (
     <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
       {/* Glass pane */}
-      <mesh position={[0, (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2, 0]}>
+      <mesh position={[0, (sillHeight + headHeight) / 2, 0]}>
         <boxGeometry args={[winWidth, winHeight, 0.05]} />
         <meshStandardMaterial
           color="#88CCEE"
@@ -195,37 +199,39 @@ function WindowMesh3D({ set, ppu }) {
         />
       </mesh>
       {/* Frame - left */}
-      <mesh position={[-winWidth / 2, (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2, 0]} castShadow>
+      <mesh position={[-winWidth / 2, (sillHeight + headHeight) / 2, 0]} castShadow>
         <boxGeometry args={[0.12, winHeight + 0.2, Math.max(winDepth, 0.25)]} />
         <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
       </mesh>
       {/* Frame - right */}
-      <mesh position={[winWidth / 2, (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2, 0]} castShadow>
+      <mesh position={[winWidth / 2, (sillHeight + headHeight) / 2, 0]} castShadow>
         <boxGeometry args={[0.12, winHeight + 0.2, Math.max(winDepth, 0.25)]} />
         <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
       </mesh>
       {/* Frame - top */}
-      <mesh position={[0, WINDOW_HEAD_HEIGHT + 0.06, 0]} castShadow>
+      <mesh position={[0, headHeight + 0.06, 0]} castShadow>
         <boxGeometry args={[winWidth + 0.24, 0.12, Math.max(winDepth, 0.25)]} />
         <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
       </mesh>
       {/* Frame - sill */}
-      <mesh position={[0, WINDOW_SILL_HEIGHT - 0.06, 0]} castShadow>
+      <mesh position={[0, sillHeight - 0.06, 0]} castShadow>
         <boxGeometry args={[winWidth + 0.24, 0.12, Math.max(winDepth, 0.35)]} />
         <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
       </mesh>
       {/* Sill wall below window */}
-      <mesh position={[0, WINDOW_SILL_HEIGHT / 2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[winWidth, WINDOW_SILL_HEIGHT, Math.max(winDepth, 0.25)]} />
-        <meshStandardMaterial color="#E8E0D8" roughness={0.8} />
-      </mesh>
+      {sillHeight > 0.01 && (
+        <mesh position={[0, sillHeight / 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[winWidth, sillHeight, Math.max(winDepth, 0.25)]} />
+          <meshStandardMaterial color="#E8E0D8" roughness={0.8} />
+        </mesh>
+      )}
     </group>
   )
 }
 
 // ─── Wall Mesh ─────────────────────────────────────────────────────
-function WallMesh({ set, ppu, allSets, renderMode }) {
-  const wallHeight = set.wallHeight || DEFAULT_WALL_HEIGHT
+function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
+  const wallHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
   // In 2D plan view, wall width = set.width (the long dimension), depth = set.height (thin dimension)
   const widthFt = set.width
   const depthFt = set.height
@@ -326,8 +332,11 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
         // Offset from wall's left edge
         const ox = oFeetX - wallFeetX
         const isDoor = o.category === 'Door'
+        const elevH = o.componentProperties?.elevationHeight
         const sillH = isDoor ? 0 : WINDOW_SILL_HEIGHT
-        const headH = isDoor ? DOOR_HEIGHT : WINDOW_HEAD_HEIGHT
+        const headH = isDoor
+          ? (elevH || o.wallHeight || DOOR_HEIGHT)
+          : (elevH ? (sillH + elevH) : WINDOW_HEAD_HEIGHT)
         return { ox, ow: oFeetW, sillH, headH, isDoor }
       })
       .sort((a, b) => a.ox - b.ox)
@@ -405,10 +414,13 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
         const oFeetW = isRotO ? o.height : o.width
         const ox = oFeetX - wallFeetX
         const glassX = -wallFeetW / 2 + ox + oFeetW / 2
-        const midY = (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2
+        const elevH = o.componentProperties?.elevationHeight
+        const sillH = WINDOW_SILL_HEIGHT
+        const headH = elevH ? (sillH + elevH) : WINDOW_HEAD_HEIGHT
+        const midY = (sillH + headH) / 2
         return (
           <mesh key={`glass-${i}`} position={[glassX, midY, 0]}>
-            <planeGeometry args={[oFeetW, WINDOW_HEAD_HEIGHT - WINDOW_SILL_HEIGHT]} />
+            <planeGeometry args={[oFeetW, headH - sillH]} />
             <meshStandardMaterial
               color="#88CCEE"
               transparent
@@ -423,7 +435,7 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
 }
 
 // ─── Generic Set Mesh (furniture, columns, stairs, etc.) ──────────────────
-function SetMesh({ set, ppu }) {
+function SetMesh({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
   const heightFt = set.wallHeight || (set.category === 'Furniture' ? 3 : set.category === 'Bathroom' ? 3 : 2)
   const elevation = set.elevation || 0
@@ -443,7 +455,7 @@ function SetMesh({ set, ppu }) {
   // Columns are cylinders
   if (set.category === 'Column') {
     const radius = Math.min(set.width, set.height) / 2
-    const colHeight = set.wallHeight || DEFAULT_WALL_HEIGHT
+    const colHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
     return (
       <mesh position={[cx, colHeight / 2 + elevation, cz]} rotation={[0, rotY, 0]} castShadow>
         <cylinderGeometry args={[radius, radius, colHeight, 16]} />
@@ -613,9 +625,9 @@ function FirstPersonControls({ enabled, startPos }) {
 }
 
 // ─── Labels in 3D ──────────────────────────────────────────────────
-function SetLabel3D({ set, ppu }) {
+function SetLabel3D({ set, ppu, defaultWallHeight }) {
   const { cx, cz } = get3DPosition(set, ppu)
-  const wallHeight = set.wallHeight || DEFAULT_WALL_HEIGHT
+  const wallHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
   const labelHeight = (set.category === 'Wall' || set.category === 'Door' || set.category === 'Window')
     ? wallHeight + 1
     : (set.wallHeight || 4) + 1
@@ -640,7 +652,7 @@ function SetLabel3D({ set, ppu }) {
 
 // ─── Main Scene Content ────────────────────────────────────────────
 function SceneContent({ controlMode }) {
-  const { sets, pixelsPerUnit, layerVisibility, labelsVisible, wallRenderMode } = useStore()
+  const { sets, pixelsPerUnit, layerVisibility, labelsVisible, wallRenderMode, defaultWallHeight } = useStore()
 
   const ppu = pixelsPerUnit || 1
 
@@ -727,27 +739,27 @@ function SceneContent({ controlMode }) {
 
       {/* Walls */}
       {wallSets.map(s => (
-        <WallMesh key={s.id} set={s} ppu={ppu} allSets={visibleSets} renderMode={wallRenderMode} />
+        <WallMesh key={s.id} set={s} ppu={ppu} allSets={visibleSets} renderMode={wallRenderMode} defaultWallHeight={defaultWallHeight} />
       ))}
 
       {/* Doors */}
       {doorSets.map(s => (
-        <DoorMesh3D key={s.id} set={s} ppu={ppu} />
+        <DoorMesh3D key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
       ))}
 
       {/* Windows */}
       {windowSets.map(s => (
-        <WindowMesh3D key={s.id} set={s} ppu={ppu} />
+        <WindowMesh3D key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
       ))}
 
       {/* Other sets (furniture, columns, stairs, etc.) */}
       {otherSets.map(s => (
-        <SetMesh key={s.id} set={s} ppu={ppu} />
+        <SetMesh key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
       ))}
 
       {/* 3D Labels */}
       {labelsVisible && visibleSets.map(s => (
-        <SetLabel3D key={`label-${s.id}`} set={s} ppu={ppu} />
+        <SetLabel3D key={`label-${s.id}`} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
       ))}
 
       {/* Camera controls */}
