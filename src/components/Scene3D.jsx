@@ -231,12 +231,24 @@ function WindowMesh3D({ set, ppu, defaultWallHeight }) {
 
 // ─── Wall Mesh ─────────────────────────────────────────────────────
 function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
-  const wallHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
-  // In 2D plan view, wall width = set.width (the long dimension), depth = set.height (thin dimension)
+  // Handle legacy wall data where set.height = elevation height (e.g. 8, 10, 12)
+  // instead of plan-view depth/thickness (e.g. 0.292). Detect by checking if
+  // height >> thickness — real plan-view depth should be near the thickness value.
+  const thickness = set.thickness || 0.292
+  const isLegacyHeight = set.height > thickness * 3
   const widthFt = set.width
-  const depthFt = set.height
+  const depthFt = isLegacyHeight ? thickness : set.height
+  const wallHeight = set.wallHeight || (isLegacyHeight ? set.height : null) || defaultWallHeight || DEFAULT_WALL_HEIGHT
 
-  const { cx, cz, rotY } = get3DPosition(set, ppu)
+  // For legacy data, recalculate 3D position using corrected plan-view depth
+  const cx_raw = set.x / ppu
+  const cz_raw = set.y / ppu
+  const isRotated = (set.rotation || 0) % 180 !== 0
+  const footprintW = isRotated ? depthFt : widthFt
+  const footprintH = isRotated ? widthFt : depthFt
+  const cx = cx_raw + footprintW / 2
+  const cz = cz_raw + footprintH / 2
+  const rotY = set.rotation ? -(set.rotation * Math.PI / 180) : 0
 
   // Find doors/windows that overlap this wall to cut openings
   const openings = useMemo(() => {
@@ -254,14 +266,14 @@ function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
       const sx2 = sx1 + sw, sy2 = sy1 + sh
 
       const isRotW = (set.rotation || 0) % 180 !== 0
-      const ww = isRotW ? set.height : set.width
-      const wh = isRotW ? set.width : set.height
+      const ww = isRotW ? depthFt : widthFt
+      const wh = isRotW ? widthFt : depthFt
       const wx1 = set.x / ppu, wy1 = set.y / ppu
       const wx2 = wx1 + ww, wy2 = wy1 + wh
 
       return sx1 < wx2 && sx2 > wx1 && sy1 < wy2 && sy2 > wy1
     })
-  }, [allSets, set, ppu])
+  }, [allSets, set, ppu, widthFt, depthFt])
 
   // Wall colour
   const wallColor = useMemo(() => {
@@ -318,9 +330,8 @@ function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
 
 function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu, wallColor }) {
   const segments = useMemo(() => {
-    const isRotW = (wallSet.rotation || 0) % 180 !== 0
     const wallFeetX = wallSet.x / ppu
-    const wallFeetW = isRotW ? wallSet.height : wallSet.width
+    const wallFeetW = widthFt // use corrected width, not raw set.width/height
     const segs = []
 
     // Sort openings by their x position relative to wall left edge (in feet)
@@ -406,9 +417,8 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
       ))}
       {/* Glass panes for windows */}
       {openings.filter(o => o.category === 'Window').map((o, i) => {
-        const isRotW = (wallSet.rotation || 0) % 180 !== 0
         const wallFeetX = wallSet.x / ppu
-        const wallFeetW = isRotW ? wallSet.height : wallSet.width
+        const wallFeetW = widthFt // use corrected width
         const isRotO = (o.rotation || 0) % 180 !== 0
         const oFeetX = o.x / ppu
         const oFeetW = isRotO ? o.height : o.width
