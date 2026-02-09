@@ -15,11 +15,31 @@ const LOOK_SPEED = 0.002
 
 // Standard flat construction dimensions
 const FLAT_PANEL_WIDTH = 4       // standard flat panel is 4' wide
-const FLAT_PANEL_HEIGHT = 12     // standard flat panel is 12' tall
 const RAIL_HEIGHT = 2            // 2' standard rail (top + bottom)
 const TIMBER_SIZE = 0.0625       // 1×3 actual is ~0.75" = 0.0625' (depth on flat)
 const TIMBER_WIDTH = 0.208       // 1×3 actual is ~2.5" = 0.208' width
 const LUAN_THICKNESS = 0.021     // ~1/4" luan
+
+// ─── Coordinate helpers ──────────────────────────────────────────────
+// 2D canvas: set.x, set.y are pixel positions (top-left corner)
+// 2D canvas: set.width, set.height are in feet
+// 2D pixel footprint = width * ppu, height * ppu
+// 3D world: X = right, Y = up, Z = into screen (matching 2D Y axis)
+// Convert: center_x_feet = set.x / ppu + set.width / 2
+//          center_z_feet = set.y / ppu + set.height / 2
+// Rotation: 2D rotation is clockwise degrees, 3D Y rotation is counter-clockwise
+
+function get3DPosition(set, ppu) {
+  const isRotated = (set.rotation || 0) % 180 !== 0
+  // In 2D, when rotated 90/270, fabric.js swaps the rendered dimensions
+  // but x,y still refers to the top-left of the bounding box
+  const footprintW = isRotated ? set.height : set.width
+  const footprintH = isRotated ? set.width : set.height
+  const cx = set.x / ppu + footprintW / 2
+  const cz = set.y / ppu + footprintH / 2
+  const rotY = set.rotation ? -(set.rotation * Math.PI / 180) : 0
+  return { cx, cz, rotY, footprintW, footprintH }
+}
 
 // ─── Flat Construction Frame (visible lumber) ────────────────────────
 function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation, side, style }) {
@@ -30,20 +50,17 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
   const toggleCount = Math.max(0, Math.floor(innerHeight / toggleSpacing))
   const panelCount = Math.ceil(widthFt / FLAT_PANEL_WIDTH)
 
-  // Determine offset for front vs rear
   const sideOffset = side === 'rear' ? -depthFt / 2 : depthFt / 2
 
   return (
     <group position={position} rotation={rotation}>
-      {/* Timber frame colour */}
       {(() => {
-        const timberColor = '#C4A35A' // raw pine/SPF lumber
-        const luanColor = '#D2B48C'   // luan plywood tan
+        const timberColor = '#C4A35A'
+        const luanColor = '#D2B48C'
         const frameDepth = timberW
-
         const elements = []
 
-        // Bottom rail — runs full width
+        // Bottom rail
         elements.push(
           <mesh key="rail-bottom" position={[0, railH / 2, sideOffset]} castShadow>
             <boxGeometry args={[widthFt, railH, frameDepth]} />
@@ -51,7 +68,7 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
           </mesh>
         )
 
-        // Top rail — runs full width
+        // Top rail
         elements.push(
           <mesh key="rail-top" position={[0, heightFt - railH / 2, sideOffset]} castShadow>
             <boxGeometry args={[widthFt, railH, frameDepth]} />
@@ -59,7 +76,7 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
           </mesh>
         )
 
-        // Stiles — left and right, run full height
+        // Stiles
         elements.push(
           <mesh key="stile-left" position={[-widthFt / 2 + TIMBER_WIDTH / 2, heightFt / 2, sideOffset]} castShadow>
             <boxGeometry args={[TIMBER_WIDTH, heightFt, frameDepth]} />
@@ -73,7 +90,7 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
           </mesh>
         )
 
-        // Toggles — horizontal cross members between rails
+        // Toggles
         for (let i = 1; i <= toggleCount; i++) {
           const ty = railH + (innerHeight / (toggleCount + 1)) * i
           elements.push(
@@ -84,7 +101,7 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
           )
         }
 
-        // Panel join stiles (where 4' flats meet) — every 4' along width
+        // Panel join stiles
         for (let p = 1; p < panelCount; p++) {
           const px = -widthFt / 2 + p * FLAT_PANEL_WIDTH
           if (px > -widthFt / 2 + TIMBER_WIDTH && px < widthFt / 2 - TIMBER_WIDTH) {
@@ -97,7 +114,7 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
           }
         }
 
-        // Luan skin (thin plane covering the frame, slightly in front)
+        // Luan skin
         const luanOffset = side === 'rear'
           ? sideOffset - frameDepth / 2 - LUAN_THICKNESS / 2
           : sideOffset + frameDepth / 2 + LUAN_THICKNESS / 2
@@ -120,45 +137,133 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
   )
 }
 
+// ─── Door/Window 3D Mesh ─────────────────────────────────────────────
+function DoorMesh3D({ set, ppu }) {
+  const { cx, cz, rotY } = get3DPosition(set, ppu)
+  const doorWidth = set.width
+  const doorDepth = set.height  // plan-view depth (typically thin)
+  const doorHeight = DOOR_HEIGHT
+
+  // Door frame (dark wood outline)
+  return (
+    <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
+      {/* Door frame */}
+      <mesh position={[0, doorHeight / 2, 0]} castShadow>
+        <boxGeometry args={[doorWidth, doorHeight, Math.max(doorDepth, 0.3)]} />
+        <meshStandardMaterial color="#8B6914" roughness={0.7} transparent opacity={0.15} />
+      </mesh>
+      {/* Frame posts (left) */}
+      <mesh position={[-doorWidth / 2, doorHeight / 2, 0]} castShadow>
+        <boxGeometry args={[0.15, doorHeight, Math.max(doorDepth, 0.3)]} />
+        <meshStandardMaterial color="#654321" roughness={0.6} />
+      </mesh>
+      {/* Frame posts (right) */}
+      <mesh position={[doorWidth / 2, doorHeight / 2, 0]} castShadow>
+        <boxGeometry args={[0.15, doorHeight, Math.max(doorDepth, 0.3)]} />
+        <meshStandardMaterial color="#654321" roughness={0.6} />
+      </mesh>
+      {/* Header */}
+      <mesh position={[0, doorHeight, 0]} castShadow>
+        <boxGeometry args={[doorWidth + 0.3, 0.25, Math.max(doorDepth, 0.3)]} />
+        <meshStandardMaterial color="#654321" roughness={0.6} />
+      </mesh>
+      {/* Threshold line on floor */}
+      <mesh position={[0, 0.02, 0]} receiveShadow>
+        <boxGeometry args={[doorWidth, 0.04, Math.max(doorDepth, 0.3)]} />
+        <meshStandardMaterial color="#555555" roughness={0.9} />
+      </mesh>
+    </group>
+  )
+}
+
+function WindowMesh3D({ set, ppu }) {
+  const { cx, cz, rotY } = get3DPosition(set, ppu)
+  const winWidth = set.width
+  const winDepth = set.height  // plan-view depth
+  const winHeight = WINDOW_HEAD_HEIGHT - WINDOW_SILL_HEIGHT
+
+  return (
+    <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
+      {/* Glass pane */}
+      <mesh position={[0, (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2, 0]}>
+        <boxGeometry args={[winWidth, winHeight, 0.05]} />
+        <meshStandardMaterial
+          color="#88CCEE"
+          transparent
+          opacity={0.35}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {/* Frame - left */}
+      <mesh position={[-winWidth / 2, (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2, 0]} castShadow>
+        <boxGeometry args={[0.12, winHeight + 0.2, Math.max(winDepth, 0.25)]} />
+        <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
+      </mesh>
+      {/* Frame - right */}
+      <mesh position={[winWidth / 2, (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2, 0]} castShadow>
+        <boxGeometry args={[0.12, winHeight + 0.2, Math.max(winDepth, 0.25)]} />
+        <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
+      </mesh>
+      {/* Frame - top */}
+      <mesh position={[0, WINDOW_HEAD_HEIGHT + 0.06, 0]} castShadow>
+        <boxGeometry args={[winWidth + 0.24, 0.12, Math.max(winDepth, 0.25)]} />
+        <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
+      </mesh>
+      {/* Frame - sill */}
+      <mesh position={[0, WINDOW_SILL_HEIGHT - 0.06, 0]} castShadow>
+        <boxGeometry args={[winWidth + 0.24, 0.12, Math.max(winDepth, 0.35)]} />
+        <meshStandardMaterial color="#D4D4D4" roughness={0.5} />
+      </mesh>
+      {/* Sill wall below window */}
+      <mesh position={[0, WINDOW_SILL_HEIGHT / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[winWidth, WINDOW_SILL_HEIGHT, Math.max(winDepth, 0.25)]} />
+        <meshStandardMaterial color="#E8E0D8" roughness={0.8} />
+      </mesh>
+    </group>
+  )
+}
+
 // ─── Wall Mesh ─────────────────────────────────────────────────────
 function WallMesh({ set, ppu, allSets, renderMode }) {
   const wallHeight = set.wallHeight || DEFAULT_WALL_HEIGHT
-  const thickness = set.thickness || 0.5
+  // In 2D plan view, wall width = set.width (the long dimension), depth = set.height (thin dimension)
   const widthFt = set.width
-  const depthFt = thickness
+  const depthFt = set.height
 
-  // Position: convert from 2D canvas coords (pixels) to 3D world coords (feet)
-  const x3d = set.x / ppu + widthFt / 2
-  const z3d = set.y / ppu + depthFt / 2
-
-  // Rotation
-  const rotY = set.rotation ? -set.rotation * (Math.PI / 180) : 0
+  const { cx, cz, rotY } = get3DPosition(set, ppu)
 
   // Find doors/windows that overlap this wall to cut openings
   const openings = useMemo(() => {
     return allSets.filter(s => {
       if (s.id === set.id) return false
       if (s.category !== 'Door' && s.category !== 'Window') return false
-      if (!s.onPlan || s.hidden) return false
+      if (s.onPlan === false || s.hidden) return false
 
-      // Check if this door/window overlaps the wall's footprint
-      const sx = s.x / ppu, sy = s.y / ppu
-      const sw = s.width, sh = s.height
-      const wx = set.x / ppu, wy = set.y / ppu
-      const ww = set.width, wh = set.thickness || 0.5
+      // Get both bounding boxes in feet
+      const sPos = get3DPosition(s, ppu)
+      const isRotS = (s.rotation || 0) % 180 !== 0
+      const sw = isRotS ? s.height : s.width
+      const sh = isRotS ? s.width : s.height
+      const sx1 = s.x / ppu, sy1 = s.y / ppu
+      const sx2 = sx1 + sw, sy2 = sy1 + sh
 
-      const overlap = sx < wx + ww && sx + sw > wx && sy < wy + wh && sy + sh > wy
-      return overlap
+      const isRotW = (set.rotation || 0) % 180 !== 0
+      const ww = isRotW ? set.height : set.width
+      const wh = isRotW ? set.width : set.height
+      const wx1 = set.x / ppu, wy1 = set.y / ppu
+      const wx2 = wx1 + ww, wy2 = wy1 + wh
+
+      return sx1 < wx2 && sx2 > wx1 && sy1 < wy2 && sy2 > wy1
     })
   }, [allSets, set, ppu])
 
-  // Wall colour based on material
+  // Wall colour
   const wallColor = useMemo(() => {
     if (set.materialTexture === 'brick') return '#8B4513'
     if (set.materialTexture === 'concrete') return '#999999'
     if (set.materialTexture === 'greenscreen') return '#00CC00'
     if (set.materialTexture === 'wood') return '#DEB887'
-    return '#E8E0D8' // default drywall/painted finish
+    return '#E8E0D8'
   }, [set.materialTexture])
 
   const isConstructionView = renderMode === 'construction-front' || renderMode === 'construction-rear'
@@ -166,9 +271,8 @@ function WallMesh({ set, ppu, allSets, renderMode }) {
   const flatStyle = set.componentProperties?.style || 'hollywood'
 
   if (isConstructionView && (set.iconType === 'flat' || set.iconType === 'flat-double' || set.iconType === 'flat-braced' || set.category === 'Wall')) {
-    // Construction view — show lumber framing
     return (
-      <group position={[x3d, 0, z3d]} rotation={[0, rotY, 0]}>
+      <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
         <FlatConstructionFrame
           widthFt={widthFt}
           heightFt={wallHeight}
@@ -183,18 +287,16 @@ function WallMesh({ set, ppu, allSets, renderMode }) {
   }
 
   if (openings.length === 0) {
-    // Simple solid wall — no openings
     return (
-      <mesh position={[x3d, wallHeight / 2, z3d]} rotation={[0, rotY, 0]} castShadow receiveShadow>
+      <mesh position={[cx, wallHeight / 2, cz]} rotation={[0, rotY, 0]} castShadow receiveShadow>
         <boxGeometry args={[widthFt, wallHeight, depthFt]} />
         <meshStandardMaterial color={wallColor} roughness={0.8} />
       </mesh>
     )
   }
 
-  // Wall with openings — build as multiple box segments
   return (
-    <group position={[x3d, 0, z3d]} rotation={[0, rotY, 0]}>
+    <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
       <WallWithOpenings
         widthFt={widthFt}
         depthFt={depthFt}
@@ -210,32 +312,37 @@ function WallMesh({ set, ppu, allSets, renderMode }) {
 
 function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu, wallColor }) {
   const segments = useMemo(() => {
-    const wx = wallSet.x / ppu
+    const isRotW = (wallSet.rotation || 0) % 180 !== 0
+    const wallFeetX = wallSet.x / ppu
+    const wallFeetW = isRotW ? wallSet.height : wallSet.width
     const segs = []
 
-    // Sort openings by their x position relative to wall
+    // Sort openings by their x position relative to wall left edge (in feet)
     const sorted = openings
       .map(o => {
-        const ox = o.x / ppu - wx
-        const ow = o.width
+        const isRotO = (o.rotation || 0) % 180 !== 0
+        const oFeetX = o.x / ppu
+        const oFeetW = isRotO ? o.height : o.width
+        // Offset from wall's left edge
+        const ox = oFeetX - wallFeetX
         const isDoor = o.category === 'Door'
         const sillH = isDoor ? 0 : WINDOW_SILL_HEIGHT
         const headH = isDoor ? DOOR_HEIGHT : WINDOW_HEAD_HEIGHT
-        return { ox, ow, sillH, headH, isDoor }
+        return { ox, ow: oFeetW, sillH, headH, isDoor }
       })
       .sort((a, b) => a.ox - b.ox)
 
-    let cursor = -widthFt / 2
+    let cursor = 0
 
     for (const op of sorted) {
-      const openLeft = op.ox - widthFt / 2 + widthFt / 2 // offset from wall center
+      const openLeft = op.ox
       const openRight = openLeft + op.ow
 
       // Segment before opening (full height)
       if (openLeft > cursor + 0.01) {
         const segW = openLeft - cursor
         segs.push({
-          x: cursor + segW / 2,
+          x: -wallFeetW / 2 + cursor + segW / 2,
           y: wallHeight / 2,
           w: segW,
           h: wallHeight,
@@ -246,7 +353,7 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
       if (op.headH < wallHeight - 0.01) {
         const aboveH = wallHeight - op.headH
         segs.push({
-          x: openLeft + op.ow / 2,
+          x: -wallFeetW / 2 + openLeft + op.ow / 2,
           y: op.headH + aboveH / 2,
           w: op.ow,
           h: aboveH,
@@ -256,7 +363,7 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
       // Below window (sill)
       if (op.sillH > 0.01) {
         segs.push({
-          x: openLeft + op.ow / 2,
+          x: -wallFeetW / 2 + openLeft + op.ow / 2,
           y: op.sillH / 2,
           w: op.ow,
           h: op.sillH,
@@ -267,11 +374,10 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
     }
 
     // Final segment after last opening
-    const wallRight = widthFt / 2
-    if (cursor < wallRight - 0.01) {
-      const segW = wallRight - cursor
+    if (cursor < wallFeetW - 0.01) {
+      const segW = wallFeetW - cursor
       segs.push({
-        x: cursor + segW / 2,
+        x: -wallFeetW / 2 + cursor + segW / 2,
         y: wallHeight / 2,
         w: segW,
         h: wallHeight,
@@ -279,7 +385,7 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
     }
 
     return segs
-  }, [widthFt, wallHeight, openings, wallSet, ppu])
+  }, [widthFt, depthFt, wallHeight, openings, wallSet, ppu])
 
   return (
     <>
@@ -291,11 +397,18 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
       ))}
       {/* Glass panes for windows */}
       {openings.filter(o => o.category === 'Window').map((o, i) => {
-        const ox = o.x / ppu - wallSet.x / ppu - widthFt / 2 + widthFt / 2 + o.width / 2
+        const isRotW = (wallSet.rotation || 0) % 180 !== 0
+        const wallFeetX = wallSet.x / ppu
+        const wallFeetW = isRotW ? wallSet.height : wallSet.width
+        const isRotO = (o.rotation || 0) % 180 !== 0
+        const oFeetX = o.x / ppu
+        const oFeetW = isRotO ? o.height : o.width
+        const ox = oFeetX - wallFeetX
+        const glassX = -wallFeetW / 2 + ox + oFeetW / 2
         const midY = (WINDOW_SILL_HEIGHT + WINDOW_HEAD_HEIGHT) / 2
         return (
-          <mesh key={`glass-${i}`} position={[ox, midY, 0]}>
-            <planeGeometry args={[o.width, WINDOW_HEAD_HEIGHT - WINDOW_SILL_HEIGHT]} />
+          <mesh key={`glass-${i}`} position={[glassX, midY, 0]}>
+            <planeGeometry args={[oFeetW, WINDOW_HEAD_HEIGHT - WINDOW_SILL_HEIGHT]} />
             <meshStandardMaterial
               color="#88CCEE"
               transparent
@@ -309,11 +422,10 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
   )
 }
 
-// ─── Generic Set Mesh (furniture, bathroom, etc.) ──────────────────
+// ─── Generic Set Mesh (furniture, columns, stairs, etc.) ──────────────────
 function SetMesh({ set, ppu }) {
+  const { cx, cz, rotY } = get3DPosition(set, ppu)
   const heightFt = set.wallHeight || (set.category === 'Furniture' ? 3 : set.category === 'Bathroom' ? 3 : 2)
-  const x3d = set.x / ppu + set.width / 2
-  const z3d = set.y / ppu + set.height / 2
   const elevation = set.elevation || 0
 
   const color = useMemo(() => {
@@ -331,9 +443,10 @@ function SetMesh({ set, ppu }) {
   // Columns are cylinders
   if (set.category === 'Column') {
     const radius = Math.min(set.width, set.height) / 2
+    const colHeight = set.wallHeight || DEFAULT_WALL_HEIGHT
     return (
-      <mesh position={[x3d, (set.wallHeight || DEFAULT_WALL_HEIGHT) / 2 + elevation, z3d]} castShadow>
-        <cylinderGeometry args={[radius, radius, set.wallHeight || DEFAULT_WALL_HEIGHT, 16]} />
+      <mesh position={[cx, colHeight / 2 + elevation, cz]} rotation={[0, rotY, 0]} castShadow>
+        <cylinderGeometry args={[radius, radius, colHeight, 16]} />
         <meshStandardMaterial color={color} roughness={0.6} />
       </mesh>
     )
@@ -344,7 +457,7 @@ function SetMesh({ set, ppu }) {
     const steps = 12
     const stepH = (set.wallHeight || 10) / steps
     return (
-      <group position={[x3d, elevation, z3d]}>
+      <group position={[cx, elevation, cz]} rotation={[0, rotY, 0]}>
         {Array.from({ length: steps }, (_, i) => (
           <mesh key={i}
             position={[0, stepH * i + stepH / 2, (i - steps / 2) * (set.height / steps)]}
@@ -359,7 +472,7 @@ function SetMesh({ set, ppu }) {
   }
 
   return (
-    <mesh position={[x3d, heightFt / 2 + elevation, z3d]} castShadow receiveShadow>
+    <mesh position={[cx, heightFt / 2 + elevation, cz]} rotation={[0, rotY, 0]} castShadow receiveShadow>
       <boxGeometry args={[set.width, heightFt, set.height]} />
       <meshStandardMaterial
         color={color}
@@ -375,21 +488,23 @@ function SetMesh({ set, ppu }) {
 function FloorPlane({ sets, ppu }) {
   const bounds = useMemo(() => {
     if (sets.length === 0) return { cx: 0, cz: 0, w: 100, d: 100 }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity
     for (const s of sets) {
-      const sx = s.x / ppu
-      const sy = s.y / ppu
-      minX = Math.min(minX, sx)
-      minY = Math.min(minY, sy)
-      maxX = Math.max(maxX, sx + s.width)
-      maxY = Math.max(maxY, sy + s.height)
+      const { cx, cz } = get3DPosition(s, ppu)
+      const isRotated = (s.rotation || 0) % 180 !== 0
+      const hw = (isRotated ? s.height : s.width) / 2
+      const hd = (isRotated ? s.width : s.height) / 2
+      minX = Math.min(minX, cx - hw)
+      minZ = Math.min(minZ, cz - hd)
+      maxX = Math.max(maxX, cx + hw)
+      maxZ = Math.max(maxZ, cz + hd)
     }
     const pad = 20
     return {
       cx: (minX + maxX) / 2,
-      cz: (minY + maxY) / 2,
+      cz: (minZ + maxZ) / 2,
       w: maxX - minX + pad * 2,
-      d: maxY - minY + pad * 2,
+      d: maxZ - minZ + pad * 2,
     }
   }, [sets, ppu])
 
@@ -499,15 +614,17 @@ function FirstPersonControls({ enabled, startPos }) {
 
 // ─── Labels in 3D ──────────────────────────────────────────────────
 function SetLabel3D({ set, ppu }) {
+  const { cx, cz } = get3DPosition(set, ppu)
   const wallHeight = set.wallHeight || DEFAULT_WALL_HEIGHT
-  const x3d = set.x / ppu + set.width / 2
-  const z3d = set.y / ppu + set.height / 2
+  const labelHeight = (set.category === 'Wall' || set.category === 'Door' || set.category === 'Window')
+    ? wallHeight + 1
+    : (set.wallHeight || 4) + 1
 
   if (set.labelHidden || set.category === 'Column') return null
 
   return (
     <Text
-      position={[x3d, wallHeight + 1, z3d]}
+      position={[cx, labelHeight, cz]}
       fontSize={1.2}
       color="#333333"
       anchorX="center"
@@ -536,14 +653,24 @@ function SceneContent({ controlMode }) {
     )
   }, [sets, layerVisibility])
 
-  // Separate walls from other sets
+  // Separate walls, doors, windows, and other sets
   const wallSets = useMemo(() =>
     visibleSets.filter(s => s.category === 'Wall' || s.iconType === 'flat' || s.iconType === 'double-flat' || s.iconType === 'braced-wall'),
     [visibleSets]
   )
+  const doorSets = useMemo(() =>
+    visibleSets.filter(s => s.category === 'Door'),
+    [visibleSets]
+  )
+  const windowSets = useMemo(() =>
+    visibleSets.filter(s => s.category === 'Window'),
+    [visibleSets]
+  )
   const otherSets = useMemo(() =>
-    visibleSets.filter(s => s.category !== 'Wall' && s.category !== 'Door' && s.category !== 'Window'
-      && s.iconType !== 'flat' && s.iconType !== 'double-flat' && s.iconType !== 'braced-wall'),
+    visibleSets.filter(s =>
+      s.category !== 'Wall' && s.category !== 'Door' && s.category !== 'Window'
+      && s.iconType !== 'flat' && s.iconType !== 'double-flat' && s.iconType !== 'braced-wall'
+    ),
     [visibleSets]
   )
 
@@ -552,8 +679,9 @@ function SceneContent({ controlMode }) {
     if (visibleSets.length === 0) return [0, 5, 0]
     let cx = 0, cz = 0
     for (const s of visibleSets) {
-      cx += s.x / ppu + s.width / 2
-      cz += s.y / ppu + s.height / 2
+      const pos = get3DPosition(s, ppu)
+      cx += pos.cx
+      cz += pos.cz
     }
     cx /= visibleSets.length
     cz /= visibleSets.length
@@ -602,6 +730,16 @@ function SceneContent({ controlMode }) {
         <WallMesh key={s.id} set={s} ppu={ppu} allSets={visibleSets} renderMode={wallRenderMode} />
       ))}
 
+      {/* Doors */}
+      {doorSets.map(s => (
+        <DoorMesh3D key={s.id} set={s} ppu={ppu} />
+      ))}
+
+      {/* Windows */}
+      {windowSets.map(s => (
+        <WindowMesh3D key={s.id} set={s} ppu={ppu} />
+      ))}
+
       {/* Other sets (furniture, columns, stairs, etc.) */}
       {otherSets.map(s => (
         <SetMesh key={s.id} set={s} ppu={ppu} />
@@ -630,14 +768,13 @@ function SceneContent({ controlMode }) {
 
 // ─── Main Exported Component ───────────────────────────────────────
 export default function Scene3D() {
-  const [controlMode, setControlMode] = useState('orbit') // 'orbit' or 'firstperson'
+  const [controlMode, setControlMode] = useState('orbit')
   const { wallRenderMode, setWallRenderMode } = useStore()
 
   return (
     <div className="w-full h-full relative bg-gray-900">
       {/* Control bar */}
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex gap-1 bg-gray-800/90 rounded-lg px-2 py-1.5 shadow-lg border border-gray-600">
-        {/* Camera mode */}
         <button
           onClick={() => setControlMode('orbit')}
           className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
@@ -657,7 +794,6 @@ export default function Scene3D() {
 
         <div className="w-px bg-gray-600 mx-1" />
 
-        {/* Wall render mode */}
         <select
           value={wallRenderMode}
           onChange={e => setWallRenderMode(e.target.value)}
@@ -670,7 +806,6 @@ export default function Scene3D() {
         </select>
       </div>
 
-      {/* Instructions overlay */}
       {controlMode === 'firstperson' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white text-xs px-4 py-2 rounded-lg">
           Click to lock mouse | WASD to move | Mouse to look | Space/Shift for up/down | Esc to unlock

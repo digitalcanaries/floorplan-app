@@ -11,7 +11,8 @@ const COLORS = [
 const CATEGORIES = ['Set', 'Wall', 'Window', 'Door', 'Furniture', 'Other']
 const WALL_CATEGORIES = ['Wall', 'Window', 'Door']
 const GAP_PRESETS = [
-  { label: '1ft', value: 1, desc: 'Back-to-back' },
+  { label: 'None', value: 0, desc: 'No gap (back-to-back)' },
+  { label: '1ft', value: 1, desc: 'Minimal clearance' },
   { label: '2ft', value: 2, desc: 'Power access' },
   { label: '4ft', value: 4, desc: 'Window/Door lighting' },
   { label: '6ft', value: 6, desc: 'Large lighting rig' },
@@ -36,9 +37,11 @@ export default function SetsTab() {
     labelMode,
     addGroup,
   } = useStore()
+  const { defaultWallHeight, setDefaultWallHeight } = useStore()
   const [form, setForm] = useState({
     name: '', width: '', height: '', color: COLORS[0],
     category: 'Set', wallGap: '', opacity: '1', noCut: false,
+    wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
   })
   const [editing, setEditing] = useState(null)
   const [cuttingSetId, setCuttingSetId] = useState(null)
@@ -57,17 +60,21 @@ export default function SetsTab() {
       category: form.category,
       noCut: form.noCut || isWallType,
       wallGap: parseFloat(form.wallGap) || 0,
+      wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
+      gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
       opacity: parseFloat(form.opacity) || 1,
     })
     setForm({
       name: '', width: '', height: '', color: COLORS[(sets.length + 1) % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
+      wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
     })
   }
 
   const handleUpdate = (e) => {
     e.preventDefault()
     if (!form.name || !form.width || !form.height) return
+    const isWallType = WALL_CATEGORIES.includes(form.category)
     updateSet(editing, {
       name: form.name,
       width: parseFloat(form.width),
@@ -76,12 +83,15 @@ export default function SetsTab() {
       category: form.category,
       noCut: form.noCut,
       wallGap: parseFloat(form.wallGap) || 0,
+      wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
+      gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
       opacity: parseFloat(form.opacity) || 1,
     })
     setEditing(null)
     setForm({
       name: '', width: '', height: '', color: COLORS[sets.length % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
+      wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
     })
   }
 
@@ -92,6 +102,8 @@ export default function SetsTab() {
       name: s.name, width: String(s.width), height: String(s.height), color: s.color,
       category: s.category || 'Set', wallGap: String(s.wallGap || ''), opacity: String(s.opacity ?? 1),
       noCut: s.noCut || false,
+      wallHeight: String(s.wallHeight || ''),
+      gapSides: s.gapSides || { top: true, right: true, bottom: true, left: true },
     })
   }
 
@@ -100,6 +112,7 @@ export default function SetsTab() {
     setForm({
       name: '', width: '', height: '', color: COLORS[sets.length % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
+      wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
     })
   }
 
@@ -295,6 +308,17 @@ export default function SetsTab() {
     <div className="p-3 flex flex-col gap-3">
       <BulkImport />
 
+      {/* Global default wall height */}
+      <div className="flex items-center gap-2 px-1">
+        <label className="text-[10px] text-gray-400 whitespace-nowrap">Default Wall Height:</label>
+        <input
+          type="number" value={defaultWallHeight} min="1" step="1"
+          onChange={e => setDefaultWallHeight(parseFloat(e.target.value) || 12)}
+          className="px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-[10px] text-white w-12"
+        />
+        <span className="text-[10px] text-gray-500">{unit}</span>
+      </div>
+
       <div className="h-px bg-gray-700" />
 
       <form onSubmit={editing ? handleUpdate : handleAdd} className="flex flex-col gap-2">
@@ -354,6 +378,41 @@ export default function SetsTab() {
                 >
                   {p.label} <span className="text-gray-500">{p.desc}</span>
                 </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Wall height — shown for Wall/Window/Door */}
+        {WALL_CATEGORIES.includes(form.category) && (
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-400">Height ({unit}):</label>
+            <input
+              type="number" placeholder={String(defaultWallHeight)} value={form.wallHeight} min="1" step="1"
+              onChange={e => setForm({ ...form, wallHeight: e.target.value })}
+              className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-white w-16"
+            />
+            <span className="text-[10px] text-gray-500">default: {defaultWallHeight}{unit}</span>
+          </div>
+        )}
+
+        {/* Per-side gap control — shown when wallGap > 0 */}
+        {WALL_CATEGORIES.includes(form.category) && parseFloat(form.wallGap) > 0 && (
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-gray-400">Gap sides:</label>
+            <div className="flex gap-2">
+              {['top', 'right', 'bottom', 'left'].map(side => (
+                <label key={side} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
+                  <input type="checkbox"
+                    checked={form.gapSides[side]}
+                    onChange={e => setForm({
+                      ...form,
+                      gapSides: { ...form.gapSides, [side]: e.target.checked }
+                    })}
+                    className="w-3 h-3 accent-amber-500"
+                  />
+                  {side.charAt(0).toUpperCase() + side.slice(1)}
+                </label>
               ))}
             </div>
           </div>

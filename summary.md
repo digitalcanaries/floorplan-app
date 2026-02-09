@@ -5,7 +5,7 @@ A web-based film/TV set floor plan layout tool for designing stage layouts, plac
 
 **Live URL:** http://16.54.34.31:3080
 **Repository:** digitalcanaries/floorplan-app
-**Last Updated:** February 2025
+**Last Updated:** February 2026
 
 ## Tech Stack
 - **Frontend:** React 19 + Vite 7, Fabric.js v7.1 (canvas), Zustand (state), Tailwind CSS v4
@@ -192,8 +192,11 @@ floorplan-app/
       FlatBuilder.jsx — Custom flat/window/door creation modals
       RulesTab.jsx    — Rule management
       LayersTab.jsx   — Layer visibility, groups, annotations, area calculation
-      TopBar.jsx      — Toolbar (~570 lines: grid, snap, labels, dims, save/load,
-                        layout, print/PDF, templates)
+      Scene3D.jsx     — Three.js 3D rendering engine (~700 lines: wall extrusion,
+                        door/window openings, flat construction frame, orbit/walkthrough,
+                        lighting, sky, floor, labels)
+      TopBar.jsx      — Toolbar (~580 lines: grid, snap, labels, dims, save/load,
+                        layout, print/PDF, templates, 3D view toggle)
       HelpGuide.jsx   — Searchable help guide (16 sections)
       UserMenu.jsx    — User dropdown (help, password, admin, logout)
   public/
@@ -263,19 +266,21 @@ floorplan-app/
 
 ## Development Roadmap — Path to 3D Set Walkthroughs
 
-### Phase 2A — 3D Foundation (NEXT)
+### Phase 2A — 3D Foundation (DONE)
 _Goal: Get basic 3D extrusion of the 2D floor plan so you can see walls standing up._
 
-| Step | Task | Details | Effort |
-|------|------|---------|--------|
-| 2A-1 | **Add Three.js / React Three Fiber** | Install @react-three/fiber + @react-three/drei. Create a `Scene3D.jsx` component. Add a "3D" view mode toggle in TopBar alongside the existing Plan/Elevation selector. | Small |
-| 2A-2 | **Extrude walls from 2D plan** | Convert each Wall/Flat set to a 3D box mesh. Use `width` as length, `thickness` (or default 0.33ft) as depth, and a new `wallHeight` field (default 10ft) as the vertical height. Position using x/y from the 2D plan. | Medium |
-| 2A-3 | **Floor and ceiling planes** | Generate floor mesh from bounding box of all sets. Optional ceiling mesh. Apply basic materials (concrete grey floor, white walls). | Small |
-| 2A-4 | **Camera controls** | OrbitControls for rotating around the scene. Toggle to first-person (PointerLockControls / WASD walking) for walkthrough mode. Eye-height at 5'6". | Medium |
-| 2A-5 | **Door & window openings** | For Door/Window sets, cut holes in the parent wall mesh using CSG (Constructive Solid Geometry). Window openings show glass plane, doors show the opening. | Medium |
-| 2A-6 | **Lighting** | Ambient light + directional sun. Point lights inside rooms. Skylights cast light cones from ceiling. | Small |
+| Step | Task | Status |
+|------|------|--------|
+| 2A-1 | **Add Three.js / React Three Fiber** — `@react-three/fiber` + `@react-three/drei` + `three`. Scene3D.jsx component lazy-loaded. "3D Walk-Through" option in view mode dropdown. | DONE |
+| 2A-2 | **Extrude walls from 2D plan** — Walls/flats extruded to 3D boxes. `wallHeight` field (default 12ft). Construction view shows 1×3 timber framing with rails, stiles, toggles, luan skin. Toggle: Finished / Construction Front / Construction Rear. | DONE |
+| 2A-3 | **Floor plane** — Dynamic floor mesh computed from set bounding box with 20ft padding. Concrete grey material. Grid helper overlay. | DONE |
+| 2A-4 | **Camera controls** — OrbitControls (rotate/pan/zoom). First-person walkthrough (WASD + pointer lock mouse look). Eye-height at 5'6". Space/Shift for vertical movement. | DONE |
+| 2A-5 | **Door & window openings** — Doors cut floor-to-head (7ft) openings in walls. Windows cut sill-to-head (3ft-7ft) openings with glass pane. Doors rendered as 3D frames with open passage. Windows rendered with frame and glass. | DONE |
+| 2A-6 | **Lighting** — Ambient + directional (with shadow maps 2048px) + hemisphere sky/ground. Sky dome. | DONE |
+| 2A-7 | **Per-wall access gap control** — Individual wall sides can have gap/no-gap. Zero gap option for back-to-back walls. Global + per-wall height settings. | DONE |
+| 2A-8 | **Standard architectural icons** — Plan-view door symbols with swing arcs (single/double/arch). Window symbols with frame lines and glass. Proper wall section fills. | DONE |
 
-**Deliverable:** Toggle between 2D plan view and 3D walkthrough of the same floor plan. Navigate through the 883 Islington warehouse and offices in first-person.
+**Deliverable:** Toggle between 2D plan view and 3D walkthrough. Navigate through sets in first-person. Toggle wall construction view to see framing.
 
 ### Phase 2B — Materials, Textures & Polish
 _Goal: Make the 3D look realistic enough for client presentations._

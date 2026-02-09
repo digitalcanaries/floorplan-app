@@ -628,27 +628,36 @@ export default function FloorCanvas({ onCanvasSize }) {
         iconObjects.forEach(obj => fc.add(obj))
       }
 
-      // Wall gap zone — dashed outline around set showing access area
+      // Wall gap zone — per-side dashed outline around set showing access area
       if (s.wallGap && s.wallGap > 0) {
         const gapPx = s.wallGap * ppu
         const isRotated = (s.rotation || 0) % 180 !== 0
-        const gapW = (isRotated ? h : w) + gapPx * 2
-        const gapH = (isRotated ? w : h) + gapPx * 2
+        const setW = isRotated ? h : w
+        const setH = isRotated ? w : h
+        const sides = s.gapSides || { top: true, right: true, bottom: true, left: true }
 
-        const gapZone = new fabric.Rect({
-          left: s.x - gapPx,
-          top: s.y - gapPx,
-          width: gapW,
-          height: gapH,
-          fill: 'transparent',
-          stroke: '#f59e0b55',
-          strokeWidth: 1.5,
-          strokeDashArray: [8, 4],
-          selectable: false,
-          evented: false,
-          name: GAP_PREFIX + s.id,
-        })
-        fc.add(gapZone)
+        // Map sides based on rotation
+        let mappedSides = sides
+        if (isRotated) {
+          const rot = (s.rotation || 0) % 360
+          if (rot === 90) mappedSides = { top: sides.left, right: sides.top, bottom: sides.right, left: sides.bottom }
+          else if (rot === 270) mappedSides = { top: sides.right, right: sides.bottom, bottom: sides.left, left: sides.top }
+        }
+
+        const gapStyle = { fill: '#f59e0b15', stroke: '#f59e0b55', strokeWidth: 1.5, strokeDashArray: [8, 4], selectable: false, evented: false }
+
+        if (mappedSides.top) {
+          fc.add(new fabric.Rect({ ...gapStyle, left: s.x, top: s.y - gapPx, width: setW, height: gapPx, name: GAP_PREFIX + s.id + '-top' }))
+        }
+        if (mappedSides.bottom) {
+          fc.add(new fabric.Rect({ ...gapStyle, left: s.x, top: s.y + setH, width: setW, height: gapPx, name: GAP_PREFIX + s.id + '-bottom' }))
+        }
+        if (mappedSides.left) {
+          fc.add(new fabric.Rect({ ...gapStyle, left: s.x - gapPx, top: s.y - (mappedSides.top ? gapPx : 0), width: gapPx, height: setH + (mappedSides.top ? gapPx : 0) + (mappedSides.bottom ? gapPx : 0), name: GAP_PREFIX + s.id + '-left' }))
+        }
+        if (mappedSides.right) {
+          fc.add(new fabric.Rect({ ...gapStyle, left: s.x + setW, top: s.y - (mappedSides.top ? gapPx : 0), width: gapPx, height: setH + (mappedSides.top ? gapPx : 0) + (mappedSides.bottom ? gapPx : 0), name: GAP_PREFIX + s.id + '-right' }))
+        }
       }
 
       // Labels — inline mode only (callout mode renders labels separately below)

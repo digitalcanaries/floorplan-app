@@ -73,6 +73,9 @@ const useStore = create((set, get) => ({
   // Hover tooltips
   showHoverTooltips: saved?.showHoverTooltips ?? true,
 
+  // Default wall height (global setting, feet)
+  defaultWallHeight: saved?.defaultWallHeight ?? 12,
+
   // Clipboard (not persisted)
   _clipboard: null,
 
@@ -253,6 +256,7 @@ const useStore = create((set, get) => ({
       iconType: s.iconType || 'rect', thickness: s.thickness ?? null,
       wallHeight: s.wallHeight ?? null, elevation: s.elevation ?? 0,
       materialTexture: s.materialTexture || null,
+      gapSides: s.gapSides || null, // { top: true, right: true, bottom: true, left: true } or null for all sides
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
     }
@@ -277,6 +281,7 @@ const useStore = create((set, get) => ({
       iconType: s.iconType || 'rect', thickness: s.thickness ?? null,
       wallHeight: s.wallHeight ?? null, elevation: s.elevation ?? 0,
       materialTexture: s.materialTexture || null,
+      gapSides: s.gapSides || null,
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
     }))
@@ -551,6 +556,12 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Default wall height
+  setDefaultWallHeight: (h) => {
+    set({ defaultWallHeight: h })
+    get().autosave()
+  },
+
   // Layer visibility by category
   setLayerVisibility: (category, visible) => {
     const current = get().layerVisibility
@@ -690,6 +701,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
+      defaultWallHeight: state.defaultWallHeight,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -728,6 +740,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
+      defaultWallHeight: state.defaultWallHeight,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -788,6 +801,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
+      defaultWallHeight: state.defaultWallHeight,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
       nextSetId: state.nextSetId,
@@ -819,6 +833,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: data.wallRenderMode ?? 'finished',
       showDimensions: data.showDimensions ?? false,
       showHoverTooltips: data.showHoverTooltips ?? true,
+      defaultWallHeight: data.defaultWallHeight ?? 12,
       layerVisibility: data.layerVisibility || {},
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,
