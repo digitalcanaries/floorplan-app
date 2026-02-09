@@ -444,19 +444,16 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
   )
 }
 
-// ─── Generic Set Mesh ──────────────────────────────────────────────────────
-function SetMesh({ set, ppu, defaultWallHeight }) {
+// ─── Special Set Mesh (columns, stairs, furniture) ───────────────────────
+function SpecialSetMesh({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
   const elevation = set.elevation || 0
-  const wallHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
-  const t = 0.292 // standard flat wall thickness
 
   const color = useMemo(() => {
     if (set.color && set.color !== '#ffffff') return set.color
-    return '#E8E0D8'
+    return '#CCCCCC'
   }, [set.color])
 
-  // Columns are cylinders
   if (set.category === 'Column') {
     const radius = Math.min(set.width, set.height) / 2
     const colHeight = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
@@ -468,7 +465,6 @@ function SetMesh({ set, ppu, defaultWallHeight }) {
     )
   }
 
-  // Stairs - stepped blocks
   if (set.category === 'Stair') {
     const steps = 12
     const stepH = (set.wallHeight || 10) / steps
@@ -487,53 +483,205 @@ function SetMesh({ set, ppu, defaultWallHeight }) {
     )
   }
 
-  // Furniture — keep as low solid boxes
-  if (set.category === 'Furniture' || set.category === 'Other') {
-    const furnHeight = set.wallHeight || 3
-    return (
-      <mesh position={[cx, furnHeight / 2 + elevation, cz]} rotation={[0, rotY, 0]} castShadow receiveShadow>
-        <boxGeometry args={[set.width, furnHeight, set.height]} />
-        <meshStandardMaterial
-          color={color}
-          transparent={set.opacity < 1}
-          opacity={Math.max(set.opacity || 1, 0.5)}
-          roughness={0.7}
-        />
-      </mesh>
-    )
-  }
-
-  // Default (category: 'Set') — render as 4 thin walls forming a hollow room
-  const w = set.width
-  const d = set.height
+  // Furniture / Other — low solid box
+  const furnHeight = set.wallHeight || 3
   return (
-    <group position={[cx, elevation, cz]} rotation={[0, rotY, 0]}>
-      {/* Floor plane */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} receiveShadow>
-        <planeGeometry args={[w, d]} />
-        <meshStandardMaterial color={color} transparent opacity={0.15} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Front wall (negative Z face) */}
-      <mesh position={[0, wallHeight / 2, -d / 2 + t / 2]} castShadow receiveShadow>
-        <boxGeometry args={[w, wallHeight, t]} />
-        <meshStandardMaterial color={color} roughness={0.8} />
-      </mesh>
-      {/* Back wall (positive Z face) */}
-      <mesh position={[0, wallHeight / 2, d / 2 - t / 2]} castShadow receiveShadow>
-        <boxGeometry args={[w, wallHeight, t]} />
-        <meshStandardMaterial color={color} roughness={0.8} />
-      </mesh>
-      {/* Left wall (negative X face) */}
-      <mesh position={[-w / 2 + t / 2, wallHeight / 2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[t, wallHeight, d - t * 2]} />
-        <meshStandardMaterial color={color} roughness={0.8} />
-      </mesh>
-      {/* Right wall (positive X face) */}
-      <mesh position={[w / 2 - t / 2, wallHeight / 2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[t, wallHeight, d - t * 2]} />
-        <meshStandardMaterial color={color} roughness={0.8} />
-      </mesh>
-    </group>
+    <mesh position={[cx, furnHeight / 2 + elevation, cz]} rotation={[0, rotY, 0]} castShadow receiveShadow>
+      <boxGeometry args={[set.width, furnHeight, set.height]} />
+      <meshStandardMaterial
+        color={color}
+        transparent={set.opacity < 1}
+        opacity={Math.max(set.opacity || 1, 0.5)}
+        roughness={0.7}
+      />
+    </mesh>
+  )
+}
+
+// ─── Set Rooms: build walls only on unshared edges ─────────────────────
+function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }) {
+  const WALL_T = 0.292
+  const EDGE_TOLERANCE = 1.5 // feet — how close edges must be to count as shared
+
+  // Compute all wall segments: for each room, check each of 4 edges
+  const wallSegments = useMemo(() => {
+    // Pre-compute axis-aligned bounding boxes in feet for all rooms
+    const boxes = roomSets.map(s => {
+      const isRot = (s.rotation || 0) % 180 !== 0
+      const fw = isRot ? s.height : s.width
+      const fh = isRot ? s.width : s.height
+      const x1 = s.x / ppu
+      const z1 = s.y / ppu
+      const x2 = x1 + fw
+      const z2 = z1 + fh
+      return { s, x1, z1, x2, z2, fw, fh }
+    })
+
+    // Pre-compute door/window boxes in feet
+    const openingBoxes = [...doorSets, ...windowSets].map(o => {
+      const isRot = (o.rotation || 0) % 180 !== 0
+      const fw = isRot ? o.height : o.width
+      const fh = isRot ? o.width : o.height
+      const x1 = o.x / ppu
+      const z1 = o.y / ppu
+      return { o, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
+    })
+
+    const segments = []
+
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i]
+      const wh = b.s.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
+      const color = (b.s.color && b.s.color !== '#ffffff') ? b.s.color : '#E8E0D8'
+
+      // 4 edges: top (z1), bottom (z2), left (x1), right (x2)
+      // Each edge is a line segment; check if another room shares that edge
+      const edges = [
+        { side: 'top', fixedAxis: 'z', fixedVal: b.z1, rangeAxis: 'x', rangeMin: b.x1, rangeMax: b.x2 },
+        { side: 'bottom', fixedAxis: 'z', fixedVal: b.z2, rangeAxis: 'x', rangeMin: b.x1, rangeMax: b.x2 },
+        { side: 'left', fixedAxis: 'x', fixedVal: b.x1, rangeAxis: 'z', rangeMin: b.z1, rangeMax: b.z2 },
+        { side: 'right', fixedAxis: 'x', fixedVal: b.x2, rangeAxis: 'z', rangeMin: b.z1, rangeMax: b.z2 },
+      ]
+
+      for (const edge of edges) {
+        // Find segments of this edge that are NOT shared with another room
+        // Collect all "covered" intervals from other rooms
+        const coveredIntervals = []
+
+        for (let j = 0; j < boxes.length; j++) {
+          if (j === i) continue
+          const other = boxes[j]
+
+          // Check if the other room shares this edge
+          let edgeMatch = false
+          if (edge.fixedAxis === 'z') {
+            // Horizontal edge: check if other room has an edge at same Z
+            edgeMatch = (Math.abs(other.z1 - edge.fixedVal) < EDGE_TOLERANCE) ||
+                        (Math.abs(other.z2 - edge.fixedVal) < EDGE_TOLERANCE)
+          } else {
+            // Vertical edge: check if other room has an edge at same X
+            edgeMatch = (Math.abs(other.x1 - edge.fixedVal) < EDGE_TOLERANCE) ||
+                        (Math.abs(other.x2 - edge.fixedVal) < EDGE_TOLERANCE)
+          }
+
+          if (edgeMatch) {
+            // Find the overlapping range along the edge
+            let overlapMin, overlapMax
+            if (edge.rangeAxis === 'x') {
+              overlapMin = Math.max(edge.rangeMin, other.x1)
+              overlapMax = Math.min(edge.rangeMax, other.x2)
+            } else {
+              overlapMin = Math.max(edge.rangeMin, other.z1)
+              overlapMax = Math.min(edge.rangeMax, other.z2)
+            }
+            if (overlapMax > overlapMin + 0.01) {
+              coveredIntervals.push({ min: overlapMin, max: overlapMax })
+            }
+          }
+        }
+
+        // Also check for door/window openings on this edge
+        for (const ob of openingBoxes) {
+          let onEdge = false
+          if (edge.fixedAxis === 'z') {
+            onEdge = ob.z1 < edge.fixedVal + EDGE_TOLERANCE && ob.z2 > edge.fixedVal - EDGE_TOLERANCE
+          } else {
+            onEdge = ob.x1 < edge.fixedVal + EDGE_TOLERANCE && ob.x2 > edge.fixedVal - EDGE_TOLERANCE
+          }
+          if (onEdge) {
+            let overlapMin, overlapMax
+            if (edge.rangeAxis === 'x') {
+              overlapMin = Math.max(edge.rangeMin, ob.x1)
+              overlapMax = Math.min(edge.rangeMax, ob.x2)
+            } else {
+              overlapMin = Math.max(edge.rangeMin, ob.z1)
+              overlapMax = Math.min(edge.rangeMax, ob.z2)
+            }
+            if (overlapMax > overlapMin + 0.01) {
+              coveredIntervals.push({ min: overlapMin, max: overlapMax })
+            }
+          }
+        }
+
+        // Merge covered intervals
+        coveredIntervals.sort((a, b) => a.min - b.min)
+        const merged = []
+        for (const iv of coveredIntervals) {
+          if (merged.length > 0 && iv.min <= merged[merged.length - 1].max + 0.01) {
+            merged[merged.length - 1].max = Math.max(merged[merged.length - 1].max, iv.max)
+          } else {
+            merged.push({ ...iv })
+          }
+        }
+
+        // Build uncovered wall segments
+        let cursor = edge.rangeMin
+        for (const iv of merged) {
+          if (iv.min > cursor + 0.1) {
+            segments.push({
+              side: edge.side, fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
+              rangeAxis: edge.rangeAxis, rangeMin: cursor, rangeMax: iv.min,
+              wallHeight: wh, color, setId: b.s.id,
+            })
+          }
+          cursor = Math.max(cursor, iv.max)
+        }
+        if (cursor < edge.rangeMax - 0.1) {
+          segments.push({
+            side: edge.side, fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
+            rangeAxis: edge.rangeAxis, rangeMin: cursor, rangeMax: edge.rangeMax,
+            wallHeight: wh, color, setId: b.s.id,
+          })
+        }
+      }
+    }
+
+    return segments
+  }, [roomSets, doorSets, windowSets, ppu, defaultWallHeight])
+
+  // Floor planes for each room
+  const floors = useMemo(() => {
+    return roomSets.map(s => {
+      const { cx, cz, rotY } = get3DPosition(s, ppu)
+      const color = (s.color && s.color !== '#ffffff') ? s.color : '#E8E0D8'
+      return { cx, cz, rotY, w: s.width, d: s.height, color, id: s.id }
+    })
+  }, [roomSets, ppu])
+
+  return (
+    <>
+      {/* Floor planes */}
+      {floors.map(f => (
+        <mesh key={`floor-${f.id}`} rotation={[-Math.PI / 2, 0, 0]} position={[f.cx, 0.01, f.cz]} receiveShadow>
+          <planeGeometry args={[f.w, f.d]} />
+          <meshStandardMaterial color={f.color} transparent opacity={0.2} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+      {/* Wall segments */}
+      {wallSegments.map((seg, i) => {
+        const len = seg.rangeMax - seg.rangeMin
+        const mid = (seg.rangeMin + seg.rangeMax) / 2
+        const wh = seg.wallHeight
+
+        let pos, size
+        if (seg.fixedAxis === 'z') {
+          // Horizontal wall: runs along X, at fixed Z
+          pos = [mid, wh / 2, seg.fixedVal]
+          size = [len, wh, WALL_T]
+        } else {
+          // Vertical wall: runs along Z, at fixed X
+          pos = [seg.fixedVal, wh / 2, mid]
+          size = [WALL_T, wh, len]
+        }
+
+        return (
+          <mesh key={`wall-${i}`} position={pos} castShadow receiveShadow>
+            <boxGeometry args={size} />
+            <meshStandardMaterial color={seg.color} roughness={0.8} />
+          </mesh>
+        )
+      })}
+    </>
   )
 }
 
@@ -706,7 +854,7 @@ function SceneContent({ controlMode }) {
     )
   }, [sets, layerVisibility])
 
-  // Separate walls, doors, windows, and other sets
+  // Separate sets by type
   const wallSets = useMemo(() =>
     visibleSets.filter(s => s.category === 'Wall' || s.iconType === 'flat' || s.iconType === 'double-flat' || s.iconType === 'braced-wall'),
     [visibleSets]
@@ -719,10 +867,21 @@ function SceneContent({ controlMode }) {
     visibleSets.filter(s => s.category === 'Window'),
     [visibleSets]
   )
-  const otherSets = useMemo(() =>
+  // Room sets: category is 'Set' or undefined (the main rooms/spaces)
+  const roomSets = useMemo(() =>
     visibleSets.filter(s =>
-      s.category !== 'Wall' && s.category !== 'Door' && s.category !== 'Window'
-      && s.iconType !== 'flat' && s.iconType !== 'double-flat' && s.iconType !== 'braced-wall'
+      (s.category === 'Set' || !s.category) &&
+      s.category !== 'Wall' && s.category !== 'Door' && s.category !== 'Window' &&
+      s.iconType !== 'flat' && s.iconType !== 'double-flat' && s.iconType !== 'braced-wall'
+    ),
+    [visibleSets]
+  )
+  // Special sets: furniture, columns, stairs, other category items
+  const specialSets = useMemo(() =>
+    visibleSets.filter(s =>
+      s.category === 'Furniture' || s.category === 'Other' ||
+      s.category === 'Column' || s.category === 'Stair' ||
+      s.category === 'Bathroom' || s.category === 'Kitchen'
     ),
     [visibleSets]
   )
@@ -746,12 +905,13 @@ function SceneContent({ controlMode }) {
   // Debug: log what we're rendering
   useEffect(() => {
     console.log('[Scene3D] ppu:', ppu, 'defaultWallHeight:', defaultWallHeight)
-    console.log('[Scene3D] wallSets:', wallSets.length, wallSets.map(s => ({ id: s.id, name: s.name, cat: s.category, icon: s.iconType, w: s.width, h: s.height, wh: s.wallHeight, thick: s.thickness, x: s.x, y: s.y })))
+    console.log('[Scene3D] wallSets:', wallSets.length)
+    console.log('[Scene3D] roomSets:', roomSets.length, roomSets.map(s => ({ id: s.id, name: s.name, cat: s.category, w: s.width, h: s.height, x: s.x, y: s.y })))
     console.log('[Scene3D] doorSets:', doorSets.length)
     console.log('[Scene3D] windowSets:', windowSets.length)
-    console.log('[Scene3D] otherSets:', otherSets.length, otherSets.map(s => ({ id: s.id, name: s.name, cat: s.category, w: s.width, h: s.height, x: s.x, y: s.y })))
+    console.log('[Scene3D] specialSets:', specialSets.length)
     console.log('[Scene3D] sceneCenter:', sceneCenter)
-  }, [wallSets, doorSets, windowSets, otherSets, ppu, defaultWallHeight, sceneCenter])
+  }, [wallSets, roomSets, doorSets, windowSets, specialSets, ppu, defaultWallHeight, sceneCenter])
 
   return (
     <>
@@ -788,10 +948,19 @@ function SceneContent({ controlMode }) {
         position={[sceneCenter[0], -0.005, sceneCenter[2]]}
       />
 
-      {/* Walls */}
+      {/* Individual wall pieces (flat components) */}
       {wallSets.map(s => (
         <WallMesh key={s.id} set={s} ppu={ppu} allSets={visibleSets} renderMode={wallRenderMode} defaultWallHeight={defaultWallHeight} />
       ))}
+
+      {/* Room Sets: smart walls on unshared edges, with door/window openings */}
+      <SetRoomWalls
+        roomSets={roomSets}
+        doorSets={doorSets}
+        windowSets={windowSets}
+        ppu={ppu}
+        defaultWallHeight={defaultWallHeight}
+      />
 
       {/* Doors */}
       {doorSets.map(s => (
@@ -803,9 +972,9 @@ function SceneContent({ controlMode }) {
         <WindowMesh3D key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
       ))}
 
-      {/* Other sets (rooms, furniture, columns, stairs, etc.) */}
-      {otherSets.map(s => (
-        <SetMesh key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+      {/* Special sets (furniture, columns, stairs, etc.) */}
+      {specialSets.map(s => (
+        <SpecialSetMesh key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
       ))}
 
       {/* 3D Labels */}
