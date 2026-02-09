@@ -23,7 +23,7 @@ router.get('/', (req, res) => {
 
 // POST /api/components — create custom component
 router.post('/', (req, res) => {
-  const { category, subcategory, name, width, height, thickness, icon_type, properties } = req.body
+  const { category, subcategory, name, width, height, thickness, icon_type, properties, wallHeight } = req.body
   if (!category || !name || !width || !height) {
     return res.status(400).json({ error: 'Category, name, width, and height are required' })
   }
@@ -50,6 +50,7 @@ router.post('/', (req, res) => {
     name,
     width,
     height,
+    wallHeight: wallHeight || null,
     thickness: thickness || 0.292,
     icon_type: icon_type || 'rect',
     properties: properties || {},

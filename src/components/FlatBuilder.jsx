@@ -68,9 +68,9 @@ function FlatForm({ onSave }) {
       subcategory: sides === 'braced' ? 'Braced Access' : sides === 'double' ? 'Double Flat' : style === 'hollywood' ? 'Hollywood Flat' : 'Broadway Flat',
       name: name || autoName,
       width,
-      height,
+      height: thickness, // plan-view: height of the set IS the depth/thickness (thin line from above)
       thickness,
-      wallHeight: height,
+      wallHeight: height, // actual elevation height (e.g. 12ft)
       icon_type: iconType,
       properties: {
         style,
@@ -82,7 +82,8 @@ function FlatForm({ onSave }) {
         lumberFt: Math.round(lumberFt),
         luanSheets,
         flatWidth: width,
-        flatHeight: height,
+        flatHeight: height, // elevation height
+        elevationHeight: height, // consistent with door/window property naming
       },
     })
   }

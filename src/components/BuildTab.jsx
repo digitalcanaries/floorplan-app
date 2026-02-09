@@ -71,10 +71,19 @@ export default function BuildTab() {
   const handleAddToCanvas = (comp) => {
     const categoryMap = { Wall: 'Wall', Window: 'Window', Door: 'Door', Other: 'Other' }
     const noCut = ['Wall', 'Window', 'Door'].includes(comp.category)
+    const props = comp.properties || {}
+    // Derive wallHeight from explicit field, properties, or (for legacy wall seed data) from height
+    const wallHeight = comp.wallHeight || props.elevationHeight || props.flatHeight || null
+    // For Wall category: if height looks like elevation (> thickness*3), use thickness as plan depth
+    const isWall = comp.category === 'Wall'
+    const planHeight = (isWall && comp.height > (comp.thickness || 0.3) * 3)
+      ? (comp.thickness || 0.292)
+      : comp.height
+    const effectiveWallHeight = wallHeight || (isWall && comp.height > (comp.thickness || 0.3) * 3 ? comp.height : null)
     addSet({
       name: comp.name,
       width: comp.width,
-      height: comp.height,
+      height: planHeight,
       color: getDefaultColor(comp.category),
       category: categoryMap[comp.category] || 'Set',
       noCut,
@@ -82,6 +91,7 @@ export default function BuildTab() {
       thickness: comp.thickness,
       componentTypeId: comp.id,
       componentProperties: comp.properties || null,
+      wallHeight: effectiveWallHeight,
       wallGap: noCut ? 1 : 0,
       opacity: comp.category === 'Window' ? 0.7 : 1,
     })
