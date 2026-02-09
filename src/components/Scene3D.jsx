@@ -498,12 +498,14 @@ function SpecialSetMesh({ set, ppu, defaultWallHeight }) {
   )
 }
 
-// ─── Set Rooms: build walls only on unshared edges ─────────────────────
+// ─── Set Rooms: 4 walls per room, only cut openings for doors/windows ────────
+// Adjacent rooms will have overlapping walls (double-thickness) which is fine
+// visually and avoids the missing-wall problem. We deduplicate by only letting
+// the room with the LOWER id emit a wall when two rooms share an edge.
 function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }) {
   const WALL_T = 0.292
-  const EDGE_TOLERANCE = 1.5 // feet — how close edges must be to count as shared
+  const EDGE_TOLERANCE = 0.5 // feet — tight tolerance for edge deduplication
 
-  // Compute all wall segments: for each room, check each of 4 edges
   const wallSegments = useMemo(() => {
     // Pre-compute axis-aligned bounding boxes in feet for all rooms
     const boxes = roomSets.map(s => {
@@ -524,7 +526,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
       const fh = isRot ? o.width : o.height
       const x1 = o.x / ppu
       const z1 = o.y / ppu
-      return { o, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
+      return { o, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh, isDoor: o.category === 'Door' }
     })
 
     const segments = []
@@ -534,8 +536,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
       const wh = b.s.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
       const color = (b.s.color && b.s.color !== '#ffffff') ? b.s.color : '#E8E0D8'
 
-      // 4 edges: top (z1), bottom (z2), left (x1), right (x2)
-      // Each edge is a line segment; check if another room shares that edge
+      // 4 edges of this room
       const edges = [
         { side: 'top', fixedAxis: 'z', fixedVal: b.z1, rangeAxis: 'x', rangeMin: b.x1, rangeMax: b.x2 },
         { side: 'bottom', fixedAxis: 'z', fixedVal: b.z2, rangeAxis: 'x', rangeMin: b.x1, rangeMax: b.x2 },
@@ -544,28 +545,22 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
       ]
 
       for (const edge of edges) {
-        // Find segments of this edge that are NOT shared with another room
-        // Collect all "covered" intervals from other rooms
-        const coveredIntervals = []
+        // Deduplication: if another room (with lower index j < i) shares this
+        // exact edge position and overlaps along the range, let that room own
+        // the overlapping portion. We skip those intervals to avoid double walls.
+        const skipIntervals = []
 
-        for (let j = 0; j < boxes.length; j++) {
-          if (j === i) continue
+        for (let j = 0; j < i; j++) {
           const other = boxes[j]
-
-          // Check if the other room shares this edge
           let edgeMatch = false
           if (edge.fixedAxis === 'z') {
-            // Horizontal edge: check if other room has an edge at same Z
             edgeMatch = (Math.abs(other.z1 - edge.fixedVal) < EDGE_TOLERANCE) ||
                         (Math.abs(other.z2 - edge.fixedVal) < EDGE_TOLERANCE)
           } else {
-            // Vertical edge: check if other room has an edge at same X
             edgeMatch = (Math.abs(other.x1 - edge.fixedVal) < EDGE_TOLERANCE) ||
                         (Math.abs(other.x2 - edge.fixedVal) < EDGE_TOLERANCE)
           }
-
           if (edgeMatch) {
-            // Find the overlapping range along the edge
             let overlapMin, overlapMax
             if (edge.rangeAxis === 'x') {
               overlapMin = Math.max(edge.rangeMin, other.x1)
@@ -575,12 +570,13 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
               overlapMax = Math.min(edge.rangeMax, other.z2)
             }
             if (overlapMax > overlapMin + 0.01) {
-              coveredIntervals.push({ min: overlapMin, max: overlapMax })
+              skipIntervals.push({ min: overlapMin, max: overlapMax })
             }
           }
         }
 
-        // Also check for door/window openings on this edge
+        // Collect door/window openings that sit on this edge
+        const openingIntervals = []
         for (const ob of openingBoxes) {
           let onEdge = false
           if (edge.fixedAxis === 'z') {
@@ -598,40 +594,106 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
               overlapMax = Math.min(edge.rangeMax, ob.z2)
             }
             if (overlapMax > overlapMin + 0.01) {
-              coveredIntervals.push({ min: overlapMin, max: overlapMax })
+              const elevH = ob.o.componentProperties?.elevationHeight
+              const sillH = ob.isDoor ? 0 : WINDOW_SILL_HEIGHT
+              const headH = ob.isDoor
+                ? (elevH || ob.o.wallHeight || DOOR_HEIGHT)
+                : (elevH ? (sillH + elevH) : WINDOW_HEAD_HEIGHT)
+              openingIntervals.push({ min: overlapMin, max: overlapMax, sillH, headH, isDoor: ob.isDoor })
             }
           }
         }
 
-        // Merge covered intervals
-        coveredIntervals.sort((a, b) => a.min - b.min)
-        const merged = []
-        for (const iv of coveredIntervals) {
-          if (merged.length > 0 && iv.min <= merged[merged.length - 1].max + 0.01) {
-            merged[merged.length - 1].max = Math.max(merged[merged.length - 1].max, iv.max)
+        // Merge skip intervals (dedup)
+        skipIntervals.sort((a, b) => a.min - b.min)
+        const mergedSkip = []
+        for (const iv of skipIntervals) {
+          if (mergedSkip.length > 0 && iv.min <= mergedSkip[mergedSkip.length - 1].max + 0.01) {
+            mergedSkip[mergedSkip.length - 1].max = Math.max(mergedSkip[mergedSkip.length - 1].max, iv.max)
           } else {
-            merged.push({ ...iv })
+            mergedSkip.push({ ...iv })
           }
         }
 
-        // Build uncovered wall segments
-        let cursor = edge.rangeMin
-        for (const iv of merged) {
-          if (iv.min > cursor + 0.1) {
-            segments.push({
-              side: edge.side, fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
-              rangeAxis: edge.rangeAxis, rangeMin: cursor, rangeMax: iv.min,
-              wallHeight: wh, color, setId: b.s.id,
-            })
+        // Build the portions of this edge that THIS room should render
+        // (subtract skip intervals from the full edge range)
+        let ownedRanges = [{ min: edge.rangeMin, max: edge.rangeMax }]
+        for (const sk of mergedSkip) {
+          const newRanges = []
+          for (const r of ownedRanges) {
+            if (sk.max <= r.min + 0.01 || sk.min >= r.max - 0.01) {
+              newRanges.push(r) // no overlap
+            } else {
+              if (sk.min > r.min + 0.1) newRanges.push({ min: r.min, max: sk.min })
+              if (sk.max < r.max - 0.1) newRanges.push({ min: sk.max, max: r.max })
+            }
           }
-          cursor = Math.max(cursor, iv.max)
+          ownedRanges = newRanges
         }
-        if (cursor < edge.rangeMax - 0.1) {
-          segments.push({
-            side: edge.side, fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
-            rangeAxis: edge.rangeAxis, rangeMin: cursor, rangeMax: edge.rangeMax,
-            wallHeight: wh, color, setId: b.s.id,
-          })
+
+        // For each owned range, cut out door/window openings and emit wall segments
+        for (const range of ownedRanges) {
+          // Find openings that overlap this range
+          const rangeOpenings = openingIntervals
+            .filter(op => op.max > range.min + 0.01 && op.min < range.max - 0.01)
+            .map(op => ({
+              ...op,
+              min: Math.max(op.min, range.min),
+              max: Math.min(op.max, range.max),
+            }))
+            .sort((a, b) => a.min - b.min)
+
+          if (rangeOpenings.length === 0) {
+            // Full wall, no openings
+            segments.push({
+              fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
+              rangeMin: range.min, rangeMax: range.max,
+              wallHeight: wh, color, setId: b.s.id,
+              yBottom: 0, yHeight: wh,
+            })
+          } else {
+            // Walk along the range, emitting wall pieces around openings
+            let cursor = range.min
+            for (const op of rangeOpenings) {
+              // Wall segment before the opening
+              if (op.min > cursor + 0.1) {
+                segments.push({
+                  fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
+                  rangeMin: cursor, rangeMax: op.min,
+                  wallHeight: wh, color, setId: b.s.id,
+                  yBottom: 0, yHeight: wh,
+                })
+              }
+              // Wall above the opening (header to ceiling)
+              if (op.headH < wh - 0.01) {
+                segments.push({
+                  fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
+                  rangeMin: op.min, rangeMax: op.max,
+                  wallHeight: wh - op.headH, color, setId: b.s.id,
+                  yBottom: op.headH, yHeight: wh - op.headH,
+                })
+              }
+              // Wall below window (sill)
+              if (op.sillH > 0.01) {
+                segments.push({
+                  fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
+                  rangeMin: op.min, rangeMax: op.max,
+                  wallHeight: op.sillH, color, setId: b.s.id,
+                  yBottom: 0, yHeight: op.sillH,
+                })
+              }
+              cursor = op.max
+            }
+            // Wall segment after last opening
+            if (cursor < range.max - 0.1) {
+              segments.push({
+                fixedAxis: edge.fixedAxis, fixedVal: edge.fixedVal,
+                rangeMin: cursor, rangeMax: range.max,
+                wallHeight: wh, color, setId: b.s.id,
+                yBottom: 0, yHeight: wh,
+              })
+            }
+          }
         }
       }
     }
@@ -661,17 +723,17 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
       {wallSegments.map((seg, i) => {
         const len = seg.rangeMax - seg.rangeMin
         const mid = (seg.rangeMin + seg.rangeMax) / 2
-        const wh = seg.wallHeight
+        const yCenter = seg.yBottom + seg.yHeight / 2
 
         let pos, size
         if (seg.fixedAxis === 'z') {
           // Horizontal wall: runs along X, at fixed Z
-          pos = [mid, wh / 2, seg.fixedVal]
-          size = [len, wh, WALL_T]
+          pos = [mid, yCenter, seg.fixedVal]
+          size = [len, seg.yHeight, WALL_T]
         } else {
           // Vertical wall: runs along Z, at fixed X
-          pos = [seg.fixedVal, wh / 2, mid]
-          size = [WALL_T, wh, len]
+          pos = [seg.fixedVal, yCenter, mid]
+          size = [WALL_T, seg.yHeight, len]
         }
 
         return (
