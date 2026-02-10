@@ -24,64 +24,21 @@ const TIMBER_WIDTH = 0.208       // 1×3 actual is ~2.5" = 0.208' width
 const LUAN_THICKNESS = 0.021     // ~1/4" luan
 
 // ─── Coordinate helpers ──────────────────────────────────────────────
-// 2D canvas: set.x, set.y are the Fabric.js (left, top) with originX='left', originY='top'
-//   This means (x, y) is the rotation PIVOT — the top-left corner of the UNROTATED rect.
-//   For 0° and 90°, this coincides with the visual bounding box top-left, but NOT for 180°/270°.
-// 2D canvas: set.width, set.height are in feet (NOT pixels)
+// 2D canvas: set.x, set.y are pixel positions (top-left corner of bounding box)
+// 2D canvas: set.width, set.height are in feet
 // 2D pixel footprint = width * ppu, height * ppu
 // 3D world: X = right, Y = up, Z = into screen (matching 2D Y axis)
+// Convert: center_x_feet = set.x / ppu + footprintW / 2
+//          center_z_feet = set.y / ppu + footprintH / 2
 // Rotation: 2D rotation is clockwise degrees, 3D Y rotation is counter-clockwise
-//
-// To find the visual bounding box center, we rotate the 4 corners of the unrotated rect
-// around the pivot (set.x, set.y) and then compute the bounding box center.
 
 function get3DPosition(set, ppu) {
-  const rotDeg = (set.rotation || 0) % 360
-  const wPx = set.width * ppu   // unrotated width in pixels
-  const hPx = set.height * ppu  // unrotated height in pixels
-
-  // The 4 corners of the unrotated rect relative to pivot (set.x, set.y) = (0,0)
-  const corners = [
-    { x: 0, y: 0 },         // top-left (the pivot)
-    { x: wPx, y: 0 },       // top-right
-    { x: wPx, y: hPx },     // bottom-right
-    { x: 0, y: hPx },       // bottom-left
-  ]
-
-  // Rotate corners around (0,0) by rotDeg clockwise
-  const rad = rotDeg * Math.PI / 180
-  const cosA = Math.cos(rad)
-  const sinA = Math.sin(rad)
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-  for (const c of corners) {
-    // Clockwise rotation: x' = x*cos + y*sin, y' = -x*sin + y*cos
-    const rx = c.x * cosA + c.y * sinA
-    const ry = -c.x * sinA + c.y * cosA
-    // Translate back to world coords (add pivot)
-    const wx = set.x + rx
-    const wy = set.y + ry
-    minX = Math.min(minX, wx)
-    minY = Math.min(minY, wy)
-    maxX = Math.max(maxX, wx)
-    maxY = Math.max(maxY, wy)
-  }
-
-  // Bounding box in pixels
-  const bbW = maxX - minX
-  const bbH = maxY - minY
-  const bbCenterX = (minX + maxX) / 2
-  const bbCenterY = (minY + maxY) / 2
-
-  // Convert to feet for 3D
-  const footprintW = bbW / ppu
-  const footprintH = bbH / ppu
-  const cx = bbCenterX / ppu
-  const cz = bbCenterY / ppu
-
-  // 3D Y rotation (counter-clockwise to match visual)
-  const rotY = rotDeg ? -(rotDeg * Math.PI / 180) : 0
-
+  const isRotated = (set.rotation || 0) % 180 !== 0
+  const footprintW = isRotated ? set.height : set.width
+  const footprintH = isRotated ? set.width : set.height
+  const cx = set.x / ppu + footprintW / 2
+  const cz = set.y / ppu + footprintH / 2
+  const rotY = set.rotation ? -(set.rotation * Math.PI / 180) : 0
   return { cx, cz, rotY, footprintW, footprintH }
 }
 
@@ -663,48 +620,25 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
   const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
 
   const roomGroups = useMemo(() => {
-    // Helper: compute bounding box in feet from a set's pixel-based Fabric.js coords
-    // Handles rotation correctly by rotating corners around the pivot (set.x, set.y)
-    function getBBoxFeet(s) {
-      const rotDeg = (s.rotation || 0) % 360
-      const wPx = s.width * ppu
-      const hPx = s.height * ppu
-
-      // 4 corners relative to pivot (0,0)
-      const corners = [[0, 0], [wPx, 0], [wPx, hPx], [0, hPx]]
-      const rad = rotDeg * Math.PI / 180
-      const cosA = Math.cos(rad)
-      const sinA = Math.sin(rad)
-
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-      for (const [cx, cy] of corners) {
-        const rx = s.x + cx * cosA + cy * sinA
-        const ry = s.y + (-cx * sinA + cy * cosA)
-        minX = Math.min(minX, rx)
-        minY = Math.min(minY, ry)
-        maxX = Math.max(maxX, rx)
-        maxY = Math.max(maxY, ry)
-      }
-
-      // Convert to feet
-      const x1 = minX / ppu
-      const z1 = minY / ppu
-      const x2 = maxX / ppu
-      const z2 = maxY / ppu
-      return { x1, z1, x2, z2, fw: x2 - x1, fh: z2 - z1 }
-    }
-
-    // Pre-compute bounding boxes in FEET for all rooms
+    // Pre-compute bounding boxes in FEET (top-left origin) for all rooms
     const boxes = roomSets.map(s => {
-      const bb = getBBoxFeet(s)
-      return { s, ...bb }
+      const isRot = (s.rotation || 0) % 180 !== 0
+      const fw = isRot ? s.height : s.width
+      const fh = isRot ? s.width : s.height
+      const x1 = s.x / ppu
+      const z1 = s.y / ppu
+      return { s, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
     })
 
     // Pre-compute door/window bounding boxes in feet
     const openingBoxes = [...doorSets, ...windowSets].map(o => {
-      const bb = getBBoxFeet(o)
+      const isRot = (o.rotation || 0) % 180 !== 0
+      const fw = isRot ? o.height : o.width
+      const fh = isRot ? o.width : o.height
+      const x1 = o.x / ppu
+      const z1 = o.y / ppu
       return {
-        o, ...bb,
+        o, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh,
         isDoor: o.category === 'Door',
       }
     })
@@ -934,7 +868,7 @@ function FloorPlane({ sets, ppu }) {
   }, [sets, ppu])
 
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[bounds.cx, -0.01, bounds.cz]} receiveShadow>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[bounds.cx, -0.05, bounds.cz]} receiveShadow>
       <planeGeometry args={[bounds.w, bounds.d]} />
       <meshStandardMaterial color="#C0C0B8" roughness={0.9} />
     </mesh>
@@ -1154,14 +1088,8 @@ function SceneContent({ controlMode, orbitRef, locked3D }) {
       {/* Sky */}
       <Sky sunPosition={[100, 50, -50]} />
 
-      {/* Floor */}
+      {/* Ground plane — solid color, no grid overlay to avoid z-fighting flicker */}
       <FloorPlane sets={visibleSets} ppu={ppu} />
-
-      {/* Grid helper on floor */}
-      <gridHelper
-        args={[500, 500, '#666666', '#444444']}
-        position={[sceneCenter[0], -0.005, sceneCenter[2]]}
-      />
 
       {/* Individual wall pieces (flat components) */}
       {wallSets.map(s => (
