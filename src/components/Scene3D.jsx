@@ -33,12 +33,34 @@ const LUAN_THICKNESS = 0.021     // ~1/4" luan
 // Rotation: 2D rotation is clockwise degrees, 3D Y rotation is counter-clockwise
 
 function get3DPosition(set, ppu) {
-  const isRotated = (set.rotation || 0) % 180 !== 0
+  const rot = ((set.rotation || 0) % 360 + 360) % 360
+  const isRotated = rot === 90 || rot === 270
+
+  // Visual bounding box dimensions (swapped when rotated 90/270)
   const footprintW = isRotated ? set.height : set.width
   const footprintH = isRotated ? set.width : set.height
-  const cx = set.x / ppu + footprintW / 2
-  const cz = set.y / ppu + footprintH / 2
-  const rotY = set.rotation ? -(set.rotation * Math.PI / 180) : 0
+
+  // Fabric.js (left, top) is the rotation pivot = top-left of UNROTATED rect.
+  // In screen coords (y-down), CW rotation shifts the visual bounding box:
+  //   0°:   no shift
+  //   90°:  bbox shifts LEFT by height (x -= height)
+  //   180°: bbox shifts LEFT by width and UP by height (x -= width, y -= height)
+  //   270°: bbox shifts UP by width (y -= width)
+  // (all in feet, where width/height are the unrotated dimensions)
+  let bboxX = set.x / ppu
+  let bboxZ = set.y / ppu
+  if (rot === 90) {
+    bboxX -= set.height
+  } else if (rot === 180) {
+    bboxX -= set.width
+    bboxZ -= set.height
+  } else if (rot === 270) {
+    bboxZ -= set.width
+  }
+
+  const cx = bboxX + footprintW / 2
+  const cz = bboxZ + footprintH / 2
+  const rotY = rot ? -(rot * Math.PI / 180) : 0
   return { cx, cz, rotY, footprintW, footprintH }
 }
 
@@ -620,25 +642,36 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
   const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
 
   const roomGroups = useMemo(() => {
-    // Pre-compute bounding boxes in FEET (top-left origin) for all rooms
-    const boxes = roomSets.map(s => {
-      const isRot = (s.rotation || 0) % 180 !== 0
+    // Helper: compute visual bounding box top-left in feet, accounting for rotation pivot
+    function getVisualBBox(s) {
+      const rot = ((s.rotation || 0) % 360 + 360) % 360
+      const isRot = rot === 90 || rot === 270
       const fw = isRot ? s.height : s.width
       const fh = isRot ? s.width : s.height
-      const x1 = s.x / ppu
-      const z1 = s.y / ppu
-      return { s, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
+      let x1 = s.x / ppu
+      let z1 = s.y / ppu
+      if (rot === 90) {
+        x1 -= s.height   // bbox shifts left by unrotated height
+      } else if (rot === 180) {
+        x1 -= s.width
+        z1 -= s.height
+      } else if (rot === 270) {
+        z1 -= s.width    // bbox shifts up by unrotated width
+      }
+      return { x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
+    }
+
+    // Pre-compute bounding boxes in FEET for all rooms
+    const boxes = roomSets.map(s => {
+      const bb = getVisualBBox(s)
+      return { s, ...bb }
     })
 
     // Pre-compute door/window bounding boxes in feet
     const openingBoxes = [...doorSets, ...windowSets].map(o => {
-      const isRot = (o.rotation || 0) % 180 !== 0
-      const fw = isRot ? o.height : o.width
-      const fh = isRot ? o.width : o.height
-      const x1 = o.x / ppu
-      const z1 = o.y / ppu
+      const bb = getVisualBBox(o)
       return {
-        o, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh,
+        o, x1: bb.x1, z1: bb.z1, x2: bb.x2, z2: bb.z2, fw: bb.fw, fh: bb.fh,
         isDoor: o.category === 'Door',
       }
     })
