@@ -4,8 +4,8 @@ import { OrbitControls, Sky, Grid, Text, Environment } from '@react-three/drei'
 import * as THREE from 'three'
 import useStore from '../store.js'
 
-// Context to share OrbitControls ref + controlMode with draggable components
-const DragContext = createContext({ orbitRef: null, controlMode: 'orbit' })
+// Context to share OrbitControls ref + controlMode + lock state with draggable components
+const DragContext = createContext({ orbitRef: null, controlMode: 'orbit', locked3D: false })
 
 // ─── Constants ───────────────────────────────────────────────────────
 const DEFAULT_WALL_HEIGHT = 12  // feet (standard 4'×12' flat)
@@ -24,23 +24,64 @@ const TIMBER_WIDTH = 0.208       // 1×3 actual is ~2.5" = 0.208' width
 const LUAN_THICKNESS = 0.021     // ~1/4" luan
 
 // ─── Coordinate helpers ──────────────────────────────────────────────
-// 2D canvas: set.x, set.y are pixel positions (top-left corner)
-// 2D canvas: set.width, set.height are in feet
+// 2D canvas: set.x, set.y are the Fabric.js (left, top) with originX='left', originY='top'
+//   This means (x, y) is the rotation PIVOT — the top-left corner of the UNROTATED rect.
+//   For 0° and 90°, this coincides with the visual bounding box top-left, but NOT for 180°/270°.
+// 2D canvas: set.width, set.height are in feet (NOT pixels)
 // 2D pixel footprint = width * ppu, height * ppu
 // 3D world: X = right, Y = up, Z = into screen (matching 2D Y axis)
-// Convert: center_x_feet = set.x / ppu + set.width / 2
-//          center_z_feet = set.y / ppu + set.height / 2
 // Rotation: 2D rotation is clockwise degrees, 3D Y rotation is counter-clockwise
+//
+// To find the visual bounding box center, we rotate the 4 corners of the unrotated rect
+// around the pivot (set.x, set.y) and then compute the bounding box center.
 
 function get3DPosition(set, ppu) {
-  const isRotated = (set.rotation || 0) % 180 !== 0
-  // In 2D, when rotated 90/270, fabric.js swaps the rendered dimensions
-  // but x,y still refers to the top-left of the bounding box
-  const footprintW = isRotated ? set.height : set.width
-  const footprintH = isRotated ? set.width : set.height
-  const cx = set.x / ppu + footprintW / 2
-  const cz = set.y / ppu + footprintH / 2
-  const rotY = set.rotation ? -(set.rotation * Math.PI / 180) : 0
+  const rotDeg = (set.rotation || 0) % 360
+  const wPx = set.width * ppu   // unrotated width in pixels
+  const hPx = set.height * ppu  // unrotated height in pixels
+
+  // The 4 corners of the unrotated rect relative to pivot (set.x, set.y) = (0,0)
+  const corners = [
+    { x: 0, y: 0 },         // top-left (the pivot)
+    { x: wPx, y: 0 },       // top-right
+    { x: wPx, y: hPx },     // bottom-right
+    { x: 0, y: hPx },       // bottom-left
+  ]
+
+  // Rotate corners around (0,0) by rotDeg clockwise
+  const rad = rotDeg * Math.PI / 180
+  const cosA = Math.cos(rad)
+  const sinA = Math.sin(rad)
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const c of corners) {
+    // Clockwise rotation: x' = x*cos + y*sin, y' = -x*sin + y*cos
+    const rx = c.x * cosA + c.y * sinA
+    const ry = -c.x * sinA + c.y * cosA
+    // Translate back to world coords (add pivot)
+    const wx = set.x + rx
+    const wy = set.y + ry
+    minX = Math.min(minX, wx)
+    minY = Math.min(minY, wy)
+    maxX = Math.max(maxX, wx)
+    maxY = Math.max(maxY, wy)
+  }
+
+  // Bounding box in pixels
+  const bbW = maxX - minX
+  const bbH = maxY - minY
+  const bbCenterX = (minX + maxX) / 2
+  const bbCenterY = (minY + maxY) / 2
+
+  // Convert to feet for 3D
+  const footprintW = bbW / ppu
+  const footprintH = bbH / ppu
+  const cx = bbCenterX / ppu
+  const cz = bbCenterY / ppu
+
+  // 3D Y rotation (counter-clockwise to match visual)
+  const rotY = rotDeg ? -(rotDeg * Math.PI / 180) : 0
+
   return { cx, cz, rotY, footprintW, footprintH }
 }
 
@@ -526,7 +567,7 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
   const dragState = useRef(null)
   const [dragOffset, setDragOffset] = useState([0, 0, 0])
   const { camera, gl, size } = useThree()
-  const { orbitRef, controlMode } = useContext(DragContext)
+  const { orbitRef, controlMode, locked3D } = useContext(DragContext)
 
   const groundPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
   const raycaster = useMemo(() => new THREE.Raycaster(), [])
@@ -548,6 +589,9 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
     if (controlMode !== 'orbit') return
     e.stopPropagation()
     setSelectedSetId(set.id)
+
+    // If locked, only select — don't allow dragging
+    if (locked3D) return
 
     const hit = getHitPoint(e)
     if (!hit) return
@@ -579,14 +623,10 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
           const dx = currentHit.x - dragState.current.startHit.x
           const dz = currentHit.z - dragState.current.startHit.z
           if (Math.abs(dx) > 0.1 || Math.abs(dz) > 0.1) {
-            // Reverse coordinate conversion: 3D center → 2D pixel position
-            const newCx = dragState.current.startCx + dx
-            const newCz = dragState.current.startCz + dz
-            const isRotated = (set.rotation || 0) % 180 !== 0
-            const fw = isRotated ? set.height : set.width
-            const fh = isRotated ? set.width : set.height
-            const newPixelX = (newCx - fw / 2) * ppu
-            const newPixelY = (newCz - fh / 2) * ppu
+            // The delta in 3D feet maps directly to a pixel delta
+            // Since the 3D center moved by (dx, dz) feet, the pixel pivot moves by the same delta * ppu
+            const newPixelX = set.x + dx * ppu
+            const newPixelY = set.y + dz * ppu
             updateSet(set.id, { x: newPixelX, y: newPixelY })
           }
         }
@@ -600,7 +640,7 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
 
     gl.domElement.addEventListener('pointermove', onMove)
     gl.domElement.addEventListener('pointerup', onUp)
-  }, [controlMode, set, ppu, getHitPoint, orbitRef, gl, setSelectedSetId, updateSet])
+  }, [controlMode, locked3D, set, ppu, getHitPoint, orbitRef, gl, setSelectedSetId, updateSet])
 
   return (
     <group ref={groupRef} position={dragOffset} onPointerDown={onPointerDown}>
@@ -623,25 +663,48 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
   const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
 
   const roomGroups = useMemo(() => {
-    // Pre-compute bounding boxes in FEET (top-left origin) for all rooms
+    // Helper: compute bounding box in feet from a set's pixel-based Fabric.js coords
+    // Handles rotation correctly by rotating corners around the pivot (set.x, set.y)
+    function getBBoxFeet(s) {
+      const rotDeg = (s.rotation || 0) % 360
+      const wPx = s.width * ppu
+      const hPx = s.height * ppu
+
+      // 4 corners relative to pivot (0,0)
+      const corners = [[0, 0], [wPx, 0], [wPx, hPx], [0, hPx]]
+      const rad = rotDeg * Math.PI / 180
+      const cosA = Math.cos(rad)
+      const sinA = Math.sin(rad)
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const [cx, cy] of corners) {
+        const rx = s.x + cx * cosA + cy * sinA
+        const ry = s.y + (-cx * sinA + cy * cosA)
+        minX = Math.min(minX, rx)
+        minY = Math.min(minY, ry)
+        maxX = Math.max(maxX, rx)
+        maxY = Math.max(maxY, ry)
+      }
+
+      // Convert to feet
+      const x1 = minX / ppu
+      const z1 = minY / ppu
+      const x2 = maxX / ppu
+      const z2 = maxY / ppu
+      return { x1, z1, x2, z2, fw: x2 - x1, fh: z2 - z1 }
+    }
+
+    // Pre-compute bounding boxes in FEET for all rooms
     const boxes = roomSets.map(s => {
-      const isRot = (s.rotation || 0) % 180 !== 0
-      const fw = isRot ? s.height : s.width
-      const fh = isRot ? s.width : s.height
-      const x1 = s.x / ppu
-      const z1 = s.y / ppu
-      return { s, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
+      const bb = getBBoxFeet(s)
+      return { s, ...bb }
     })
 
     // Pre-compute door/window bounding boxes in feet
     const openingBoxes = [...doorSets, ...windowSets].map(o => {
-      const isRot = (o.rotation || 0) % 180 !== 0
-      const fw = isRot ? o.height : o.width
-      const fh = isRot ? o.width : o.height
-      const x1 = o.x / ppu
-      const z1 = o.y / ppu
+      const bb = getBBoxFeet(o)
       return {
-        o, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh,
+        o, ...bb,
         isDoor: o.category === 'Door',
       }
     })
@@ -1001,7 +1064,7 @@ function SetLabel3D({ set, ppu, defaultWallHeight }) {
 }
 
 // ─── Main Scene Content ────────────────────────────────────────────
-function SceneContent({ controlMode, orbitRef }) {
+function SceneContent({ controlMode, orbitRef, locked3D }) {
   const { sets, pixelsPerUnit, layerVisibility, labelsVisible, wallRenderMode, defaultWallHeight } = useStore()
 
   const ppu = pixelsPerUnit || 1
@@ -1063,7 +1126,7 @@ function SceneContent({ controlMode, orbitRef }) {
 
   const startPos = useMemo(() => sceneCenter, [sceneCenter])
 
-  const dragContextValue = useMemo(() => ({ orbitRef, controlMode }), [orbitRef, controlMode])
+  const dragContextValue = useMemo(() => ({ orbitRef, controlMode, locked3D }), [orbitRef, controlMode, locked3D])
 
   return (
     <DragContext.Provider value={dragContextValue}>
@@ -1162,6 +1225,7 @@ function SceneContent({ controlMode, orbitRef }) {
 // ─── Main Exported Component ───────────────────────────────────────
 export default function Scene3D() {
   const [controlMode, setControlMode] = useState('orbit')
+  const [locked3D, setLocked3D] = useState(false)
   const { wallRenderMode, setWallRenderMode, setSelectedSetId } = useStore()
   const orbitRef = useRef()
 
@@ -1202,6 +1266,18 @@ export default function Scene3D() {
           <option value="construction-front">Construction (Front)</option>
           <option value="construction-rear">Construction (Rear)</option>
         </select>
+
+        <div className="w-px bg-gray-600 mx-1" />
+
+        <button
+          onClick={() => setLocked3D(prev => !prev)}
+          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+            locked3D ? 'bg-amber-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+          title={locked3D ? 'Unlock 3D layout (allow dragging)' : 'Lock 3D layout (prevent dragging)'}
+        >
+          {locked3D ? '\uD83D\uDD12 Locked' : '\uD83D\uDD13 Unlocked'}
+        </button>
       </div>
 
       {controlMode === 'firstperson' && (
@@ -1212,7 +1288,10 @@ export default function Scene3D() {
 
       {controlMode === 'orbit' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white text-xs px-4 py-2 rounded-lg">
-          Click to select | Drag to move | Right-drag to pan | Scroll to zoom | Left-drag background to rotate
+          {locked3D
+            ? 'Layout locked | Click to select | Right-drag to pan | Scroll to zoom | Left-drag to rotate'
+            : 'Click to select | Drag to move | Right-drag to pan | Scroll to zoom | Left-drag background to rotate'
+          }
         </div>
       )}
 
@@ -1226,7 +1305,7 @@ export default function Scene3D() {
         }}
         onPointerMissed={handlePointerMissed}
       >
-        <SceneContent controlMode={controlMode} orbitRef={orbitRef} />
+        <SceneContent controlMode={controlMode} orbitRef={orbitRef} locked3D={locked3D} />
       </Canvas>
     </div>
   )
