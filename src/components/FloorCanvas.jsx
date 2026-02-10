@@ -10,6 +10,7 @@ const RULE_PREFIX = 'rule-line-'
 const OVERLAP_PREFIX = 'overlap-zone-'
 const CUTAWAY_PREFIX = 'cutaway-ghost-'
 const GAP_PREFIX = 'wall-gap-'
+const WALL_LINE_PREFIX = 'wall-line-'
 const LEADER_PREFIX = 'leader-line-'
 const SNAP_LINE_NAME = 'snap-guide-line'
 const TOOLTIP_NAME = 'hover-tooltip'
@@ -383,6 +384,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         o.name?.startsWith(OVERLAP_PREFIX) ||
         o.name?.startsWith(CUTAWAY_PREFIX) ||
         o.name?.startsWith(GAP_PREFIX) ||
+        o.name?.startsWith(WALL_LINE_PREFIX) ||
         o.name?.startsWith(LEADER_PREFIX) ||
         o.name?.startsWith(ICON_PREFIX) ||
         o.name?.startsWith(DIM_PREFIX) ||
@@ -618,6 +620,121 @@ export default function FloorCanvas({ onCanvasSize }) {
       })
 
       fc.add(shape)
+
+      // Per-side wall line rendering with overlap clipping for room sets
+      const isRoomSet = !s.category || s.category === 'Set'
+      const hasRemovedWalls = s.removedWalls && Object.values(s.removedWalls).some(v => v)
+      if (isRoomSet) {
+        // Compute room AABBs for overlap detection (pixel coords, axis-aligned after rotation)
+        const myAABB = getAABB(s, ppu)
+        const otherRoomAABBs = visibleSets
+          .filter(o => o.id !== s.id && (!o.category || o.category === 'Set'))
+          .map(o => getAABB(o, ppu))
+
+        // Check if any other room overlaps this one
+        const hasOverlap = otherRoomAABBs.some(oabb => {
+          const overlap = getOverlapRect(myAABB, oabb)
+          return overlap && overlap.w > 2 && overlap.h > 2
+        })
+
+        if (hasRemovedWalls || hasOverlap) {
+          // Make the rect stroke transparent — use individual wall lines instead
+          shape.set({ stroke: 'transparent', strokeWidth: 0 })
+
+          const wallColor = isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color
+          const wallWidth = isSelected ? 3 : 2
+          const wallDash = isLocked ? [6, 3] : []
+          const removedWalls = s.removedWalls || {}
+
+          // Map removedWalls sides based on rotation
+          const rot = ((s.rotation || 0) % 360 + 360) % 360
+          let mapped = removedWalls
+          if (rot === 90) mapped = { top: removedWalls.left, right: removedWalls.top, bottom: removedWalls.right, left: removedWalls.bottom }
+          else if (rot === 270) mapped = { top: removedWalls.right, right: removedWalls.bottom, bottom: removedWalls.left, left: removedWalls.top }
+          else if (rot === 180) mapped = { top: removedWalls.bottom, right: removedWalls.left, bottom: removedWalls.top, left: removedWalls.right }
+
+          // Visual bounding box in pixels (post-rotation, axis-aligned)
+          const bx = myAABB.x, by = myAABB.y, bw = myAABB.w, bh = myAABB.h
+
+          // Define 4 wall sides in pixel coords (axis-aligned bounding box)
+          const wallSides = [
+            { side: 'top',    fixed: by,      rangeMin: bx, rangeMax: bx + bw, dir: 'h' },
+            { side: 'bottom', fixed: by + bh, rangeMin: bx, rangeMax: bx + bw, dir: 'h' },
+            { side: 'left',   fixed: bx,      rangeMin: by, rangeMax: by + bh, dir: 'v' },
+            { side: 'right',  fixed: bx + bw, rangeMin: by, rangeMax: by + bh, dir: 'v' },
+          ]
+
+          for (const ws of wallSides) {
+            // Skip manually removed walls
+            if (mapped[ws.side]) continue
+
+            // Compute overlap intervals — portions of this wall inside another room
+            const clipIntervals = []
+            for (const oabb of otherRoomAABBs) {
+              if (ws.dir === 'h') {
+                // Horizontal wall at Y=fixed. Is this Y inside other room's Y range?
+                if (ws.fixed > oabb.y + 1 && ws.fixed < oabb.y + oabb.h - 1) {
+                  const oMin = Math.max(ws.rangeMin, oabb.x)
+                  const oMax = Math.min(ws.rangeMax, oabb.x + oabb.w)
+                  if (oMax > oMin + 1) clipIntervals.push({ min: oMin, max: oMax })
+                }
+              } else {
+                // Vertical wall at X=fixed. Is this X inside other room's X range?
+                if (ws.fixed > oabb.x + 1 && ws.fixed < oabb.x + oabb.w - 1) {
+                  const oMin = Math.max(ws.rangeMin, oabb.y)
+                  const oMax = Math.min(ws.rangeMax, oabb.y + oabb.h)
+                  if (oMax > oMin + 1) clipIntervals.push({ min: oMin, max: oMax })
+                }
+              }
+            }
+
+            // Subtract clip intervals from the wall range to get visible segments
+            // Simple interval subtraction (same algorithm as 3D subtractIntervals)
+            let segments = [{ min: ws.rangeMin, max: ws.rangeMax }]
+            if (clipIntervals.length > 0) {
+              const sorted = [...clipIntervals].sort((a, b) => a.min - b.min)
+              const merged = []
+              for (const iv of sorted) {
+                if (merged.length > 0 && iv.min <= merged[merged.length - 1].max + 0.5) {
+                  merged[merged.length - 1].max = Math.max(merged[merged.length - 1].max, iv.max)
+                } else {
+                  merged.push({ min: iv.min, max: iv.max })
+                }
+              }
+              const result = []
+              let cursor = ws.rangeMin
+              for (const m of merged) {
+                const cMin = Math.max(m.min, ws.rangeMin)
+                const cMax = Math.min(m.max, ws.rangeMax)
+                if (cMin >= cMax) continue
+                if (cMin > cursor + 0.5) result.push({ min: cursor, max: cMin })
+                cursor = Math.max(cursor, cMax)
+              }
+              if (cursor < ws.rangeMax - 0.5) result.push({ min: cursor, max: ws.rangeMax })
+              segments = result
+            }
+
+            // Draw visible wall line segments
+            for (let si = 0; si < segments.length; si++) {
+              const seg = segments[si]
+              let x1, y1, x2, y2
+              if (ws.dir === 'h') {
+                x1 = seg.min; y1 = ws.fixed; x2 = seg.max; y2 = ws.fixed
+              } else {
+                x1 = ws.fixed; y1 = seg.min; x2 = ws.fixed; y2 = seg.max
+              }
+              fc.add(new fabric.Line([x1, y1, x2, y2], {
+                stroke: wallColor,
+                strokeWidth: wallWidth,
+                strokeDashArray: wallDash.length ? [...wallDash] : undefined,
+                selectable: false,
+                evented: false,
+                name: WALL_LINE_PREFIX + s.id + '-' + ws.side + '-' + si,
+              }))
+            }
+          }
+        }
+      }
 
       // Component icon detail lines (windows, doors, flats, etc.)
       if (s.iconType && s.iconType !== 'rect') {

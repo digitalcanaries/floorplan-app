@@ -42,6 +42,7 @@ export default function SetsTab() {
     name: '', width: '', height: '', color: COLORS[0],
     category: 'Set', wallGap: '', opacity: '1', noCut: false,
     wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
+    removedWalls: { top: false, right: false, bottom: false, left: false },
   })
   const [editing, setEditing] = useState(null)
   const [cuttingSetId, setCuttingSetId] = useState(null)
@@ -62,12 +63,14 @@ export default function SetsTab() {
       wallGap: parseFloat(form.wallGap) || 0,
       wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
       gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
+      removedWalls: !isWallType && Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
       opacity: parseFloat(form.opacity) || 1,
     })
     setForm({
       name: '', width: '', height: '', color: COLORS[(sets.length + 1) % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
+      removedWalls: { top: false, right: false, bottom: false, left: false },
     })
   }
 
@@ -85,6 +88,7 @@ export default function SetsTab() {
       wallGap: parseFloat(form.wallGap) || 0,
       wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
       gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
+      removedWalls: !isWallType && Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
       opacity: parseFloat(form.opacity) || 1,
     })
     setEditing(null)
@@ -92,6 +96,7 @@ export default function SetsTab() {
       name: '', width: '', height: '', color: COLORS[sets.length % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
+      removedWalls: { top: false, right: false, bottom: false, left: false },
     })
   }
 
@@ -104,6 +109,7 @@ export default function SetsTab() {
       noCut: s.noCut || false,
       wallHeight: String(s.wallHeight || ''),
       gapSides: s.gapSides || { top: true, right: true, bottom: true, left: true },
+      removedWalls: s.removedWalls || { top: false, right: false, bottom: false, left: false },
     })
   }
 
@@ -113,6 +119,7 @@ export default function SetsTab() {
       name: '', width: '', height: '', color: COLORS[sets.length % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
+      removedWalls: { top: false, right: false, bottom: false, left: false },
     })
   }
 
@@ -429,6 +436,28 @@ export default function SetsTab() {
           />
           <span className="text-[10px] text-gray-400 w-6 text-right">{Math.round((form.opacity || 1) * 100)}%</span>
         </div>
+
+        {/* Remove walls — shown for room-type sets only */}
+        {(form.category === 'Set' || !form.category) && (
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-gray-400">Remove walls:</label>
+            <div className="flex gap-2">
+              {['top', 'right', 'bottom', 'left'].map(side => (
+                <label key={side} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
+                  <input type="checkbox"
+                    checked={form.removedWalls[side]}
+                    onChange={e => setForm({
+                      ...form,
+                      removedWalls: { ...form.removedWalls, [side]: e.target.checked }
+                    })}
+                    className="w-3 h-3 accent-red-500"
+                  />
+                  {side.charAt(0).toUpperCase() + side.slice(1)}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* No-cut toggle */}
         <label className="flex items-center gap-2 text-xs cursor-pointer">

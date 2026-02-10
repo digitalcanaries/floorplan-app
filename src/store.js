@@ -257,6 +257,7 @@ const useStore = create((set, get) => ({
       wallHeight: s.wallHeight ?? null, elevation: s.elevation ?? 0,
       materialTexture: s.materialTexture || null,
       gapSides: s.gapSides || null, // { top: true, right: true, bottom: true, left: true } or null for all sides
+      removedWalls: s.removedWalls || null, // { top: false, right: false, bottom: false, left: false } or null
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
     }
@@ -282,6 +283,7 @@ const useStore = create((set, get) => ({
       wallHeight: s.wallHeight ?? null, elevation: s.elevation ?? 0,
       materialTexture: s.materialTexture || null,
       gapSides: s.gapSides || null,
+      removedWalls: s.removedWalls || null,
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
     }))

@@ -818,7 +818,15 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
         { dir: 'v', fixedVal: b.x2, rMin: b.z1, rMax: b.z2 }, // right
       ]
 
-      for (const edge of edges) {
+      const sideNames = ['top', 'bottom', 'left', 'right']  // matches edges array order
+      const removedWalls = b.s.removedWalls || {}
+
+      for (let edgeIdx = 0; edgeIdx < edges.length; edgeIdx++) {
+        const edge = edges[edgeIdx]
+
+        // --- Step 0: Manual wall removal — skip entire edge if user removed it ---
+        if (removedWalls[sideNames[edgeIdx]]) continue
+
         // --- Step 1: Dedup — find overlap intervals from lower-index rooms ---
         const dedupIntervals = []
         for (let j = 0; j < i; j++) {
@@ -842,8 +850,31 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
           }
         }
 
-        // Get the ranges this room should actually render (after dedup subtraction)
-        const ownedRanges = subtractIntervals(edge.rMin, edge.rMax, dedupIntervals)
+        // --- Step 1b: Overlap clipping — remove wall segments inside another room's interior ---
+        const overlapIntervals = []
+        for (let j = 0; j < boxes.length; j++) {
+          if (j === i) continue
+          const other = boxes[j]
+          if (edge.dir === 'h') {
+            // Horizontal edge at Z=fixedVal. Is this Z inside other room's Z range?
+            if (edge.fixedVal > other.z1 + EDGE_TOL && edge.fixedVal < other.z2 - EDGE_TOL) {
+              const oMin = Math.max(edge.rMin, other.x1)
+              const oMax = Math.min(edge.rMax, other.x2)
+              if (oMax > oMin + 0.05) overlapIntervals.push({ min: oMin, max: oMax })
+            }
+          } else {
+            // Vertical edge at X=fixedVal. Is this X inside other room's X range?
+            if (edge.fixedVal > other.x1 + EDGE_TOL && edge.fixedVal < other.x2 - EDGE_TOL) {
+              const oMin = Math.max(edge.rMin, other.z1)
+              const oMax = Math.min(edge.rMax, other.z2)
+              if (oMax > oMin + 0.05) overlapIntervals.push({ min: oMin, max: oMax })
+            }
+          }
+        }
+
+        // Combine dedup + overlap intervals and subtract from edge
+        const allClipIntervals = [...dedupIntervals, ...overlapIntervals]
+        const ownedRanges = subtractIntervals(edge.rMin, edge.rMax, allClipIntervals)
 
         // --- Step 2: For each owned range, find door/window openings on this edge ---
         for (const range of ownedRanges) {
