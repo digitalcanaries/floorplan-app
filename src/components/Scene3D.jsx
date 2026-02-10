@@ -498,65 +498,232 @@ function SpecialSetMesh({ set, ppu, defaultWallHeight }) {
   )
 }
 
-// ─── Set Rooms: simple 4-wall hollow rooms ──────────────────────────────────
-// Each room renders as 4 walls forming a rectangle, positioned using the same
-// get3DPosition() as floors/doors/windows to ensure consistent placement.
-// No edge-sharing logic — just simple walls you can walk into.
+// ─── Set Rooms: hollow rooms with door/window openings ──────────────────────
+// Each room = 4 walls forming a hollow rectangle.
+// For each wall edge we:
+//   1. Detect doors/windows sitting on that edge and cut openings
+//   2. Deduplicate: if another room (with lower array index) shares the same
+//      edge position AND overlaps on the range axis, skip that overlap portion
+//      so we don't get double-thickness walls. The lower-index room "owns" it.
 function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }) {
   const WALL_T = 0.292
+  const EDGE_TOL = 0.5 // feet — tolerance for edge coincidence (dedup only)
+  const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
 
-  const rooms = useMemo(() => {
-    return roomSets.map(s => {
-      const { cx, cz, footprintW, footprintH } = get3DPosition(s, ppu)
-      const wh = s.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
-      const color = (s.color && s.color !== '#ffffff') ? s.color : '#E8E0D8'
-      const w = footprintW  // width in feet (rotation-aware)
-      const d = footprintH  // depth in feet (rotation-aware)
-      return { s, cx, cz, w, d, wh, color, id: s.id }
+  const { segments: wallSegments, floors } = useMemo(() => {
+    // Pre-compute bounding boxes in FEET (top-left origin) for all rooms
+    const boxes = roomSets.map(s => {
+      const isRot = (s.rotation || 0) % 180 !== 0
+      const fw = isRot ? s.height : s.width
+      const fh = isRot ? s.width : s.height
+      const x1 = s.x / ppu
+      const z1 = s.y / ppu
+      return { s, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
     })
-  }, [roomSets, ppu, defaultWallHeight])
+
+    // Pre-compute door/window bounding boxes in feet
+    const openingBoxes = [...doorSets, ...windowSets].map(o => {
+      const isRot = (o.rotation || 0) % 180 !== 0
+      const fw = isRot ? o.height : o.width
+      const fh = isRot ? o.width : o.height
+      const x1 = o.x / ppu
+      const z1 = o.y / ppu
+      return {
+        o, x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh,
+        isDoor: o.category === 'Door',
+      }
+    })
+
+    // Helper: subtract intervals from a range, returning remaining segments
+    function subtractIntervals(rangeMin, rangeMax, intervals) {
+      if (intervals.length === 0) return [{ min: rangeMin, max: rangeMax }]
+      // Sort and merge intervals
+      const sorted = [...intervals].sort((a, b) => a.min - b.min)
+      const merged = []
+      for (const iv of sorted) {
+        if (merged.length > 0 && iv.min <= merged[merged.length - 1].max + 0.01) {
+          merged[merged.length - 1].max = Math.max(merged[merged.length - 1].max, iv.max)
+        } else {
+          merged.push({ min: iv.min, max: iv.max })
+        }
+      }
+      // Subtract from range
+      const result = []
+      let cursor = rangeMin
+      for (const m of merged) {
+        const clampMin = Math.max(m.min, rangeMin)
+        const clampMax = Math.min(m.max, rangeMax)
+        if (clampMin >= clampMax) continue
+        if (clampMin > cursor + 0.05) {
+          result.push({ min: cursor, max: clampMin })
+        }
+        cursor = Math.max(cursor, clampMax)
+      }
+      if (cursor < rangeMax - 0.05) {
+        result.push({ min: cursor, max: rangeMax })
+      }
+      return result
+    }
+
+    const segments = []
+    const floorList = []
+
+    for (let i = 0; i < boxes.length; i++) {
+      const b = boxes[i]
+      const wh = b.s.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
+      const color = (b.s.color && b.s.color !== '#ffffff') ? b.s.color : '#E8E0D8'
+
+      // Floor
+      const fcx = (b.x1 + b.x2) / 2
+      const fcz = (b.z1 + b.z2) / 2
+      floorList.push({ cx: fcx, cz: fcz, w: b.fw, d: b.fh, color, id: b.s.id })
+
+      // 4 edges: each defined by a fixed axis/value and a range along the other axis
+      // 'h' edges run along X (horizontal), 'v' edges run along Z (vertical)
+      const edges = [
+        { dir: 'h', fixedVal: b.z1, rMin: b.x1, rMax: b.x2 }, // top (front)
+        { dir: 'h', fixedVal: b.z2, rMin: b.x1, rMax: b.x2 }, // bottom (back)
+        { dir: 'v', fixedVal: b.x1, rMin: b.z1, rMax: b.z2 }, // left
+        { dir: 'v', fixedVal: b.x2, rMin: b.z1, rMax: b.z2 }, // right
+      ]
+
+      for (const edge of edges) {
+        // --- Step 1: Dedup — find overlap intervals from lower-index rooms ---
+        const dedupIntervals = []
+        for (let j = 0; j < i; j++) {
+          const other = boxes[j]
+          let matchesEdge = false
+          if (edge.dir === 'h') {
+            matchesEdge = Math.abs(other.z1 - edge.fixedVal) < EDGE_TOL ||
+                          Math.abs(other.z2 - edge.fixedVal) < EDGE_TOL
+          } else {
+            matchesEdge = Math.abs(other.x1 - edge.fixedVal) < EDGE_TOL ||
+                          Math.abs(other.x2 - edge.fixedVal) < EDGE_TOL
+          }
+          if (matchesEdge) {
+            const oMin = edge.dir === 'h' ? other.x1 : other.z1
+            const oMax = edge.dir === 'h' ? other.x2 : other.z2
+            const overlapMin = Math.max(edge.rMin, oMin)
+            const overlapMax = Math.min(edge.rMax, oMax)
+            if (overlapMax > overlapMin + 0.05) {
+              dedupIntervals.push({ min: overlapMin, max: overlapMax })
+            }
+          }
+        }
+
+        // Get the ranges this room should actually render (after dedup subtraction)
+        const ownedRanges = subtractIntervals(edge.rMin, edge.rMax, dedupIntervals)
+
+        // --- Step 2: For each owned range, find door/window openings on this edge ---
+        for (const range of ownedRanges) {
+          // Find openings that sit on this wall edge
+          const edgeOpenings = []
+          for (const ob of openingBoxes) {
+            // Check if the opening overlaps this edge positionally
+            let onEdge = false
+            if (edge.dir === 'h') {
+              // Horizontal edge at fixedVal (Z). Opening must straddle this Z.
+              onEdge = ob.z1 < edge.fixedVal + OPEN_TOL && ob.z2 > edge.fixedVal - OPEN_TOL
+            } else {
+              // Vertical edge at fixedVal (X). Opening must straddle this X.
+              onEdge = ob.x1 < edge.fixedVal + OPEN_TOL && ob.x2 > edge.fixedVal - OPEN_TOL
+            }
+            if (!onEdge) continue
+
+            // Check overlap along the range axis
+            const opMin = edge.dir === 'h' ? ob.x1 : ob.z1
+            const opMax = edge.dir === 'h' ? ob.x2 : ob.z2
+            const clampMin = Math.max(range.min, opMin)
+            const clampMax = Math.min(range.max, opMax)
+            if (clampMax <= clampMin + 0.05) continue
+
+            const elevH = ob.o.componentProperties?.elevationHeight
+            const sillH = ob.isDoor ? 0 : WINDOW_SILL_HEIGHT
+            const headH = ob.isDoor
+              ? (elevH || ob.o.wallHeight || DOOR_HEIGHT)
+              : (elevH ? (sillH + elevH) : WINDOW_HEAD_HEIGHT)
+
+            edgeOpenings.push({ min: clampMin, max: clampMax, sillH, headH, isDoor: ob.isDoor })
+          }
+
+          // Sort openings along the range
+          edgeOpenings.sort((a, b) => a.min - b.min)
+
+          // Build wall segments with openings cut out
+          let cursor = range.min
+          for (const op of edgeOpenings) {
+            // Solid wall before this opening
+            if (op.min > cursor + 0.05) {
+              segments.push({
+                dir: edge.dir, fixedVal: edge.fixedVal,
+                rMin: cursor, rMax: op.min,
+                yBot: 0, yH: wh, color, setId: b.s.id,
+              })
+            }
+            // Wall above opening (header to ceiling)
+            if (op.headH < wh - 0.05) {
+              segments.push({
+                dir: edge.dir, fixedVal: edge.fixedVal,
+                rMin: op.min, rMax: op.max,
+                yBot: op.headH, yH: wh - op.headH, color, setId: b.s.id,
+              })
+            }
+            // Wall below window (sill)
+            if (op.sillH > 0.05) {
+              segments.push({
+                dir: edge.dir, fixedVal: edge.fixedVal,
+                rMin: op.min, rMax: op.max,
+                yBot: 0, yH: op.sillH, color, setId: b.s.id,
+              })
+            }
+            cursor = Math.max(cursor, op.max)
+          }
+          // Solid wall after last opening
+          if (cursor < range.max - 0.05) {
+            segments.push({
+              dir: edge.dir, fixedVal: edge.fixedVal,
+              rMin: cursor, rMax: range.max,
+              yBot: 0, yH: wh, color, setId: b.s.id,
+            })
+          }
+        }
+      }
+    }
+
+    return { segments, floors: floorList }
+  }, [roomSets, doorSets, windowSets, ppu, defaultWallHeight])
 
   return (
     <>
       {/* Floor planes */}
-      {rooms.map(r => (
-        <mesh key={`floor-${r.id}`} rotation={[-Math.PI / 2, 0, 0]} position={[r.cx, 0.01, r.cz]} receiveShadow>
-          <planeGeometry args={[r.w, r.d]} />
-          <meshStandardMaterial color={r.color} transparent opacity={0.2} side={THREE.DoubleSide} />
+      {floors.map(f => (
+        <mesh key={`floor-${f.id}`} rotation={[-Math.PI / 2, 0, 0]} position={[f.cx, 0.01, f.cz]} receiveShadow>
+          <planeGeometry args={[f.w, f.d]} />
+          <meshStandardMaterial color={f.color} transparent opacity={0.2} side={THREE.DoubleSide} />
         </mesh>
       ))}
-      {/* 4 walls per room */}
-      {rooms.map(r => {
-        const halfW = r.w / 2
-        const halfD = r.d / 2
-        const yMid = r.wh / 2
-        // front wall (negative Z face)
-        // back wall (positive Z face)
-        // left wall (negative X face)
-        // right wall (positive X face)
+      {/* Wall segments */}
+      {wallSegments.map((seg, i) => {
+        const len = seg.rMax - seg.rMin
+        const mid = (seg.rMin + seg.rMax) / 2
+        const yCenter = seg.yBot + seg.yH / 2
+
+        let pos, size
+        if (seg.dir === 'h') {
+          // Horizontal wall runs along X at fixed Z
+          pos = [mid, yCenter, seg.fixedVal]
+          size = [len, seg.yH, WALL_T]
+        } else {
+          // Vertical wall runs along Z at fixed X
+          pos = [seg.fixedVal, yCenter, mid]
+          size = [WALL_T, seg.yH, len]
+        }
+
         return (
-          <group key={`walls-${r.id}`}>
-            {/* Front wall — runs along X at cz - halfD */}
-            <mesh position={[r.cx, yMid, r.cz - halfD]} castShadow receiveShadow>
-              <boxGeometry args={[r.w, r.wh, WALL_T]} />
-              <meshStandardMaterial color={r.color} roughness={0.8} />
-            </mesh>
-            {/* Back wall — runs along X at cz + halfD */}
-            <mesh position={[r.cx, yMid, r.cz + halfD]} castShadow receiveShadow>
-              <boxGeometry args={[r.w, r.wh, WALL_T]} />
-              <meshStandardMaterial color={r.color} roughness={0.8} />
-            </mesh>
-            {/* Left wall — runs along Z at cx - halfW */}
-            <mesh position={[r.cx - halfW, yMid, r.cz]} castShadow receiveShadow>
-              <boxGeometry args={[WALL_T, r.wh, r.d]} />
-              <meshStandardMaterial color={r.color} roughness={0.8} />
-            </mesh>
-            {/* Right wall — runs along Z at cx + halfW */}
-            <mesh position={[r.cx + halfW, yMid, r.cz]} castShadow receiveShadow>
-              <boxGeometry args={[WALL_T, r.wh, r.d]} />
-              <meshStandardMaterial color={r.color} roughness={0.8} />
-            </mesh>
-          </group>
+          <mesh key={`wall-${i}`} position={pos} castShadow receiveShadow>
+            <boxGeometry args={size} />
+            <meshStandardMaterial color={seg.color} roughness={0.8} />
+          </mesh>
         )
       })}
     </>
