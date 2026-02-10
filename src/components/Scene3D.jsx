@@ -1154,7 +1154,8 @@ function SceneContent({ controlMode, orbitRef, locked3D }) {
 export default function Scene3D() {
   const [controlMode, setControlMode] = useState('orbit')
   const [locked3D, setLocked3D] = useState(false)
-  const { wallRenderMode, setWallRenderMode, setSelectedSetId } = useStore()
+  const [showDebug, setShowDebug] = useState(false)
+  const { wallRenderMode, setWallRenderMode, setSelectedSetId, sets, pixelsPerUnit } = useStore()
   const orbitRef = useRef()
 
   const handlePointerMissed = useCallback(() => {
@@ -1206,6 +1207,18 @@ export default function Scene3D() {
         >
           {locked3D ? '\uD83D\uDD12 Locked' : '\uD83D\uDD13 Unlocked'}
         </button>
+
+        <div className="w-px bg-gray-600 mx-1" />
+
+        <button
+          onClick={() => setShowDebug(prev => !prev)}
+          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+            showDebug ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+          title="Toggle debug position overlay"
+        >
+          Debug
+        </button>
       </div>
 
       {controlMode === 'firstperson' && (
@@ -1220,6 +1233,47 @@ export default function Scene3D() {
             ? 'Layout locked | Click to select | Right-drag to pan | Scroll to zoom | Left-drag to rotate'
             : 'Click to select | Drag to move | Right-drag to pan | Scroll to zoom | Left-drag background to rotate'
           }
+        </div>
+      )}
+
+      {/* Debug panel */}
+      {showDebug && (
+        <div className="absolute top-14 right-2 z-20 bg-black/90 text-green-400 text-[10px] font-mono p-2 rounded max-h-[80vh] overflow-auto w-[420px]">
+          <div className="text-white text-xs mb-1 font-bold">SET POSITION DEBUG (ppu={pixelsPerUnit.toFixed(2)})</div>
+          <table className="w-full">
+            <thead>
+              <tr className="text-yellow-400">
+                <th className="text-left">Name</th>
+                <th>cat</th>
+                <th>rot</th>
+                <th>x(px)</th>
+                <th>y(px)</th>
+                <th>w(ft)</th>
+                <th>h(ft)</th>
+                <th>3D cx</th>
+                <th>3D cz</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sets.filter(s => s.onPlan !== false && !s.hidden).map(s => {
+                const ppu = pixelsPerUnit || 1
+                const pos = get3DPosition(s, ppu)
+                return (
+                  <tr key={s.id} className="hover:bg-white/10">
+                    <td className="text-left truncate max-w-[100px]" title={s.name}>{s.name}</td>
+                    <td className="text-center">{(s.category || 'Set').slice(0,3)}</td>
+                    <td className="text-center">{s.rotation || 0}</td>
+                    <td className="text-right">{s.x?.toFixed(1)}</td>
+                    <td className="text-right">{s.y?.toFixed(1)}</td>
+                    <td className="text-right">{s.width}</td>
+                    <td className="text-right">{s.height}</td>
+                    <td className="text-right">{pos.cx.toFixed(1)}</td>
+                    <td className="text-right">{pos.cz.toFixed(1)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
