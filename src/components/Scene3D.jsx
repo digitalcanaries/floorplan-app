@@ -4,8 +4,8 @@ import { OrbitControls, Sky, Grid, Text, Environment } from '@react-three/drei'
 import * as THREE from 'three'
 import useStore from '../store.js'
 
-// Context to share OrbitControls ref + controlMode + lock state with draggable components
-const DragContext = createContext({ orbitRef: null, controlMode: 'orbit', locked3D: false })
+// Context to share OrbitControls ref + controlMode + lock state + R-key with draggable components
+const DragContext = createContext({ orbitRef: null, controlMode: 'orbit', locked3D: false, rKeyRef: null })
 
 // ─── Constants ───────────────────────────────────────────────────────
 const DEFAULT_WALL_HEIGHT = 12  // feet (standard 4'×12' flat)
@@ -163,13 +163,14 @@ function FlatConstructionFrame({ widthFt, heightFt, depthFt, position, rotation,
 // ─── Door/Window 3D Mesh ─────────────────────────────────────────────
 function DoorMesh3D({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
+  const elevation = set.elevation || 0
   const doorWidth = set.width
   const doorDepth = set.height  // plan-view depth (typically thin)
   const doorHeight = set.componentProperties?.elevationHeight || set.wallHeight || DOOR_HEIGHT
 
   // Door frame (dark wood outline)
   return (
-    <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
+    <group position={[cx, elevation, cz]} rotation={[0, rotY, 0]}>
       {/* Door frame */}
       <mesh position={[0, doorHeight / 2, 0]} castShadow>
         <boxGeometry args={[doorWidth, doorHeight, Math.max(doorDepth, 0.3)]} />
@@ -201,6 +202,7 @@ function DoorMesh3D({ set, ppu, defaultWallHeight }) {
 
 function WindowMesh3D({ set, ppu, defaultWallHeight }) {
   const { cx, cz, rotY } = get3DPosition(set, ppu)
+  const elevation = set.elevation || 0
   const winWidth = set.width
   const winDepth = set.height  // plan-view depth
   // Use actual elevation height from component properties, falling back to defaults
@@ -210,7 +212,7 @@ function WindowMesh3D({ set, ppu, defaultWallHeight }) {
   const winHeight = headHeight - sillHeight
 
   return (
-    <group position={[cx, 0, cz]} rotation={[0, rotY, 0]}>
+    <group position={[cx, elevation, cz]} rotation={[0, rotY, 0]}>
       {/* Glass pane */}
       <mesh position={[0, (sillHeight + headHeight) / 2, 0]}>
         <boxGeometry args={[winWidth, winHeight, 0.05]} />
@@ -524,9 +526,10 @@ function SpecialSetMesh({ set, ppu, defaultWallHeight }) {
 // ─── Selection Highlight ────────────────────────────────────────────
 function SelectionHighlight({ set, ppu, defaultWallHeight }) {
   const { cx, cz, footprintW, footprintH } = get3DPosition(set, ppu)
+  const elevation = set.elevation || 0
   const h = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
   return (
-    <mesh position={[cx, h / 2, cz]}>
+    <mesh position={[cx, h / 2 + elevation, cz]}>
       <boxGeometry args={[footprintW + 0.3, h + 0.3, footprintH + 0.3]} />
       <meshBasicMaterial color="#00ffff" wireframe transparent opacity={0.5} />
     </mesh>
@@ -535,7 +538,10 @@ function SelectionHighlight({ set, ppu, defaultWallHeight }) {
 
 // ─── Draggable Set Group ────────────────────────────────────────────
 // Wraps 3D children in a group that can be clicked (select) and dragged (reposition).
-// Uses raycasting against an invisible XZ ground plane for drag motion.
+// Supports 3 drag modes:
+//   Plain drag     = move on XZ ground plane (existing behavior)
+//   Shift + drag   = raise/lower (Y-axis elevation)
+//   R + drag       = rotate around Y-axis (snaps to 90° on release)
 function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
   const selectedSetId = useStore(s => s.selectedSetId)
   const setSelectedSetId = useStore(s => s.setSelectedSetId)
@@ -544,15 +550,16 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
 
   const groupRef = useRef()
   const dragState = useRef(null)
-  const [dragOffset, setDragOffset] = useState([0, 0, 0])
+  const [dragOffset, setDragOffset] = useState([0, 0, 0])  // [dx, dy, dz] visual offset
+  const [dragRotation, setDragRotation] = useState(0)        // visual rotation offset (radians)
+  const [dragLabel, setDragLabel] = useState(null)            // { mode, value } for HUD overlay
   const { camera, gl, size } = useThree()
-  const { orbitRef, controlMode, locked3D } = useContext(DragContext)
+  const { orbitRef, controlMode, locked3D, rKeyRef } = useContext(DragContext)
 
   const groundPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
   const raycaster = useMemo(() => new THREE.Raycaster(), [])
 
   const getHitPoint = useCallback((e) => {
-    // Convert pointer event to NDC coordinates
     const rect = gl.domElement.getBoundingClientRect()
     const mouse = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -572,45 +579,101 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
     // If locked, only select — don't allow dragging
     if (locked3D) return
 
+    // Determine drag mode from modifier keys
+    let dragMode = 'move'
+    if (e.shiftKey) {
+      dragMode = 'elevate'
+    } else if (rKeyRef?.current) {
+      dragMode = 'rotate'
+    }
+
     const hit = getHitPoint(e)
     if (!hit) return
 
     const { cx, cz } = get3DPosition(set, ppu)
     dragState.current = {
+      dragMode,
       startHit: hit.clone(),
       startCx: cx,
       startCz: cz,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startElevation: set.elevation || 0,
+      startRotation: set.rotation || 0,
     }
     setDragOffset([0, 0, 0])
+    setDragRotation(0)
+    setDragLabel(null)
 
     if (orbitRef?.current) orbitRef.current.enabled = false
 
-    // Use native DOM events for reliable move/up tracking
     const onMove = (moveEvt) => {
       if (!dragState.current) return
-      const currentHit = getHitPoint(moveEvt)
-      if (!currentHit) return
-      const dx = currentHit.x - dragState.current.startHit.x
-      const dz = currentHit.z - dragState.current.startHit.z
-      setDragOffset([dx, 0, dz])
+      const ds = dragState.current
+
+      if (ds.dragMode === 'move') {
+        // XZ ground plane movement
+        const currentHit = getHitPoint(moveEvt)
+        if (!currentHit) return
+        const dx = currentHit.x - ds.startHit.x
+        const dz = currentHit.z - ds.startHit.z
+        setDragOffset([dx, 0, dz])
+      } else if (ds.dragMode === 'elevate') {
+        // Y-axis elevation: mouse Y delta → feet (moving mouse UP = raise)
+        const deltaPixels = ds.startClientY - moveEvt.clientY  // inverted: up = positive
+        const deltaFeet = deltaPixels / 30  // ~30px per foot
+        setDragOffset([0, deltaFeet, 0])
+        setDragLabel({ mode: 'elevate', value: ds.startElevation + deltaFeet })
+      } else if (ds.dragMode === 'rotate') {
+        // Y-axis rotation: mouse X delta → degrees (moving mouse RIGHT = clockwise)
+        const deltaPixels = moveEvt.clientX - ds.startClientX
+        const deltaDegrees = deltaPixels * 0.5  // ~0.5 degree per pixel for smooth feedback
+        const currentDeg = ds.startRotation + deltaDegrees
+        const rotRad = -(deltaDegrees * Math.PI / 180)
+        setDragRotation(rotRad)
+        // Show snapped value in label
+        const snapped = ((Math.round(currentDeg / 90) * 90) % 360 + 360) % 360
+        setDragLabel({ mode: 'rotate', value: snapped })
+      }
     }
 
     const onUp = (upEvt) => {
       if (dragState.current) {
-        const currentHit = getHitPoint(upEvt)
-        if (currentHit) {
-          const dx = currentHit.x - dragState.current.startHit.x
-          const dz = currentHit.z - dragState.current.startHit.z
-          if (Math.abs(dx) > 0.1 || Math.abs(dz) > 0.1) {
-            // The delta in 3D feet maps directly to a pixel delta
-            // Since the 3D center moved by (dx, dz) feet, the pixel pivot moves by the same delta * ppu
-            const newPixelX = set.x + dx * ppu
-            const newPixelY = set.y + dz * ppu
-            updateSet(set.id, { x: newPixelX, y: newPixelY })
+        const ds = dragState.current
+
+        if (ds.dragMode === 'move') {
+          const currentHit = getHitPoint(upEvt)
+          if (currentHit) {
+            const dx = currentHit.x - ds.startHit.x
+            const dz = currentHit.z - ds.startHit.z
+            if (Math.abs(dx) > 0.1 || Math.abs(dz) > 0.1) {
+              const newPixelX = set.x + dx * ppu
+              const newPixelY = set.y + dz * ppu
+              updateSet(set.id, { x: newPixelX, y: newPixelY })
+            }
+          }
+        } else if (ds.dragMode === 'elevate') {
+          const deltaPixels = ds.startClientY - upEvt.clientY
+          const deltaFeet = deltaPixels / 30
+          if (Math.abs(deltaFeet) > 0.05) {
+            const newElev = Math.max(0, ds.startElevation + deltaFeet)  // floor at 0
+            updateSet(set.id, { elevation: newElev })
+          }
+        } else if (ds.dragMode === 'rotate') {
+          const deltaPixels = upEvt.clientX - ds.startClientX
+          const deltaDegrees = deltaPixels * 0.5
+          const currentDeg = ds.startRotation + deltaDegrees
+          // Snap to nearest 90°
+          const snapped = ((Math.round(currentDeg / 90) * 90) % 360 + 360) % 360
+          if (snapped !== ds.startRotation) {
+            updateSet(set.id, { rotation: snapped })
           }
         }
+
         dragState.current = null
         setDragOffset([0, 0, 0])
+        setDragRotation(0)
+        setDragLabel(null)
       }
       if (orbitRef?.current) orbitRef.current.enabled = true
       gl.domElement.removeEventListener('pointermove', onMove)
@@ -619,12 +682,34 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
 
     gl.domElement.addEventListener('pointermove', onMove)
     gl.domElement.addEventListener('pointerup', onUp)
-  }, [controlMode, locked3D, set, ppu, getHitPoint, orbitRef, gl, setSelectedSetId, updateSet])
+  }, [controlMode, locked3D, set, ppu, getHitPoint, orbitRef, rKeyRef, gl, setSelectedSetId, updateSet])
 
   return (
-    <group ref={groupRef} position={dragOffset} onPointerDown={onPointerDown}>
+    <group
+      ref={groupRef}
+      position={dragOffset}
+      rotation={dragRotation ? [0, dragRotation, 0] : undefined}
+      onPointerDown={onPointerDown}
+    >
       {children}
       {isSelected && <SelectionHighlight set={set} ppu={ppu} defaultWallHeight={defaultWallHeight} />}
+      {/* Drag mode HUD label */}
+      {dragLabel && (
+        <Text
+          position={[0, (set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT) + 2, 0]}
+          fontSize={1.2}
+          color={dragLabel.mode === 'elevate' ? '#00ff88' : '#ff8800'}
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.06}
+          outlineColor="#000000"
+        >
+          {dragLabel.mode === 'elevate'
+            ? `↕ Elevation: ${dragLabel.value.toFixed(1)} ft`
+            : `↻ Rotation: ${dragLabel.value}°`
+          }
+        </Text>
+      )}
     </group>
   )
 }
@@ -841,37 +926,40 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
 
   return (
     <>
-      {Object.values(roomGroups).map(group => (
-        <DraggableSetGroup key={group.set.id} set={group.set} ppu={ppu} defaultWallHeight={defaultWallHeight}>
-          {/* Floor plane */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[group.floor.cx, 0.01, group.floor.cz]} receiveShadow>
-            <planeGeometry args={[group.floor.w, group.floor.d]} />
-            <meshStandardMaterial color={group.floor.color} transparent opacity={0.2} side={THREE.DoubleSide} />
-          </mesh>
-          {/* Wall segments for this room */}
-          {group.segments.map((seg, i) => {
-            const len = seg.rMax - seg.rMin
-            const mid = (seg.rMin + seg.rMax) / 2
-            const yCenter = seg.yBot + seg.yH / 2
+      {Object.values(roomGroups).map(group => {
+        const elev = group.set.elevation || 0
+        return (
+          <DraggableSetGroup key={group.set.id} set={group.set} ppu={ppu} defaultWallHeight={defaultWallHeight}>
+            {/* Floor plane */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[group.floor.cx, 0.01 + elev, group.floor.cz]} receiveShadow>
+              <planeGeometry args={[group.floor.w, group.floor.d]} />
+              <meshStandardMaterial color={group.floor.color} transparent opacity={0.2} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Wall segments for this room */}
+            {group.segments.map((seg, i) => {
+              const len = seg.rMax - seg.rMin
+              const mid = (seg.rMin + seg.rMax) / 2
+              const yCenter = seg.yBot + seg.yH / 2 + elev
 
-            let pos, size
-            if (seg.dir === 'h') {
-              pos = [mid, yCenter, seg.fixedVal]
-              size = [len, seg.yH, WALL_T]
-            } else {
-              pos = [seg.fixedVal, yCenter, mid]
-              size = [WALL_T, seg.yH, len]
-            }
+              let pos, size
+              if (seg.dir === 'h') {
+                pos = [mid, yCenter, seg.fixedVal]
+                size = [len, seg.yH, WALL_T]
+              } else {
+                pos = [seg.fixedVal, yCenter, mid]
+                size = [WALL_T, seg.yH, len]
+              }
 
-            return (
-              <mesh key={`wall-${i}`} position={pos} castShadow receiveShadow>
-                <boxGeometry args={size} />
-                <meshStandardMaterial color={seg.color} roughness={0.8} />
-              </mesh>
-            )
-          })}
-        </DraggableSetGroup>
-      ))}
+              return (
+                <mesh key={`wall-${i}`} position={pos} castShadow receiveShadow>
+                  <boxGeometry args={size} />
+                  <meshStandardMaterial color={seg.color} roughness={0.8} />
+                </mesh>
+              )
+            })}
+          </DraggableSetGroup>
+        )
+      })}
     </>
   )
 }
@@ -1031,7 +1119,7 @@ function SetLabel3D({ set, ppu, defaultWallHeight }) {
 }
 
 // ─── Main Scene Content ────────────────────────────────────────────
-function SceneContent({ controlMode, orbitRef, locked3D }) {
+function SceneContent({ controlMode, orbitRef, locked3D, rKeyRef }) {
   const { sets, pixelsPerUnit, layerVisibility, labelsVisible, wallRenderMode, defaultWallHeight } = useStore()
 
   const ppu = pixelsPerUnit || 1
@@ -1093,7 +1181,7 @@ function SceneContent({ controlMode, orbitRef, locked3D }) {
 
   const startPos = useMemo(() => sceneCenter, [sceneCenter])
 
-  const dragContextValue = useMemo(() => ({ orbitRef, controlMode, locked3D }), [orbitRef, controlMode, locked3D])
+  const dragContextValue = useMemo(() => ({ orbitRef, controlMode, locked3D, rKeyRef }), [orbitRef, controlMode, locked3D, rKeyRef])
 
   return (
     <DragContext.Provider value={dragContextValue}>
@@ -1190,6 +1278,23 @@ export default function Scene3D() {
   const [showDebug, setShowDebug] = useState(false)
   const { wallRenderMode, setWallRenderMode, setSelectedSetId, sets, pixelsPerUnit } = useStore()
   const orbitRef = useRef()
+  const rKeyRef = useRef(false)
+
+  // Track R key state for rotation drag mode
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'r' || e.key === 'R') rKeyRef.current = true
+    }
+    const onKeyUp = (e) => {
+      if (e.key === 'r' || e.key === 'R') rKeyRef.current = false
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [])
 
   const handlePointerMissed = useCallback(() => {
     setSelectedSetId(null)
@@ -1264,7 +1369,7 @@ export default function Scene3D() {
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white text-xs px-4 py-2 rounded-lg">
           {locked3D
             ? 'Layout locked | Click to select | Right-drag to pan | Scroll to zoom | Left-drag to rotate'
-            : 'Click to select | Drag to move | Right-drag to pan | Scroll to zoom | Left-drag background to rotate'
+            : 'Click to select | Drag to move | Shift+Drag to raise/lower | R+Drag to rotate | Right-drag to pan | Scroll to zoom'
           }
         </div>
       )}
@@ -1320,7 +1425,7 @@ export default function Scene3D() {
         }}
         onPointerMissed={handlePointerMissed}
       >
-        <SceneContent controlMode={controlMode} orbitRef={orbitRef} locked3D={locked3D} />
+        <SceneContent controlMode={controlMode} orbitRef={orbitRef} locked3D={locked3D} rKeyRef={rKeyRef} />
       </Canvas>
     </div>
   )
