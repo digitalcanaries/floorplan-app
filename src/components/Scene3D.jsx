@@ -1,8 +1,11 @@
-import { useRef, useMemo, useState, useEffect, useCallback } from 'react'
+import { useRef, useMemo, useState, useEffect, useCallback, createContext, useContext } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Sky, Grid, Text, Environment } from '@react-three/drei'
 import * as THREE from 'three'
 import useStore from '../store.js'
+
+// Context to share OrbitControls ref + controlMode with draggable components
+const DragContext = createContext({ orbitRef: null, controlMode: 'orbit' })
 
 // ─── Constants ───────────────────────────────────────────────────────
 const DEFAULT_WALL_HEIGHT = 12  // feet (standard 4'×12' flat)
@@ -498,6 +501,115 @@ function SpecialSetMesh({ set, ppu, defaultWallHeight }) {
   )
 }
 
+// ─── Selection Highlight ────────────────────────────────────────────
+function SelectionHighlight({ set, ppu, defaultWallHeight }) {
+  const { cx, cz, footprintW, footprintH } = get3DPosition(set, ppu)
+  const h = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
+  return (
+    <mesh position={[cx, h / 2, cz]}>
+      <boxGeometry args={[footprintW + 0.3, h + 0.3, footprintH + 0.3]} />
+      <meshBasicMaterial color="#00ffff" wireframe transparent opacity={0.5} />
+    </mesh>
+  )
+}
+
+// ─── Draggable Set Group ────────────────────────────────────────────
+// Wraps 3D children in a group that can be clicked (select) and dragged (reposition).
+// Uses raycasting against an invisible XZ ground plane for drag motion.
+function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
+  const selectedSetId = useStore(s => s.selectedSetId)
+  const setSelectedSetId = useStore(s => s.setSelectedSetId)
+  const updateSet = useStore(s => s.updateSet)
+  const isSelected = selectedSetId === set.id
+
+  const groupRef = useRef()
+  const dragState = useRef(null)
+  const [dragOffset, setDragOffset] = useState([0, 0, 0])
+  const { camera, gl, size } = useThree()
+  const { orbitRef, controlMode } = useContext(DragContext)
+
+  const groundPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
+  const raycaster = useMemo(() => new THREE.Raycaster(), [])
+
+  const getHitPoint = useCallback((e) => {
+    // Convert pointer event to NDC coordinates
+    const rect = gl.domElement.getBoundingClientRect()
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    )
+    raycaster.setFromCamera(mouse, camera)
+    const hit = new THREE.Vector3()
+    raycaster.ray.intersectPlane(groundPlane, hit)
+    return hit
+  }, [camera, gl, raycaster, groundPlane])
+
+  const onPointerDown = useCallback((e) => {
+    if (controlMode !== 'orbit') return
+    e.stopPropagation()
+    setSelectedSetId(set.id)
+
+    const hit = getHitPoint(e)
+    if (!hit) return
+
+    const { cx, cz } = get3DPosition(set, ppu)
+    dragState.current = {
+      startHit: hit.clone(),
+      startCx: cx,
+      startCz: cz,
+    }
+    setDragOffset([0, 0, 0])
+
+    if (orbitRef?.current) orbitRef.current.enabled = false
+
+    // Use native DOM events for reliable move/up tracking
+    const onMove = (moveEvt) => {
+      if (!dragState.current) return
+      const currentHit = getHitPoint(moveEvt)
+      if (!currentHit) return
+      const dx = currentHit.x - dragState.current.startHit.x
+      const dz = currentHit.z - dragState.current.startHit.z
+      setDragOffset([dx, 0, dz])
+    }
+
+    const onUp = (upEvt) => {
+      if (dragState.current) {
+        const currentHit = getHitPoint(upEvt)
+        if (currentHit) {
+          const dx = currentHit.x - dragState.current.startHit.x
+          const dz = currentHit.z - dragState.current.startHit.z
+          if (Math.abs(dx) > 0.1 || Math.abs(dz) > 0.1) {
+            // Reverse coordinate conversion: 3D center → 2D pixel position
+            const newCx = dragState.current.startCx + dx
+            const newCz = dragState.current.startCz + dz
+            const isRotated = (set.rotation || 0) % 180 !== 0
+            const fw = isRotated ? set.height : set.width
+            const fh = isRotated ? set.width : set.height
+            const newPixelX = (newCx - fw / 2) * ppu
+            const newPixelY = (newCz - fh / 2) * ppu
+            updateSet(set.id, { x: newPixelX, y: newPixelY })
+          }
+        }
+        dragState.current = null
+        setDragOffset([0, 0, 0])
+      }
+      if (orbitRef?.current) orbitRef.current.enabled = true
+      gl.domElement.removeEventListener('pointermove', onMove)
+      gl.domElement.removeEventListener('pointerup', onUp)
+    }
+
+    gl.domElement.addEventListener('pointermove', onMove)
+    gl.domElement.addEventListener('pointerup', onUp)
+  }, [controlMode, set, ppu, getHitPoint, orbitRef, gl, setSelectedSetId, updateSet])
+
+  return (
+    <group ref={groupRef} position={dragOffset} onPointerDown={onPointerDown}>
+      {children}
+      {isSelected && <SelectionHighlight set={set} ppu={ppu} defaultWallHeight={defaultWallHeight} />}
+    </group>
+  )
+}
+
 // ─── Set Rooms: hollow rooms with door/window openings ──────────────────────
 // Each room = 4 walls forming a hollow rectangle.
 // For each wall edge we:
@@ -510,7 +622,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
   const EDGE_TOL = 0.5 // feet — tolerance for edge coincidence (dedup only)
   const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
 
-  const { segments: wallSegments, floors } = useMemo(() => {
+  const roomGroups = useMemo(() => {
     // Pre-compute bounding boxes in FEET (top-left origin) for all rooms
     const boxes = roomSets.map(s => {
       const isRot = (s.rotation || 0) % 180 !== 0
@@ -565,18 +677,22 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
       return result
     }
 
-    const segments = []
-    const floorList = []
+    // Group segments and floors by room (setId)
+    const roomGroups = {} // keyed by set.id → { set, segments: [], floor: {} }
 
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i]
       const wh = b.s.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
       const color = (b.s.color && b.s.color !== '#ffffff') ? b.s.color : '#E8E0D8'
 
-      // Floor
+      // Initialise group for this room
       const fcx = (b.x1 + b.x2) / 2
       const fcz = (b.z1 + b.z2) / 2
-      floorList.push({ cx: fcx, cz: fcz, w: b.fw, d: b.fh, color, id: b.s.id })
+      roomGroups[b.s.id] = {
+        set: b.s,
+        segments: [],
+        floor: { cx: fcx, cz: fcz, w: b.fw, d: b.fh, color },
+      }
 
       // 4 edges: each defined by a fixed axis/value and a range along the other axis
       // 'h' edges run along X (horizontal), 'v' edges run along Z (vertical)
@@ -654,78 +770,78 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
           for (const op of edgeOpenings) {
             // Solid wall before this opening
             if (op.min > cursor + 0.05) {
-              segments.push({
+              roomGroups[b.s.id].segments.push({
                 dir: edge.dir, fixedVal: edge.fixedVal,
                 rMin: cursor, rMax: op.min,
-                yBot: 0, yH: wh, color, setId: b.s.id,
+                yBot: 0, yH: wh, color,
               })
             }
             // Wall above opening (header to ceiling)
             if (op.headH < wh - 0.05) {
-              segments.push({
+              roomGroups[b.s.id].segments.push({
                 dir: edge.dir, fixedVal: edge.fixedVal,
                 rMin: op.min, rMax: op.max,
-                yBot: op.headH, yH: wh - op.headH, color, setId: b.s.id,
+                yBot: op.headH, yH: wh - op.headH, color,
               })
             }
             // Wall below window (sill)
             if (op.sillH > 0.05) {
-              segments.push({
+              roomGroups[b.s.id].segments.push({
                 dir: edge.dir, fixedVal: edge.fixedVal,
                 rMin: op.min, rMax: op.max,
-                yBot: 0, yH: op.sillH, color, setId: b.s.id,
+                yBot: 0, yH: op.sillH, color,
               })
             }
             cursor = Math.max(cursor, op.max)
           }
           // Solid wall after last opening
           if (cursor < range.max - 0.05) {
-            segments.push({
+            roomGroups[b.s.id].segments.push({
               dir: edge.dir, fixedVal: edge.fixedVal,
               rMin: cursor, rMax: range.max,
-              yBot: 0, yH: wh, color, setId: b.s.id,
+              yBot: 0, yH: wh, color,
             })
           }
         }
       }
     }
 
-    return { segments, floors: floorList }
+    return roomGroups
   }, [roomSets, doorSets, windowSets, ppu, defaultWallHeight])
 
   return (
     <>
-      {/* Floor planes */}
-      {floors.map(f => (
-        <mesh key={`floor-${f.id}`} rotation={[-Math.PI / 2, 0, 0]} position={[f.cx, 0.01, f.cz]} receiveShadow>
-          <planeGeometry args={[f.w, f.d]} />
-          <meshStandardMaterial color={f.color} transparent opacity={0.2} side={THREE.DoubleSide} />
-        </mesh>
-      ))}
-      {/* Wall segments */}
-      {wallSegments.map((seg, i) => {
-        const len = seg.rMax - seg.rMin
-        const mid = (seg.rMin + seg.rMax) / 2
-        const yCenter = seg.yBot + seg.yH / 2
-
-        let pos, size
-        if (seg.dir === 'h') {
-          // Horizontal wall runs along X at fixed Z
-          pos = [mid, yCenter, seg.fixedVal]
-          size = [len, seg.yH, WALL_T]
-        } else {
-          // Vertical wall runs along Z at fixed X
-          pos = [seg.fixedVal, yCenter, mid]
-          size = [WALL_T, seg.yH, len]
-        }
-
-        return (
-          <mesh key={`wall-${i}`} position={pos} castShadow receiveShadow>
-            <boxGeometry args={size} />
-            <meshStandardMaterial color={seg.color} roughness={0.8} />
+      {Object.values(roomGroups).map(group => (
+        <DraggableSetGroup key={group.set.id} set={group.set} ppu={ppu} defaultWallHeight={defaultWallHeight}>
+          {/* Floor plane */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[group.floor.cx, 0.01, group.floor.cz]} receiveShadow>
+            <planeGeometry args={[group.floor.w, group.floor.d]} />
+            <meshStandardMaterial color={group.floor.color} transparent opacity={0.2} side={THREE.DoubleSide} />
           </mesh>
-        )
-      })}
+          {/* Wall segments for this room */}
+          {group.segments.map((seg, i) => {
+            const len = seg.rMax - seg.rMin
+            const mid = (seg.rMin + seg.rMax) / 2
+            const yCenter = seg.yBot + seg.yH / 2
+
+            let pos, size
+            if (seg.dir === 'h') {
+              pos = [mid, yCenter, seg.fixedVal]
+              size = [len, seg.yH, WALL_T]
+            } else {
+              pos = [seg.fixedVal, yCenter, mid]
+              size = [WALL_T, seg.yH, len]
+            }
+
+            return (
+              <mesh key={`wall-${i}`} position={pos} castShadow receiveShadow>
+                <boxGeometry args={size} />
+                <meshStandardMaterial color={seg.color} roughness={0.8} />
+              </mesh>
+            )
+          })}
+        </DraggableSetGroup>
+      ))}
     </>
   )
 }
@@ -885,7 +1001,7 @@ function SetLabel3D({ set, ppu, defaultWallHeight }) {
 }
 
 // ─── Main Scene Content ────────────────────────────────────────────
-function SceneContent({ controlMode }) {
+function SceneContent({ controlMode, orbitRef }) {
   const { sets, pixelsPerUnit, layerVisibility, labelsVisible, wallRenderMode, defaultWallHeight } = useStore()
 
   const ppu = pixelsPerUnit || 1
@@ -947,8 +1063,10 @@ function SceneContent({ controlMode }) {
 
   const startPos = useMemo(() => sceneCenter, [sceneCenter])
 
+  const dragContextValue = useMemo(() => ({ orbitRef, controlMode }), [orbitRef, controlMode])
+
   return (
-    <>
+    <DragContext.Provider value={dragContextValue}>
       {/* Lighting */}
       <ambientLight intensity={0.4} />
       <directionalLight
@@ -984,7 +1102,9 @@ function SceneContent({ controlMode }) {
 
       {/* Individual wall pieces (flat components) */}
       {wallSets.map(s => (
-        <WallMesh key={s.id} set={s} ppu={ppu} allSets={visibleSets} renderMode={wallRenderMode} defaultWallHeight={defaultWallHeight} />
+        <DraggableSetGroup key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight}>
+          <WallMesh set={s} ppu={ppu} allSets={visibleSets} renderMode={wallRenderMode} defaultWallHeight={defaultWallHeight} />
+        </DraggableSetGroup>
       ))}
 
       {/* Room Sets: smart walls on unshared edges, with door/window openings */}
@@ -998,17 +1118,23 @@ function SceneContent({ controlMode }) {
 
       {/* Doors */}
       {doorSets.map(s => (
-        <DoorMesh3D key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+        <DraggableSetGroup key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight}>
+          <DoorMesh3D set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+        </DraggableSetGroup>
       ))}
 
       {/* Windows */}
       {windowSets.map(s => (
-        <WindowMesh3D key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+        <DraggableSetGroup key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight}>
+          <WindowMesh3D set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+        </DraggableSetGroup>
       ))}
 
       {/* Special sets (furniture, columns, stairs, etc.) */}
       {specialSets.map(s => (
-        <SpecialSetMesh key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+        <DraggableSetGroup key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight}>
+          <SpecialSetMesh set={s} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+        </DraggableSetGroup>
       ))}
 
       {/* 3D Labels */}
@@ -1019,6 +1145,7 @@ function SceneContent({ controlMode }) {
       {/* Camera controls */}
       {controlMode === 'orbit' && (
         <OrbitControls
+          ref={orbitRef}
           target={sceneCenter}
           maxPolarAngle={Math.PI / 2.1}
           minDistance={5}
@@ -1028,14 +1155,19 @@ function SceneContent({ controlMode }) {
         />
       )}
       <FirstPersonControls enabled={controlMode === 'firstperson'} startPos={startPos} />
-    </>
+    </DragContext.Provider>
   )
 }
 
 // ─── Main Exported Component ───────────────────────────────────────
 export default function Scene3D() {
   const [controlMode, setControlMode] = useState('orbit')
-  const { wallRenderMode, setWallRenderMode } = useStore()
+  const { wallRenderMode, setWallRenderMode, setSelectedSetId } = useStore()
+  const orbitRef = useRef()
+
+  const handlePointerMissed = useCallback(() => {
+    setSelectedSetId(null)
+  }, [setSelectedSetId])
 
   return (
     <div className="w-full h-full relative bg-gray-900">
@@ -1080,7 +1212,7 @@ export default function Scene3D() {
 
       {controlMode === 'orbit' && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white text-xs px-4 py-2 rounded-lg">
-          Left-drag to rotate | Right-drag to pan | Scroll to zoom
+          Click to select | Drag to move | Right-drag to pan | Scroll to zoom | Left-drag background to rotate
         </div>
       )}
 
@@ -1092,8 +1224,9 @@ export default function Scene3D() {
           gl.shadowMap.enabled = true
           gl.shadowMap.type = THREE.PCFSoftShadowMap
         }}
+        onPointerMissed={handlePointerMissed}
       >
-        <SceneContent controlMode={controlMode} />
+        <SceneContent controlMode={controlMode} orbitRef={orbitRef} />
       </Canvas>
     </div>
   )
