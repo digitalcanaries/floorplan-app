@@ -296,15 +296,25 @@ function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
   const depthFt = isLegacyHeight ? thickness : set.height
   const wallHeight = set.wallHeight || (isLegacyHeight ? set.height : null) || defaultWallHeight || DEFAULT_WALL_HEIGHT
 
-  // For legacy data, recalculate 3D position using corrected plan-view depth
-  const cx_raw = set.x / ppu
-  const cz_raw = set.y / ppu
-  const isRotated = (set.rotation || 0) % 180 !== 0
+  // Recalculate 3D position using corrected plan-view depth, with rotation-aware
+  // bbox offset (same logic as get3DPosition but using corrected depthFt for legacy walls)
+  const rot = ((set.rotation || 0) % 360 + 360) % 360
+  const isRotated = rot === 90 || rot === 270
   const footprintW = isRotated ? depthFt : widthFt
   const footprintH = isRotated ? widthFt : depthFt
-  const cx = cx_raw + footprintW / 2
-  const cz = cz_raw + footprintH / 2
-  const rotY = set.rotation ? -(set.rotation * Math.PI / 180) : 0
+  let bboxX = set.x / ppu
+  let bboxZ = set.y / ppu
+  if (rot === 90) {
+    bboxX -= depthFt   // bbox shifts left by unrotated height (depthFt for legacy)
+  } else if (rot === 180) {
+    bboxX -= widthFt
+    bboxZ -= depthFt
+  } else if (rot === 270) {
+    bboxZ -= widthFt   // bbox shifts up by unrotated width
+  }
+  const cx = bboxX + footprintW / 2
+  const cz = bboxZ + footprintH / 2
+  const rotY = rot ? -(rot * Math.PI / 180) : 0
 
   // Find doors/windows that overlap this wall to cut openings
   const openings = useMemo(() => {
@@ -313,19 +323,15 @@ function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
       if (s.category !== 'Door' && s.category !== 'Window') return false
       if (s.onPlan === false || s.hidden) return false
 
-      // Get both bounding boxes in feet
+      // Get both bounding boxes in feet using rotation-aware bbox positions
       const sPos = get3DPosition(s, ppu)
-      const isRotS = (s.rotation || 0) % 180 !== 0
-      const sw = isRotS ? s.height : s.width
-      const sh = isRotS ? s.width : s.height
-      const sx1 = s.x / ppu, sy1 = s.y / ppu
-      const sx2 = sx1 + sw, sy2 = sy1 + sh
+      const sx1 = sPos.cx - sPos.footprintW / 2
+      const sy1 = sPos.cz - sPos.footprintH / 2
+      const sx2 = sPos.cx + sPos.footprintW / 2
+      const sy2 = sPos.cz + sPos.footprintH / 2
 
-      const isRotW = (set.rotation || 0) % 180 !== 0
-      const ww = isRotW ? depthFt : widthFt
-      const wh = isRotW ? widthFt : depthFt
-      const wx1 = set.x / ppu, wy1 = set.y / ppu
-      const wx2 = wx1 + ww, wy2 = wy1 + wh
+      const wx1 = bboxX, wy1 = bboxZ
+      const wx2 = bboxX + footprintW, wy2 = bboxZ + footprintH
 
       return sx1 < wx2 && sx2 > wx1 && sy1 < wy2 && sy2 > wy1
     })
