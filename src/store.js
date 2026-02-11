@@ -83,6 +83,9 @@ const useStore = create((set, get) => ({
   // Hover tooltips
   showHoverTooltips: saved?.showHoverTooltips ?? true,
 
+  // Lock indicators (amber dashed borders on locked sets)
+  showLockIndicators: saved?.showLockIndicators ?? true,
+
   // Default wall height (global setting, feet)
   defaultWallHeight: saved?.defaultWallHeight ?? 12,
 
@@ -580,6 +583,12 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Lock indicators toggle
+  setShowLockIndicators: (v) => {
+    set({ showLockIndicators: v })
+    get().autosave()
+  },
+
   // Default wall height
   setDefaultWallHeight: (h) => {
     set({ defaultWallHeight: h })
@@ -811,6 +820,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
+      showLockIndicators: state.showLockIndicators,
       defaultWallHeight: state.defaultWallHeight,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
@@ -854,6 +864,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
+      showLockIndicators: state.showLockIndicators,
       defaultWallHeight: state.defaultWallHeight,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
@@ -919,6 +930,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: state.wallRenderMode,
       showDimensions: state.showDimensions,
       showHoverTooltips: state.showHoverTooltips,
+      showLockIndicators: state.showLockIndicators,
       defaultWallHeight: state.defaultWallHeight,
       layerVisibility: state.layerVisibility,
       sets: state.sets,
@@ -955,6 +967,7 @@ const useStore = create((set, get) => ({
       wallRenderMode: data.wallRenderMode ?? 'finished',
       showDimensions: data.showDimensions ?? false,
       showHoverTooltips: data.showHoverTooltips ?? true,
+      showLockIndicators: data.showLockIndicators ?? true,
       defaultWallHeight: data.defaultWallHeight ?? 12,
       layerVisibility: data.layerVisibility || {},
       sets: data.sets || [],

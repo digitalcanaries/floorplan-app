@@ -41,7 +41,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     undo, redo,
     annotations, updateAnnotation,
     layerVisibility, showDimensions,
-    showHoverTooltips,
+    showHoverTooltips, showLockIndicators,
     copySet, pasteSet, duplicateSet,
     buildingWalls, buildingWallsVisible,
     drawingMode, drawingWallPoints, addDrawingPoint, cancelDrawing,
@@ -441,6 +441,7 @@ export default function FloorCanvas({ onCanvasSize }) {
       const h = s.height * ppu
       const isSelected = s.id === selectedSetId
       const isLocked = s.lockedToPdf
+      const showLockVis = isLocked && showLockIndicators // visual indicator only
       const hasCutouts = s.cutouts && s.cutouts.length > 0
       const setOpacity = s.opacity ?? 1
 
@@ -475,9 +476,9 @@ export default function FloorCanvas({ onCanvasSize }) {
           left: s.x,
           top: s.y,
           fill: s.color + fillAlpha,
-          stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
+          stroke: isSelected ? '#ffffff' : showLockVis ? '#f59e0b' : s.color,
           strokeWidth: isSelected ? 3 : 2,
-          strokeDashArray: isLocked ? [6, 3] : [],
+          strokeDashArray: showLockVis ? [6, 3] : [],
           angle: s.rotation || 0,
           originX: 'left',
           originY: 'top',
@@ -500,9 +501,9 @@ export default function FloorCanvas({ onCanvasSize }) {
           width: w,
           height: h,
           fill: s.color + fillAlpha,
-          stroke: isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color,
+          stroke: isSelected ? '#ffffff' : showLockVis ? '#f59e0b' : s.color,
           strokeWidth: isSelected ? 3 : 2,
-          strokeDashArray: isLocked ? [6, 3] : [],
+          strokeDashArray: showLockVis ? [6, 3] : [],
           angle: s.rotation || 0,
           originX: 'left',
           originY: 'top',
@@ -1277,7 +1278,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
 
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode, layerVisibility, showDimensions, annotations, buildingWalls, buildingWallsVisible, drawingMode, drawingWallPoints])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode, layerVisibility, showDimensions, annotations, buildingWalls, buildingWallsVisible, drawingMode, drawingWallPoints, showLockIndicators])
 
   useEffect(() => {
     syncSets()
