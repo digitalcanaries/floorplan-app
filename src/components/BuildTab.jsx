@@ -193,13 +193,14 @@ export default function BuildTab() {
           <div className="flex-1">
             <label className="text-[10px] text-gray-500 block">Height</label>
             <select
-              value={buildingWallDefaults.height || 14}
+              value={buildingWallDefaults.height || 13}
               onChange={e => setBuildingWallDefaults({ height: parseFloat(e.target.value) })}
               className="w-full text-[10px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white"
             >
               <option value={8}>8'</option>
               <option value={10}>10'</option>
               <option value={12}>12'</option>
+              <option value={13}>13'</option>
               <option value={14}>14'</option>
               <option value={16}>16'</option>
               <option value={20}>20'</option>

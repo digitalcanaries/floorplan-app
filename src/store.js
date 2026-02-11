@@ -67,7 +67,7 @@ const useStore = create((set, get) => ({
   // Building Walls (structural walls drawn on PDF)
   buildingWalls: saved?.buildingWalls || [],
   nextBuildingWallId: saved?.nextBuildingWallId || 1,
-  buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 1, height: 14, color: '#8B4513' },
+  buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },
   buildingWallsVisible: saved?.buildingWallsVisible ?? true,
 
   // Drawing mode (transient, not persisted)
@@ -91,7 +91,7 @@ const useStore = create((set, get) => ({
   hideAllSets: false, // transient — not persisted
 
   // Default wall height (global setting, feet)
-  defaultWallHeight: saved?.defaultWallHeight ?? 12,
+  defaultWallHeight: saved?.defaultWallHeight ?? 10,
 
   // Clipboard (not persisted)
   _clipboard: null,
@@ -1035,7 +1035,7 @@ const useStore = create((set, get) => ({
       showDimensions: data.showDimensions ?? false,
       showHoverTooltips: data.showHoverTooltips ?? true,
       showLockIndicators: data.showLockIndicators ?? true,
-      defaultWallHeight: data.defaultWallHeight ?? 12,
+      defaultWallHeight: data.defaultWallHeight ?? 10,
       layerVisibility: data.layerVisibility || {},
       sets: data.sets || [],
       nextSetId: data.nextSetId || 1,
@@ -1047,7 +1047,7 @@ const useStore = create((set, get) => ({
       nextGroupId: data.nextGroupId || 1,
       buildingWalls: data.buildingWalls || [],
       nextBuildingWallId: data.nextBuildingWallId || 1,
-      buildingWallDefaults: data.buildingWallDefaults || { thickness: 1, height: 14, color: '#8B4513' },
+      buildingWallDefaults: data.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },
       buildingWallsVisible: data.buildingWallsVisible ?? true,
       selectedSetId: null,
       _past: [], _future: [],
@@ -1073,7 +1073,7 @@ const useStore = create((set, get) => ({
       nextGroupId: 1,
       buildingWalls: [],
       nextBuildingWallId: 1,
-      buildingWallDefaults: { thickness: 1, height: 14, color: '#8B4513' },
+      buildingWallDefaults: { thickness: 1, height: 13, color: '#8B4513' },
       buildingWallsVisible: true,
       drawingMode: null,
       drawingWallPoints: [],
