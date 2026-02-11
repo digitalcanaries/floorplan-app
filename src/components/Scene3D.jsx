@@ -848,14 +848,30 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
 
       // 4 edges: each defined by a fixed axis/value and a range along the other axis
       // 'h' edges run along X (horizontal), 'v' edges run along Z (vertical)
+      // Visual bbox edges order: visual-top, visual-bottom, visual-left, visual-right
       const edges = [
-        { dir: 'h', fixedVal: b.z1, rMin: b.x1, rMax: b.x2 }, // top (front)
-        { dir: 'h', fixedVal: b.z2, rMin: b.x1, rMax: b.x2 }, // bottom (back)
-        { dir: 'v', fixedVal: b.x1, rMin: b.z1, rMax: b.z2 }, // left
-        { dir: 'v', fixedVal: b.x2, rMin: b.z1, rMax: b.z2 }, // right
+        { dir: 'h', fixedVal: b.z1, rMin: b.x1, rMax: b.x2 }, // visual top (front)
+        { dir: 'h', fixedVal: b.z2, rMin: b.x1, rMax: b.x2 }, // visual bottom (back)
+        { dir: 'v', fixedVal: b.x1, rMin: b.z1, rMax: b.z2 }, // visual left
+        { dir: 'v', fixedVal: b.x2, rMin: b.z1, rMax: b.z2 }, // visual right
       ]
 
-      const sideNames = ['top', 'bottom', 'left', 'right']  // matches edges array order
+      // Map visual bbox edges to the LOGICAL (unrotated) side names.
+      // removedWalls/hiddenWalls/wallExtensions use logical side names (top/bottom/left/right
+      // of the UNROTATED rect). When rotated, the visual bbox edges correspond to different
+      // logical sides:
+      //   rot=0:   visual top=logical top,    bottom=bottom,  left=left,   right=right
+      //   rot=90:  visual top=logical left,   bottom=right,   left=bottom, right=top
+      //   rot=180: visual top=logical bottom,  bottom=top,    left=right,  right=left
+      //   rot=270: visual top=logical right,  bottom=left,    left=top,    right=bottom
+      const rot = ((b.s.rotation || 0) % 360 + 360) % 360
+      const sideMap = {
+        0:   ['top', 'bottom', 'left', 'right'],
+        90:  ['left', 'right', 'bottom', 'top'],
+        180: ['bottom', 'top', 'right', 'left'],
+        270: ['right', 'left', 'top', 'bottom'],
+      }
+      const sideNames = sideMap[rot] || sideMap[0]
       const removedWalls = b.s.removedWalls || {}
       const hiddenWalls = b.s.hiddenWalls || {}
       const wallExtensions = b.s.wallExtensions || {}
