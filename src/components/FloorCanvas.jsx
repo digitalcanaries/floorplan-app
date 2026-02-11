@@ -622,10 +622,13 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.add(shape)
 
       // Per-side wall line rendering with overlap clipping for room sets
+      // Only applies to non-rotated sets (0°) where AABB matches the rect exactly.
+      // For rotated sets, the AABB is the outer envelope and doesn't match the rect outline.
       const isRoomSet = !s.category || s.category === 'Set'
       const hasRemovedWalls = s.removedWalls && Object.values(s.removedWalls).some(v => v)
-      if (isRoomSet) {
-        // Compute room AABBs for overlap detection (pixel coords, axis-aligned after rotation)
+      const setRot = ((s.rotation || 0) % 360 + 360) % 360
+      if (isRoomSet && setRot === 0) {
+        // Compute room AABBs for overlap detection (pixel coords)
         const myAABB = getAABB(s, ppu)
         const otherRoomAABBs = visibleSets
           .filter(o => o.id !== s.id && (!o.category || o.category === 'Set'))
@@ -646,17 +649,10 @@ export default function FloorCanvas({ onCanvasSize }) {
           const wallDash = isLocked ? [6, 3] : []
           const removedWalls = s.removedWalls || {}
 
-          // Map removedWalls sides based on rotation
-          const rot = ((s.rotation || 0) % 360 + 360) % 360
-          let mapped = removedWalls
-          if (rot === 90) mapped = { top: removedWalls.left, right: removedWalls.top, bottom: removedWalls.right, left: removedWalls.bottom }
-          else if (rot === 270) mapped = { top: removedWalls.right, right: removedWalls.bottom, bottom: removedWalls.left, left: removedWalls.top }
-          else if (rot === 180) mapped = { top: removedWalls.bottom, right: removedWalls.left, bottom: removedWalls.top, left: removedWalls.right }
+          // At 0° rotation, AABB matches the rect exactly
+          const bx = s.x, by = s.y, bw = w, bh = h
 
-          // Visual bounding box in pixels (post-rotation, axis-aligned)
-          const bx = myAABB.x, by = myAABB.y, bw = myAABB.w, bh = myAABB.h
-
-          // Define 4 wall sides in pixel coords (axis-aligned bounding box)
+          // Define 4 wall sides in pixel coords
           const wallSides = [
             { side: 'top',    fixed: by,      rangeMin: bx, rangeMax: bx + bw, dir: 'h' },
             { side: 'bottom', fixed: by + bh, rangeMin: bx, rangeMax: bx + bw, dir: 'h' },
@@ -666,7 +662,7 @@ export default function FloorCanvas({ onCanvasSize }) {
 
           for (const ws of wallSides) {
             // Skip manually removed walls
-            if (mapped[ws.side]) continue
+            if (removedWalls[ws.side]) continue
 
             // Compute overlap intervals — portions of this wall inside another room
             const clipIntervals = []
@@ -689,7 +685,6 @@ export default function FloorCanvas({ onCanvasSize }) {
             }
 
             // Subtract clip intervals from the wall range to get visible segments
-            // Simple interval subtraction (same algorithm as 3D subtractIntervals)
             let segments = [{ min: ws.rangeMin, max: ws.rangeMax }]
             if (clipIntervals.length > 0) {
               const sorted = [...clipIntervals].sort((a, b) => a.min - b.min)
