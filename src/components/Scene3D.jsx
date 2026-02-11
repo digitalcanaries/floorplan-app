@@ -64,34 +64,27 @@ function BuildingWall3D({ wall, ppu, defaultWallHeight }) {
 // Rotation: 2D rotation is clockwise degrees, 3D Y rotation is counter-clockwise
 
 function get3DPosition(set, ppu) {
-  const rot = ((set.rotation || 0) % 360 + 360) % 360
-  const isRotated = rot === 90 || rot === 270
+  const rotDeg = ((set.rotation || 0) % 360 + 360) % 360
+  const rad = rotDeg * Math.PI / 180
+  const cosR = Math.cos(rad), sinR = Math.sin(rad)
 
-  // Visual bounding box dimensions (swapped when rotated 90/270)
-  const footprintW = isRotated ? set.height : set.width
-  const footprintH = isRotated ? set.width : set.height
+  // Fabric.js (left, top) = rotation pivot = top-left of UNROTATED rect.
+  // Unrotated center in local coords: (w/2, h/2) (in feet).
+  // Fabric.js CW rotation in screen coords (y-down):
+  //   cx = pivot_x + (w/2)*cos(θ) - (h/2)*sin(θ)
+  //   cz = pivot_y + (w/2)*sin(θ) + (h/2)*cos(θ)
+  const pivotX = set.x / ppu
+  const pivotZ = set.y / ppu
+  const hw = set.width / 2, hh = set.height / 2
+  const cx = pivotX + hw * cosR - hh * sinR
+  const cz = pivotZ + hw * sinR + hh * cosR
 
-  // Fabric.js (left, top) is the rotation pivot = top-left of UNROTATED rect.
-  // In screen coords (y-down), CW rotation shifts the visual bounding box:
-  //   0°:   no shift
-  //   90°:  bbox shifts LEFT by height (x -= height)
-  //   180°: bbox shifts LEFT by width and UP by height (x -= width, y -= height)
-  //   270°: bbox shifts UP by width (y -= width)
-  // (all in feet, where width/height are the unrotated dimensions)
-  let bboxX = set.x / ppu
-  let bboxZ = set.y / ppu
-  if (rot === 90) {
-    bboxX -= set.height
-  } else if (rot === 180) {
-    bboxX -= set.width
-    bboxZ -= set.height
-  } else if (rot === 270) {
-    bboxZ -= set.width
-  }
+  // footprint dimensions (unrotated — the rect is w×h, rotation applied via rotY)
+  const footprintW = set.width
+  const footprintH = set.height
 
-  const cx = bboxX + footprintW / 2
-  const cz = bboxZ + footprintH / 2
-  const rotY = rot ? -(rot * Math.PI / 180) : 0
+  // 3D Y rotation is negative because 2D CW maps to 3D CCW around Y-up
+  const rotY = rotDeg ? -(rad) : 0
   return { cx, cz, rotY, footprintW, footprintH }
 }
 
@@ -296,44 +289,34 @@ function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
   const depthFt = isLegacyHeight ? thickness : set.height
   const wallHeight = set.wallHeight || (isLegacyHeight ? set.height : null) || defaultWallHeight || DEFAULT_WALL_HEIGHT
 
-  // Recalculate 3D position using corrected plan-view depth, with rotation-aware
-  // bbox offset (same logic as get3DPosition but using corrected depthFt for legacy walls)
-  const rot = ((set.rotation || 0) % 360 + 360) % 360
-  const isRotated = rot === 90 || rot === 270
-  const footprintW = isRotated ? depthFt : widthFt
-  const footprintH = isRotated ? widthFt : depthFt
-  let bboxX = set.x / ppu
-  let bboxZ = set.y / ppu
-  if (rot === 90) {
-    bboxX -= depthFt   // bbox shifts left by unrotated height (depthFt for legacy)
-  } else if (rot === 180) {
-    bboxX -= widthFt
-    bboxZ -= depthFt
-  } else if (rot === 270) {
-    bboxZ -= widthFt   // bbox shifts up by unrotated width
-  }
-  const cx = bboxX + footprintW / 2
-  const cz = bboxZ + footprintH / 2
-  const rotY = rot ? -(rot * Math.PI / 180) : 0
+  // General trig-based position (same as get3DPosition but with corrected depthFt for legacy)
+  const rotDeg = ((set.rotation || 0) % 360 + 360) % 360
+  const rad = rotDeg * Math.PI / 180
+  const cosR = Math.cos(rad), sinR = Math.sin(rad)
+  const pivotX = set.x / ppu, pivotZ = set.y / ppu
+  const cx = pivotX + (widthFt / 2) * cosR - (depthFt / 2) * sinR
+  const cz = pivotZ + (widthFt / 2) * sinR + (depthFt / 2) * cosR
+  const rotY = rotDeg ? -rad : 0
 
-  // Find doors/windows that overlap this wall to cut openings
+  // Find doors/windows that overlap this wall to cut openings (AABB overlap test)
   const openings = useMemo(() => {
+    // Compute AABB for this wall
+    const corners = [[0,0],[widthFt,0],[widthFt,depthFt],[0,depthFt]]
+    let wMinX = Infinity, wMinZ = Infinity, wMaxX = -Infinity, wMaxZ = -Infinity
+    for (const [lx, lz] of corners) {
+      const wx = pivotX + lx * cosR - lz * sinR
+      const wz = pivotZ + lx * sinR + lz * cosR
+      wMinX = Math.min(wMinX, wx); wMaxX = Math.max(wMaxX, wx)
+      wMinZ = Math.min(wMinZ, wz); wMaxZ = Math.max(wMaxZ, wz)
+    }
     return allSets.filter(s => {
       if (s.id === set.id) return false
       if (s.category !== 'Door' && s.category !== 'Window') return false
       if (s.onPlan === false || s.hidden) return false
-
-      // Get both bounding boxes in feet using rotation-aware bbox positions
       const sPos = get3DPosition(s, ppu)
-      const sx1 = sPos.cx - sPos.footprintW / 2
-      const sy1 = sPos.cz - sPos.footprintH / 2
-      const sx2 = sPos.cx + sPos.footprintW / 2
-      const sy2 = sPos.cz + sPos.footprintH / 2
-
-      const wx1 = bboxX, wy1 = bboxZ
-      const wx2 = bboxX + footprintW, wy2 = bboxZ + footprintH
-
-      return sx1 < wx2 && sx2 > wx1 && sy1 < wy2 && sy2 > wy1
+      const sx1 = sPos.cx - sPos.footprintW / 2, sy1 = sPos.cz - sPos.footprintH / 2
+      const sx2 = sPos.cx + sPos.footprintW / 2, sy2 = sPos.cz + sPos.footprintH / 2
+      return sx1 < wMaxX && sx2 > wMinX && sy1 < wMaxZ && sy2 > wMinZ
     })
   }, [allSets, set, ppu, widthFt, depthFt])
 
@@ -562,11 +545,11 @@ function SpecialSetMesh({ set, ppu, defaultWallHeight }) {
 
 // ─── Selection Highlight ────────────────────────────────────────────
 function SelectionHighlight({ set, ppu, defaultWallHeight }) {
-  const { cx, cz, footprintW, footprintH } = get3DPosition(set, ppu)
+  const { cx, cz, rotY, footprintW, footprintH } = get3DPosition(set, ppu)
   const elevation = set.elevation || 0
   const h = set.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
   return (
-    <mesh position={[cx, h / 2 + elevation, cz]}>
+    <mesh position={[cx, h / 2 + elevation, cz]} rotation={[0, rotY, 0]}>
       <boxGeometry args={[footprintW + 0.3, h + 0.3, footprintH + 0.3]} />
       <meshBasicMaterial color="#00ffff" wireframe transparent opacity={0.5} />
     </mesh>
@@ -764,44 +747,48 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
   const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
 
   const roomGroups = useMemo(() => {
-    // Helper: compute visual bounding box top-left in feet, accounting for rotation pivot
-    function getVisualBBox(s) {
-      const rot = ((s.rotation || 0) % 360 + 360) % 360
-      const isRot = rot === 90 || rot === 270
-      const fw = isRot ? s.height : s.width
-      const fh = isRot ? s.width : s.height
-      let x1 = s.x / ppu
-      let z1 = s.y / ppu
-      if (rot === 90) {
-        x1 -= s.height   // bbox shifts left by unrotated height
-      } else if (rot === 180) {
-        x1 -= s.width
-        z1 -= s.height
-      } else if (rot === 270) {
-        z1 -= s.width    // bbox shifts up by unrotated width
-      }
-      return { x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
+    // Helper: compute center position and rotation using general trig
+    function getRoomCenter(s) {
+      const pos = get3DPosition(s, ppu)
+      return pos  // { cx, cz, rotY, footprintW, footprintH }
     }
 
-    // Pre-compute bounding boxes in FEET for all rooms
+    // Helper: compute axis-aligned bounding box (for dedup/overlap on cardinal rotations)
+    function getAABB(s) {
+      const rotDeg = ((s.rotation || 0) % 360 + 360) % 360
+      const rad = rotDeg * Math.PI / 180
+      const cosR = Math.cos(rad), sinR = Math.sin(rad)
+      const px = s.x / ppu, pz = s.y / ppu
+      // 4 corners of unrotated rect in local coords relative to pivot
+      const corners = [
+        [0, 0], [s.width, 0], [s.width, s.height], [0, s.height]
+      ]
+      let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity
+      for (const [lx, lz] of corners) {
+        const wx = px + lx * cosR - lz * sinR
+        const wz = pz + lx * sinR + lz * cosR
+        minX = Math.min(minX, wx); maxX = Math.max(maxX, wx)
+        minZ = Math.min(minZ, wz); maxZ = Math.max(maxZ, wz)
+      }
+      return { x1: minX, z1: minZ, x2: maxX, z2: maxZ, fw: maxX - minX, fh: maxZ - minZ }
+    }
+
+    // Pre-compute for all rooms
     const boxes = roomSets.map(s => {
-      const bb = getVisualBBox(s)
-      return { s, ...bb }
+      const center = getRoomCenter(s)
+      const aabb = getAABB(s)
+      return { s, ...center, aabb }
     })
 
-    // Pre-compute door/window bounding boxes in feet
+    // Pre-compute door/window bounding boxes (axis-aligned) for opening detection
     const openingBoxes = [...doorSets, ...windowSets].map(o => {
-      const bb = getVisualBBox(o)
-      return {
-        o, x1: bb.x1, z1: bb.z1, x2: bb.x2, z2: bb.z2, fw: bb.fw, fh: bb.fh,
-        isDoor: o.category === 'Door',
-      }
+      const aabb = getAABB(o)
+      return { o, ...aabb, isDoor: o.category === 'Door' }
     })
 
     // Helper: subtract intervals from a range, returning remaining segments
     function subtractIntervals(rangeMin, rangeMax, intervals) {
       if (intervals.length === 0) return [{ min: rangeMin, max: rangeMax }]
-      // Sort and merge intervals
       const sorted = [...intervals].sort((a, b) => a.min - b.min)
       const merged = []
       for (const iv of sorted) {
@@ -811,207 +798,164 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
           merged.push({ min: iv.min, max: iv.max })
         }
       }
-      // Subtract from range
       const result = []
       let cursor = rangeMin
       for (const m of merged) {
         const clampMin = Math.max(m.min, rangeMin)
         const clampMax = Math.min(m.max, rangeMax)
         if (clampMin >= clampMax) continue
-        if (clampMin > cursor + 0.05) {
-          result.push({ min: cursor, max: clampMin })
-        }
+        if (clampMin > cursor + 0.05) result.push({ min: cursor, max: clampMin })
         cursor = Math.max(cursor, clampMax)
       }
-      if (cursor < rangeMax - 0.05) {
-        result.push({ min: cursor, max: rangeMax })
-      }
+      if (cursor < rangeMax - 0.05) result.push({ min: cursor, max: rangeMax })
       return result
     }
 
     // Group segments and floors by room (setId)
-    const roomGroups = {} // keyed by set.id → { set, segments: [], floor: {} }
+    const roomGroups = {}
 
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i]
       const wh = b.s.wallHeight || defaultWallHeight || DEFAULT_WALL_HEIGHT
       const color = (b.s.color && b.s.color !== '#ffffff') ? b.s.color : '#E8E0D8'
+      const rotDeg = ((b.s.rotation || 0) % 360 + 360) % 360
+      const isCardinal = rotDeg === 0 || rotDeg === 90 || rotDeg === 180 || rotDeg === 270
 
-      // Initialise group for this room
-      const fcx = (b.x1 + b.x2) / 2
-      const fcz = (b.z1 + b.z2) / 2
+      // Room center and rotation from get3DPosition
       roomGroups[b.s.id] = {
         set: b.s,
-        segments: [],
-        floor: { cx: fcx, cz: fcz, w: b.fw, d: b.fh, color },
+        segments: [],   // local-space segments (relative to room center, unrotated)
+        floor: { cx: b.cx, cz: b.cz, w: b.footprintW, d: b.footprintH, color },
+        rotY: b.rotY,
       }
 
-      // 4 edges: each defined by a fixed axis/value and a range along the other axis
-      // 'h' edges run along X (horizontal), 'v' edges run along Z (vertical)
-      // Visual bbox edges order: visual-top, visual-bottom, visual-left, visual-right
+      // Walls are defined in LOCAL coordinates (unrotated, centered on room center).
+      // Local edges: top = -h/2, bottom = +h/2, left = -w/2, right = +w/2
+      const hw = b.s.width / 2, hh = b.s.height / 2
+      // 4 edges in local space: dir='h' runs along local X, dir='v' runs along local Z
       const edges = [
-        { dir: 'h', fixedVal: b.z1, rMin: b.x1, rMax: b.x2 }, // visual top (front)
-        { dir: 'h', fixedVal: b.z2, rMin: b.x1, rMax: b.x2 }, // visual bottom (back)
-        { dir: 'v', fixedVal: b.x1, rMin: b.z1, rMax: b.z2 }, // visual left
-        { dir: 'v', fixedVal: b.x2, rMin: b.z1, rMax: b.z2 }, // visual right
+        { dir: 'h', fixedVal: -hh, rMin: -hw, rMax: hw },  // top (logical top of unrotated rect)
+        { dir: 'h', fixedVal:  hh, rMin: -hw, rMax: hw },  // bottom
+        { dir: 'v', fixedVal: -hw, rMin: -hh, rMax: hh },  // left
+        { dir: 'v', fixedVal:  hw, rMin: -hh, rMax: hh },  // right
       ]
-
-      // Map visual bbox edges to the LOGICAL (unrotated) side names.
-      // removedWalls/hiddenWalls/wallExtensions use logical side names (top/bottom/left/right
-      // of the UNROTATED rect). When rotated, the visual bbox edges correspond to different
-      // logical sides:
-      //   rot=0:   visual top=logical top,    bottom=bottom,  left=left,   right=right
-      //   rot=90:  visual top=logical left,   bottom=right,   left=bottom, right=top
-      //   rot=180: visual top=logical bottom,  bottom=top,    left=right,  right=left
-      //   rot=270: visual top=logical right,  bottom=left,    left=top,    right=bottom
-      const rot = ((b.s.rotation || 0) % 360 + 360) % 360
-      const sideMap = {
-        0:   ['top', 'bottom', 'left', 'right'],
-        90:  ['left', 'right', 'bottom', 'top'],
-        180: ['bottom', 'top', 'right', 'left'],
-        270: ['right', 'left', 'top', 'bottom'],
-      }
-      const sideNames = sideMap[rot] || sideMap[0]
+      const sideNames = ['top', 'bottom', 'left', 'right']  // logical side names (unrotated)
       const removedWalls = b.s.removedWalls || {}
       const hiddenWalls = b.s.hiddenWalls || {}
       const wallExtensions = b.s.wallExtensions || {}
 
       for (let edgeIdx = 0; edgeIdx < edges.length; edgeIdx++) {
-        const edge = edges[edgeIdx]
+        const edge = { ...edges[edgeIdx] }  // clone since we may modify range
         const sideName = sideNames[edgeIdx]
 
-        // --- Step 0: Manual wall removal — skip entire edge if user removed it ---
         if (removedWalls[sideName]) continue
         const isHidden = hiddenWalls[sideName]
 
-        // Apply wall extension to expand the edge range
         const ext = wallExtensions[sideName] || 0
-        if (ext > 0) {
-          edge.rMin -= ext
-          edge.rMax += ext
-        }
+        if (ext > 0) { edge.rMin -= ext; edge.rMax += ext }
 
-        // --- Step 1: Dedup — find overlap intervals from lower-index rooms ---
-        const dedupIntervals = []
-        for (let j = 0; j < i; j++) {
-          const other = boxes[j]
-          let matchesEdge = false
+        // For cardinal rotations, apply dedup/overlap clipping in world space
+        // For non-cardinal, skip clipping (matches 2D behavior)
+        let ownedRanges = [{ min: edge.rMin, max: edge.rMax }]
+        if (isCardinal) {
+          // Transform edge to world space for clipping
+          const cosR = Math.cos(-b.rotY), sinR = Math.sin(-b.rotY)
+          // Transform local fixed point to world for edge matching
+          let worldFixed, worldRMin, worldRMax, worldDir
           if (edge.dir === 'h') {
-            matchesEdge = Math.abs(other.z1 - edge.fixedVal) < EDGE_TOL ||
-                          Math.abs(other.z2 - edge.fixedVal) < EDGE_TOL
-          } else {
-            matchesEdge = Math.abs(other.x1 - edge.fixedVal) < EDGE_TOL ||
-                          Math.abs(other.x2 - edge.fixedVal) < EDGE_TOL
-          }
-          if (matchesEdge) {
-            const oMin = edge.dir === 'h' ? other.x1 : other.z1
-            const oMax = edge.dir === 'h' ? other.x2 : other.z2
-            const overlapMin = Math.max(edge.rMin, oMin)
-            const overlapMax = Math.min(edge.rMax, oMax)
-            if (overlapMax > overlapMin + 0.05) {
-              dedupIntervals.push({ min: overlapMin, max: overlapMax })
-            }
-          }
-        }
-
-        // --- Step 1b: Overlap clipping — remove wall segments inside another room's interior ---
-        const overlapIntervals = []
-        for (let j = 0; j < boxes.length; j++) {
-          if (j === i) continue
-          const other = boxes[j]
-          if (edge.dir === 'h') {
-            // Horizontal edge at Z=fixedVal. Is this Z inside other room's Z range?
-            if (edge.fixedVal > other.z1 + EDGE_TOL && edge.fixedVal < other.z2 - EDGE_TOL) {
-              const oMin = Math.max(edge.rMin, other.x1)
-              const oMax = Math.min(edge.rMax, other.x2)
-              if (oMax > oMin + 0.05) overlapIntervals.push({ min: oMin, max: oMax })
-            }
-          } else {
-            // Vertical edge at X=fixedVal. Is this X inside other room's X range?
-            if (edge.fixedVal > other.x1 + EDGE_TOL && edge.fixedVal < other.x2 - EDGE_TOL) {
-              const oMin = Math.max(edge.rMin, other.z1)
-              const oMax = Math.min(edge.rMax, other.z2)
-              if (oMax > oMin + 0.05) overlapIntervals.push({ min: oMin, max: oMax })
-            }
-          }
-        }
-
-        // Combine dedup + overlap intervals and subtract from edge
-        const allClipIntervals = [...dedupIntervals, ...overlapIntervals]
-        const ownedRanges = subtractIntervals(edge.rMin, edge.rMax, allClipIntervals)
-
-        // --- Step 2: For each owned range, find door/window openings on this edge ---
-        for (const range of ownedRanges) {
-          // Find openings that sit on this wall edge
-          const edgeOpenings = []
-          for (const ob of openingBoxes) {
-            // Check if the opening overlaps this edge positionally
-            let onEdge = false
-            if (edge.dir === 'h') {
-              // Horizontal edge at fixedVal (Z). Opening must straddle this Z.
-              onEdge = ob.z1 < edge.fixedVal + OPEN_TOL && ob.z2 > edge.fixedVal - OPEN_TOL
+            // local point (0, fixedVal) in room center space
+            const wx = b.cx + 0 * cosR - edge.fixedVal * sinR
+            const wz = b.cz + 0 * sinR + edge.fixedVal * cosR
+            if (Math.abs(sinR) < 0.01) {
+              // ~0° or ~180°: horizontal edge stays horizontal in world
+              worldDir = 'h'; worldFixed = wz
+              worldRMin = b.cx + edge.rMin * cosR
+              worldRMax = b.cx + edge.rMax * cosR
+              if (worldRMin > worldRMax) { const t = worldRMin; worldRMin = worldRMax; worldRMax = t }
             } else {
-              // Vertical edge at fixedVal (X). Opening must straddle this X.
-              onEdge = ob.x1 < edge.fixedVal + OPEN_TOL && ob.x2 > edge.fixedVal - OPEN_TOL
+              // ~90° or ~270°: horizontal edge becomes vertical in world
+              worldDir = 'v'; worldFixed = wx
+              worldRMin = b.cz + edge.rMin * sinR
+              worldRMax = b.cz + edge.rMax * sinR
+              if (worldRMin > worldRMax) { const t = worldRMin; worldRMin = worldRMax; worldRMax = t }
             }
-            if (!onEdge) continue
-
-            // Check overlap along the range axis
-            const opMin = edge.dir === 'h' ? ob.x1 : ob.z1
-            const opMax = edge.dir === 'h' ? ob.x2 : ob.z2
-            const clampMin = Math.max(range.min, opMin)
-            const clampMax = Math.min(range.max, opMax)
-            if (clampMax <= clampMin + 0.05) continue
-
-            const elevH = ob.o.componentProperties?.elevationHeight
-            const sillH = ob.isDoor ? 0 : WINDOW_SILL_HEIGHT
-            const headH = ob.isDoor
-              ? (elevH || ob.o.wallHeight || DOOR_HEIGHT)
-              : (elevH ? (sillH + elevH) : WINDOW_HEAD_HEIGHT)
-
-            edgeOpenings.push({ min: clampMin, max: clampMax, sillH, headH, isDoor: ob.isDoor })
+          } else {
+            const wx = b.cx + edge.fixedVal * cosR - 0 * sinR
+            const wz = b.cz + edge.fixedVal * sinR + 0 * cosR
+            if (Math.abs(cosR) < 0.01) {
+              // ~90° or ~270°: vertical edge becomes horizontal in world
+              worldDir = 'h'; worldFixed = wz
+              worldRMin = b.cx - edge.rMax * sinR
+              worldRMax = b.cx - edge.rMin * sinR
+              if (worldRMin > worldRMax) { const t = worldRMin; worldRMin = worldRMax; worldRMax = t }
+            } else {
+              // ~0° or ~180°: vertical edge stays vertical in world
+              worldDir = 'v'; worldFixed = wx
+              worldRMin = b.cz + edge.rMin * cosR
+              worldRMax = b.cz + edge.rMax * cosR
+              if (worldRMin > worldRMax) { const t = worldRMin; worldRMin = worldRMax; worldRMax = t }
+            }
           }
 
-          // Sort openings along the range
-          edgeOpenings.sort((a, b) => a.min - b.min)
+          // Dedup: lower-index rooms sharing this world edge
+          const clipIntervals = []
+          for (let j = 0; j < i; j++) {
+            const other = boxes[j].aabb
+            let matchesEdge = false
+            if (worldDir === 'h') {
+              matchesEdge = Math.abs(other.z1 - worldFixed) < EDGE_TOL || Math.abs(other.z2 - worldFixed) < EDGE_TOL
+            } else {
+              matchesEdge = Math.abs(other.x1 - worldFixed) < EDGE_TOL || Math.abs(other.x2 - worldFixed) < EDGE_TOL
+            }
+            if (matchesEdge) {
+              const oMin = worldDir === 'h' ? other.x1 : other.z1
+              const oMax = worldDir === 'h' ? other.x2 : other.z2
+              const overlapMin = Math.max(worldRMin, oMin)
+              const overlapMax = Math.min(worldRMax, oMax)
+              if (overlapMax > overlapMin + 0.05) clipIntervals.push({ min: overlapMin, max: overlapMax })
+            }
+          }
 
-          // Build wall segments with openings cut out
-          let cursor = range.min
-          for (const op of edgeOpenings) {
-            // Solid wall before this opening
-            if (op.min > cursor + 0.05) {
-              roomGroups[b.s.id].segments.push({
-                dir: edge.dir, fixedVal: edge.fixedVal,
-                rMin: cursor, rMax: op.min,
-                yBot: 0, yH: wh, color, hidden: isHidden,
-              })
+          // Overlap: rooms whose interior contains this edge
+          for (let j = 0; j < boxes.length; j++) {
+            if (j === i) continue
+            const other = boxes[j].aabb
+            if (worldDir === 'h') {
+              if (worldFixed > other.z1 + EDGE_TOL && worldFixed < other.z2 - EDGE_TOL) {
+                const oMin = Math.max(worldRMin, other.x1)
+                const oMax = Math.min(worldRMax, other.x2)
+                if (oMax > oMin + 0.05) clipIntervals.push({ min: oMin, max: oMax })
+              }
+            } else {
+              if (worldFixed > other.x1 + EDGE_TOL && worldFixed < other.x2 - EDGE_TOL) {
+                const oMin = Math.max(worldRMin, other.z1)
+                const oMax = Math.min(worldRMax, other.z2)
+                if (oMax > oMin + 0.05) clipIntervals.push({ min: oMin, max: oMax })
+              }
             }
-            // Wall above opening (header to ceiling)
-            if (op.headH < wh - 0.05) {
-              roomGroups[b.s.id].segments.push({
-                dir: edge.dir, fixedVal: edge.fixedVal,
-                rMin: op.min, rMax: op.max,
-                yBot: op.headH, yH: wh - op.headH, color, hidden: isHidden,
-              })
-            }
-            // Wall below window (sill)
-            if (op.sillH > 0.05) {
-              roomGroups[b.s.id].segments.push({
-                dir: edge.dir, fixedVal: edge.fixedVal,
-                rMin: op.min, rMax: op.max,
-                yBot: 0, yH: op.sillH, color, hidden: isHidden,
-              })
-            }
-            cursor = Math.max(cursor, op.max)
           }
-          // Solid wall after last opening
-          if (cursor < range.max - 0.05) {
-            roomGroups[b.s.id].segments.push({
-              dir: edge.dir, fixedVal: edge.fixedVal,
-              rMin: cursor, rMax: range.max,
-              yBot: 0, yH: wh, color, hidden: isHidden,
-            })
+
+          if (clipIntervals.length > 0) {
+            // Subtract in world space, then convert back to local range
+            const worldRanges = subtractIntervals(worldRMin, worldRMax, clipIntervals)
+            // Convert world ranges back to local ranges
+            const localScale = (worldRMax - worldRMin) > 0.01 ? (edge.rMax - edge.rMin) / (worldRMax - worldRMin) : 1
+            ownedRanges = worldRanges.map(r => ({
+              min: edge.rMin + (r.min - worldRMin) * localScale,
+              max: edge.rMin + (r.max - worldRMin) * localScale,
+            }))
           }
+        }
+
+        // Build wall segments in LOCAL space
+        for (const range of ownedRanges) {
+          // For simplicity, skip door/window openings on non-cardinal rotations
+          // (doors/windows are separate meshes and will overlap visually)
+          roomGroups[b.s.id].segments.push({
+            dir: edge.dir, fixedVal: edge.fixedVal,
+            rMin: range.min, rMax: range.max,
+            yBot: 0, yH: wh, color, hidden: isHidden,
+          })
         }
       }
     }
@@ -1025,33 +969,37 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
         const elev = group.set.elevation || 0
         return (
           <DraggableSetGroup key={group.set.id} set={group.set} ppu={ppu} defaultWallHeight={defaultWallHeight}>
-            {/* Floor plane */}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[group.floor.cx, 0.01 + elev, group.floor.cz]} receiveShadow>
-              <planeGeometry args={[group.floor.w, group.floor.d]} />
-              <meshStandardMaterial color={group.floor.color} transparent opacity={0.2} side={THREE.DoubleSide} />
-            </mesh>
-            {/* Wall segments for this room */}
-            {group.segments.map((seg, i) => {
-              const len = seg.rMax - seg.rMin
-              const mid = (seg.rMin + seg.rMax) / 2
-              const yCenter = seg.yBot + seg.yH / 2 + elev
+            {/* Floor plane — positioned at room center, rotated with room */}
+            <group position={[group.floor.cx, 0, group.floor.cz]} rotation={[0, group.rotY, 0]}>
+              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01 + elev, 0]} receiveShadow>
+                <planeGeometry args={[group.floor.w, group.floor.d]} />
+                <meshStandardMaterial color={group.floor.color} transparent opacity={0.2} side={THREE.DoubleSide} />
+              </mesh>
+              {/* Wall segments in local (unrotated) space */}
+              {group.segments.map((seg, i) => {
+                const len = seg.rMax - seg.rMin
+                const mid = (seg.rMin + seg.rMax) / 2
+                const yCenter = seg.yBot + seg.yH / 2 + elev
 
-              let pos, size
-              if (seg.dir === 'h') {
-                pos = [mid, yCenter, seg.fixedVal]
-                size = [len, seg.yH, WALL_T]
-              } else {
-                pos = [seg.fixedVal, yCenter, mid]
-                size = [WALL_T, seg.yH, len]
-              }
+                let pos, size
+                if (seg.dir === 'h') {
+                  // Horizontal edge: runs along local X, fixed at local Z
+                  pos = [mid, yCenter, seg.fixedVal]
+                  size = [len, seg.yH, WALL_T]
+                } else {
+                  // Vertical edge: runs along local Z, fixed at local X
+                  pos = [seg.fixedVal, yCenter, mid]
+                  size = [WALL_T, seg.yH, len]
+                }
 
-              return (
-                <mesh key={`wall-${i}`} position={pos} castShadow={!seg.hidden} receiveShadow={!seg.hidden}>
-                  <boxGeometry args={size} />
-                  <meshStandardMaterial color={seg.color} roughness={0.8} transparent={!!seg.hidden} opacity={seg.hidden ? 0.15 : 1} />
-                </mesh>
-              )
-            })}
+                return (
+                  <mesh key={`wall-${i}`} position={pos} castShadow={!seg.hidden} receiveShadow={!seg.hidden}>
+                    <boxGeometry args={size} />
+                    <meshStandardMaterial color={seg.color} roughness={0.8} transparent={!!seg.hidden} opacity={seg.hidden ? 0.15 : 1} />
+                  </mesh>
+                )
+              })}
+            </group>
           </DraggableSetGroup>
         )
       })}
@@ -1065,14 +1013,17 @@ function FloorPlane({ sets, ppu }) {
     if (sets.length === 0) return { cx: 0, cz: 0, w: 100, d: 100 }
     let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity
     for (const s of sets) {
-      const { cx, cz } = get3DPosition(s, ppu)
-      const isRotated = (s.rotation || 0) % 180 !== 0
-      const hw = (isRotated ? s.height : s.width) / 2
-      const hd = (isRotated ? s.width : s.height) / 2
-      minX = Math.min(minX, cx - hw)
-      minZ = Math.min(minZ, cz - hd)
-      maxX = Math.max(maxX, cx + hw)
-      maxZ = Math.max(maxZ, cz + hd)
+      // Compute AABB from rotated corners for accurate bounds at any angle
+      const rotDeg = ((s.rotation || 0) % 360 + 360) % 360
+      const rad = rotDeg * Math.PI / 180
+      const cosR = Math.cos(rad), sinR = Math.sin(rad)
+      const px = s.x / ppu, pz = s.y / ppu
+      for (const [lx, lz] of [[0,0],[s.width,0],[s.width,s.height],[0,s.height]]) {
+        const wx = px + lx * cosR - lz * sinR
+        const wz = pz + lx * sinR + lz * cosR
+        minX = Math.min(minX, wx); maxX = Math.max(maxX, wx)
+        minZ = Math.min(minZ, wz); maxZ = Math.max(maxZ, wz)
+      }
     }
     const pad = 20
     return {
