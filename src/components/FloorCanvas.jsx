@@ -45,6 +45,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     copySet, pasteSet, duplicateSet,
     buildingWalls, buildingWallsVisible,
     drawingMode, drawingWallPoints, addDrawingPoint, cancelDrawing,
+    breakDrawingChain, drawingWallSnap,
   } = useStore()
 
   // Initialize fabric canvas
@@ -1302,8 +1303,11 @@ export default function FloorCanvas({ onCanvasSize }) {
         y = Math.round(y / gridSize) * gridSize
       }
 
+      const state = useStore.getState()
+      const pts = state.drawingWallPoints
+      const snap = state.drawingWallSnap
+
       // Angle constraint: Shift constrains to 0/45/90° increments from previous point
-      const pts = useStore.getState().drawingWallPoints
       if (pts.length > 0) {
         const prev = pts[pts.length - 1]
         const dx = x - prev.x, dy = y - prev.y
@@ -1315,8 +1319,8 @@ export default function FloorCanvas({ onCanvasSize }) {
             const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
             x = prev.x + Math.cos(snapped) * dist
             y = prev.y + Math.sin(snapped) * dist
-          } else {
-            // Auto-constrain to H/V if close (within 15°)
+          } else if (snap) {
+            // Auto-constrain to H/V if close (within 15°) — only when snap enabled
             const angle = Math.abs(Math.atan2(dy, dx))
             if (angle < Math.PI / 12 || angle > 11 * Math.PI / 12) {
               y = prev.y // horizontal
@@ -1330,9 +1334,19 @@ export default function FloorCanvas({ onCanvasSize }) {
       addDrawingPoint({ x, y })
     }
 
+    // Double-click breaks the chain (stay in drawing mode, start fresh)
+    const onDblClick = (opt) => {
+      if (opt.e.ctrlKey || opt.e.metaKey) return
+      breakDrawingChain()
+    }
+
     fc.on('mouse:down', onClick)
-    return () => fc.off('mouse:down', onClick)
-  }, [drawingMode, snapToGrid, gridSize, addDrawingPoint])
+    fc.on('mouse:dblclick', onDblClick)
+    return () => {
+      fc.off('mouse:down', onClick)
+      fc.off('mouse:dblclick', onDblClick)
+    }
+  }, [drawingMode, snapToGrid, gridSize, addDrawingPoint, breakDrawingChain])
 
   // Building wall drawing mode — rubber-band preview line
   useEffect(() => {
@@ -1352,7 +1366,9 @@ export default function FloorCanvas({ onCanvasSize }) {
         y = Math.round(y / gridSize) * gridSize
       }
 
-      const pts = useStore.getState().drawingWallPoints
+      const state = useStore.getState()
+      const pts = state.drawingWallPoints
+      const snap = state.drawingWallSnap
       if (pts.length === 0) return
       const lastPt = pts[pts.length - 1]
       const dx = x - lastPt.x, dy = y - lastPt.y
@@ -1363,7 +1379,7 @@ export default function FloorCanvas({ onCanvasSize }) {
           const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
           x = lastPt.x + Math.cos(snapped) * dist
           y = lastPt.y + Math.sin(snapped) * dist
-        } else {
+        } else if (snap) {
           const angle = Math.abs(Math.atan2(dy, dx))
           if (angle < Math.PI / 12 || angle > 11 * Math.PI / 12) {
             y = lastPt.y
@@ -1533,7 +1549,7 @@ export default function FloorCanvas({ onCanvasSize }) {
       {drawingMode === 'building-wall' && (
         <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg z-10 flex items-center gap-3">
           <span>Drawing Building Walls</span>
-          <span className="text-amber-200 text-xs">Click to place points · Shift=45° snap · Esc=finish</span>
+          <span className="text-amber-200 text-xs">Click=place · Dbl-click=break chain · Shift=45° · Esc=done</span>
           <button
             onClick={cancelDrawing}
             className="px-2 py-0.5 bg-red-600 hover:bg-red-500 rounded text-xs"

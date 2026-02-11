@@ -73,6 +73,7 @@ const useStore = create((set, get) => ({
   // Drawing mode (transient, not persisted)
   drawingMode: null, // null | 'building-wall'
   drawingWallPoints: [], // temporary points while drawing
+  drawingWallSnap: true, // auto H/V snap while drawing
 
   // Layers visibility (by category)
   layerVisibility: saved?.layerVisibility || {},
@@ -679,6 +680,8 @@ const useStore = create((set, get) => ({
   // Drawing mode
   setDrawingMode: (mode) => set({ drawingMode: mode, drawingWallPoints: [] }),
   cancelDrawing: () => set({ drawingMode: null, drawingWallPoints: [] }),
+  breakDrawingChain: () => set({ drawingWallPoints: [] }), // break chain but stay in drawing mode
+  setDrawingWallSnap: (v) => set({ drawingWallSnap: v }),
   addDrawingPoint: (pt) => {
     const state = get()
     const points = [...state.drawingWallPoints, pt]

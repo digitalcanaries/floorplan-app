@@ -28,7 +28,8 @@ export default function BuildTab() {
   const {
     addSet, unit, viewMode, setViewMode, pixelsPerUnit,
     buildingWalls, deleteBuildingWall, clearBuildingWalls,
-    drawingMode, setDrawingMode, cancelDrawing,
+    drawingMode, setDrawingMode, cancelDrawing, breakDrawingChain,
+    drawingWallSnap, setDrawingWallSnap,
     buildingWallDefaults, setBuildingWallDefaults,
   } = useStore()
   const [components, setComponents] = useState([])
@@ -148,6 +149,28 @@ export default function BuildTab() {
         >
           {drawingMode === 'building-wall' ? '■ Stop Drawing (Esc)' : '✏ Draw Building Walls'}
         </button>
+
+        {/* Drawing options — shown when in draw mode */}
+        {drawingMode === 'building-wall' && (
+          <div className="flex items-center gap-2 mb-2">
+            <label className="flex items-center gap-1.5 text-[10px] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={drawingWallSnap}
+                onChange={e => setDrawingWallSnap(e.target.checked)}
+                className="accent-amber-500"
+              />
+              <span className="text-gray-300">H/V Snap</span>
+            </label>
+            <button
+              onClick={breakDrawingChain}
+              className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-[10px] rounded"
+              title="Break the chain to start a new disconnected wall"
+            >
+              Break Chain
+            </button>
+          </div>
+        )}
 
         {/* Defaults */}
         <div className="flex gap-2 mb-2">
