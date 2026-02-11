@@ -41,6 +41,7 @@ export default function LayersTab() {
     unit, pixelsPerUnit,
     buildingWalls, buildingWallsVisible, setBuildingWallsVisible,
     showLockIndicators, setShowLockIndicators,
+    hideAllSets, setHideAllSets,
   } = useStore()
 
   const [newGroupName, setNewGroupName] = useState('')
@@ -66,6 +67,10 @@ export default function LayersTab() {
       {/* Global toggles */}
       <div className="flex flex-col gap-1 bg-gray-900/50 rounded p-2 border border-gray-700">
         <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Display Options</span>
+        <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-red-900/30 rounded px-1 py-0.5">
+          <input type="checkbox" checked={hideAllSets} onChange={e => setHideAllSets(e.target.checked)} className="accent-red-500" />
+          <span className={hideAllSets ? 'text-red-400 font-medium' : 'text-gray-300'}>Hide All Sets</span>
+        </label>
         <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
           <input type="checkbox" checked={gridVisible} onChange={e => setGridVisible(e.target.checked)} className="accent-indigo-500" />
           <span className="text-gray-300">Grid</span>

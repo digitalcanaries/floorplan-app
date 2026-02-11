@@ -86,6 +86,9 @@ const useStore = create((set, get) => ({
   // Lock indicators (amber dashed borders on locked sets)
   showLockIndicators: saved?.showLockIndicators ?? true,
 
+  // Hide all sets (to see PDF clearly while drawing building walls)
+  hideAllSets: false, // transient — not persisted
+
   // Default wall height (global setting, feet)
   defaultWallHeight: saved?.defaultWallHeight ?? 12,
 
@@ -582,6 +585,9 @@ const useStore = create((set, get) => ({
     set({ showHoverTooltips: v })
     get().autosave()
   },
+
+  // Hide all sets toggle
+  setHideAllSets: (v) => set({ hideAllSets: v }),
 
   // Lock indicators toggle
   setShowLockIndicators: (v) => {

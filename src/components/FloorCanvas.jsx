@@ -41,7 +41,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     undo, redo,
     annotations, updateAnnotation,
     layerVisibility, showDimensions,
-    showHoverTooltips, showLockIndicators,
+    showHoverTooltips, showLockIndicators, hideAllSets,
     copySet, pasteSet, duplicateSet,
     buildingWalls, buildingWallsVisible,
     drawingMode, drawingWallPoints, addDrawingPoint, cancelDrawing,
@@ -432,7 +432,7 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     // Draw set shapes (only sets that are on the plan, not hidden, and layer is visible)
     // Sort by zIndex for rendering order
-    const visibleSets = sets
+    const visibleSets = hideAllSets ? [] : sets
       .filter(s => s.onPlan !== false && !s.hidden && (layerVisibility[s.category || 'Set'] !== false))
       .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 
@@ -1278,7 +1278,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
 
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode, layerVisibility, showDimensions, annotations, buildingWalls, buildingWallsVisible, drawingMode, drawingWallPoints, showLockIndicators])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode, layerVisibility, showDimensions, annotations, buildingWalls, buildingWallsVisible, drawingMode, drawingWallPoints, showLockIndicators, hideAllSets])
 
   useEffect(() => {
     syncSets()
