@@ -17,6 +17,9 @@ const TOOLTIP_NAME = 'hover-tooltip'
 const TOOLTIP_BG_NAME = 'hover-tooltip-bg'
 const DIM_PREFIX = 'dim-line-'
 const ANNO_PREFIX = 'annotation-'
+const BWALL_PREFIX = 'building-wall-'
+const DRAWING_PREVIEW_NAME = 'drawing-preview'
+const DRAWING_POINT_NAME = 'drawing-point'
 
 export default function FloorCanvas({ onCanvasSize }) {
   const canvasRef = useRef(null)
@@ -40,6 +43,8 @@ export default function FloorCanvas({ onCanvasSize }) {
     layerVisibility, showDimensions,
     showHoverTooltips,
     copySet, pasteSet, duplicateSet,
+    buildingWalls, buildingWallsVisible,
+    drawingMode, drawingWallPoints, addDrawingPoint, cancelDrawing,
   } = useStore()
 
   // Initialize fabric canvas
@@ -595,6 +600,37 @@ export default function FloorCanvas({ onCanvasSize }) {
             y += snapDy
           }
 
+          // Building wall collision — prevent sets from overlapping building walls
+          const bwalls = useStore.getState().buildingWalls
+          if (bwalls.length > 0) {
+            const testAABB = getAABB({ ...s, x, y }, ppu)
+            const setL = testAABB.x, setR = testAABB.x + testAABB.w
+            const setT = testAABB.y, setB = testAABB.y + testAABB.h
+            for (const bw of bwalls) {
+              const thk = bw.thickness * ppu
+              const wdx = bw.x2 - bw.x1, wdy = bw.y2 - bw.y1
+              const wlen = Math.sqrt(wdx * wdx + wdy * wdy)
+              if (wlen < 1) continue
+              const wnx = -wdy / wlen * (thk / 2), wny = wdx / wlen * (thk / 2)
+              // Wall AABB
+              const wxs = [bw.x1 + wnx, bw.x1 - wnx, bw.x2 + wnx, bw.x2 - wnx]
+              const wys = [bw.y1 + wny, bw.y1 - wny, bw.y2 + wny, bw.y2 - wny]
+              const wL = Math.min(...wxs), wR = Math.max(...wxs)
+              const wT = Math.min(...wys), wB = Math.max(...wys)
+              // AABB overlap test
+              if (setR > wL && setL < wR && setB > wT && setT < wB) {
+                // Push set out — find minimum push distance
+                const pushL = wR - setL, pushR = setR - wL
+                const pushT = wB - setT, pushB = setB - wT
+                const minPush = Math.min(pushL, pushR, pushT, pushB)
+                if (minPush === pushL) x += pushL
+                else if (minPush === pushR) x -= pushR
+                else if (minPush === pushT) y += pushT
+                else y -= pushB
+              }
+            }
+          }
+
           if (isPolygon) {
             this.set({ left: x - this.pathOffset.x, top: y - this.pathOffset.y })
           } else {
@@ -1118,6 +1154,82 @@ export default function FloorCanvas({ onCanvasSize }) {
       }
     }
 
+    // Draw building walls
+    fc.getObjects()
+      .filter(o => o.name?.startsWith(BWALL_PREFIX))
+      .forEach(o => fc.remove(o))
+
+    if (buildingWallsVisible) {
+      for (const bw of buildingWalls) {
+        const thicknessPx = bw.thickness * ppu
+        const dx = bw.x2 - bw.x1
+        const dy = bw.y2 - bw.y1
+        const len = Math.sqrt(dx * dx + dy * dy)
+        if (len < 1) continue
+
+        const nx = -dy / len * (thicknessPx / 2) // perpendicular normal
+        const ny = dx / len * (thicknessPx / 2)
+
+        // Oriented rectangle as polygon
+        const points = [
+          { x: bw.x1 + nx, y: bw.y1 + ny },
+          { x: bw.x2 + nx, y: bw.y2 + ny },
+          { x: bw.x2 - nx, y: bw.y2 - ny },
+          { x: bw.x1 - nx, y: bw.y1 - ny },
+        ]
+        const poly = new fabric.Polygon(points, {
+          fill: bw.color + '99',
+          stroke: bw.color,
+          strokeWidth: 2,
+          selectable: false,
+          evented: false,
+          name: BWALL_PREFIX + bw.id,
+        })
+        fc.add(poly)
+
+        // Length label at midpoint
+        if (labelsVisible) {
+          const lengthFt = len / ppu
+          if (lengthFt > 0.5) {
+            const midX = (bw.x1 + bw.x2) / 2
+            const midY = (bw.y1 + bw.y2) / 2
+            const label = new fabric.FabricText(
+              `${Math.round(lengthFt * 10) / 10}${unit}`,
+              {
+                left: midX, top: midY - 10,
+                fontSize: 9, fill: '#ffffff',
+                fontFamily: 'system-ui, sans-serif',
+                originX: 'center',
+                selectable: false, evented: false,
+                name: BWALL_PREFIX + bw.id + '-label',
+                shadow: new fabric.Shadow({ color: '#000000', blur: 3 }),
+              }
+            )
+            fc.add(label)
+          }
+        }
+      }
+    }
+
+    // Draw drawing-in-progress points
+    fc.getObjects()
+      .filter(o => o.name === DRAWING_POINT_NAME)
+      .forEach(o => fc.remove(o))
+
+    if (drawingMode === 'building-wall') {
+      for (const pt of drawingWallPoints) {
+        const dot = new fabric.Circle({
+          left: pt.x - 4, top: pt.y - 4,
+          radius: 4,
+          fill: '#EF4444',
+          stroke: '#ffffff', strokeWidth: 2,
+          selectable: false, evented: false,
+          name: DRAWING_POINT_NAME,
+        })
+        fc.add(dot)
+      }
+    }
+
     // Draw annotations (text labels)
     for (const anno of annotations) {
       const text = new fabric.FabricText(anno.text, {
@@ -1165,11 +1277,124 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
 
     fc.requestRenderAll()
-  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode, layerVisibility, showDimensions, annotations])
+  }, [sets, rules, pixelsPerUnit, selectedSetId, snapToGrid, snapToSets, gridSize, labelsVisible, labelMode, showOverlaps, viewMode, layerVisibility, showDimensions, annotations, buildingWalls, buildingWallsVisible, drawingMode, drawingWallPoints])
 
   useEffect(() => {
     syncSets()
   }, [syncSets])
+
+  // Building wall drawing mode — click to place points
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc || drawingMode !== 'building-wall') return
+
+    const onClick = (opt) => {
+      if (opt.e.ctrlKey || opt.e.metaKey) return // pan
+      if (opt.e.button !== 0) return // left click only
+
+      const pointer = fc.getScenePoint(opt.e)
+      let x = pointer.x, y = pointer.y
+
+      // Grid snap
+      if (snapToGrid) {
+        x = Math.round(x / gridSize) * gridSize
+        y = Math.round(y / gridSize) * gridSize
+      }
+
+      // Angle constraint: Shift constrains to 0/45/90° increments from previous point
+      const pts = useStore.getState().drawingWallPoints
+      if (pts.length > 0) {
+        const prev = pts[pts.length - 1]
+        const dx = x - prev.x, dy = y - prev.y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist > 2) {
+          if (opt.e.shiftKey) {
+            // Constrain to 45° increments
+            const angle = Math.atan2(dy, dx)
+            const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+            x = prev.x + Math.cos(snapped) * dist
+            y = prev.y + Math.sin(snapped) * dist
+          } else {
+            // Auto-constrain to H/V if close (within 15°)
+            const angle = Math.abs(Math.atan2(dy, dx))
+            if (angle < Math.PI / 12 || angle > 11 * Math.PI / 12) {
+              y = prev.y // horizontal
+            } else if (Math.abs(angle - Math.PI / 2) < Math.PI / 12) {
+              x = prev.x // vertical
+            }
+          }
+        }
+      }
+
+      addDrawingPoint({ x, y })
+    }
+
+    fc.on('mouse:down', onClick)
+    return () => fc.off('mouse:down', onClick)
+  }, [drawingMode, snapToGrid, gridSize, addDrawingPoint])
+
+  // Building wall drawing mode — rubber-band preview line
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc || drawingMode !== 'building-wall' || drawingWallPoints.length === 0) return
+
+    const onMove = (opt) => {
+      // Remove old preview
+      fc.getObjects().filter(o => o.name === DRAWING_PREVIEW_NAME).forEach(o => fc.remove(o))
+
+      const pointer = fc.getScenePoint(opt.e)
+      let x = pointer.x, y = pointer.y
+
+      // Grid snap
+      if (snapToGrid) {
+        x = Math.round(x / gridSize) * gridSize
+        y = Math.round(y / gridSize) * gridSize
+      }
+
+      const pts = useStore.getState().drawingWallPoints
+      if (pts.length === 0) return
+      const lastPt = pts[pts.length - 1]
+      const dx = x - lastPt.x, dy = y - lastPt.y
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist > 2) {
+        if (opt.e.shiftKey) {
+          const angle = Math.atan2(dy, dx)
+          const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4)
+          x = lastPt.x + Math.cos(snapped) * dist
+          y = lastPt.y + Math.sin(snapped) * dist
+        } else {
+          const angle = Math.abs(Math.atan2(dy, dx))
+          if (angle < Math.PI / 12 || angle > 11 * Math.PI / 12) {
+            y = lastPt.y
+          } else if (Math.abs(angle - Math.PI / 2) < Math.PI / 12) {
+            x = lastPt.x
+          }
+        }
+      }
+
+      const preview = new fabric.Line([lastPt.x, lastPt.y, x, y], {
+        stroke: '#8B4513',
+        strokeWidth: 3,
+        strokeDashArray: [6, 4],
+        selectable: false,
+        evented: false,
+        name: DRAWING_PREVIEW_NAME,
+        opacity: 0.7,
+      })
+      fc.add(preview)
+      fc.requestRenderAll()
+    }
+
+    fc.on('mouse:move', onMove)
+    return () => {
+      fc.off('mouse:move', onMove)
+      const fcc = fabricRef.current
+      if (fcc) {
+        fcc.getObjects().filter(o => o.name === DRAWING_PREVIEW_NAME).forEach(o => fcc.remove(o))
+        fcc.requestRenderAll()
+      }
+    }
+  }, [drawingMode, drawingWallPoints, snapToGrid, gridSize])
 
   // Pan canvas to center on newly selected set
   useEffect(() => {
@@ -1283,12 +1508,17 @@ export default function FloorCanvas({ onCanvasSize }) {
           e.preventDefault()
           deleteSet(state.selectedSetId)
         }
+      } else if (e.key === 'Escape') {
+        if (state.drawingMode) {
+          e.preventDefault()
+          cancelDrawing()
+        }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, copySet, pasteSet, duplicateSet, deleteSet])
+  }, [undo, redo, copySet, pasteSet, duplicateSet, deleteSet, cancelDrawing])
 
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden bg-gray-900">
@@ -1297,6 +1527,18 @@ export default function FloorCanvas({ onCanvasSize }) {
         <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg z-10">
           Click two points on the floor plan to calibrate scale
           ({calibrationPoints.length}/2 points selected)
+        </div>
+      )}
+      {drawingMode === 'building-wall' && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg z-10 flex items-center gap-3">
+          <span>Drawing Building Walls</span>
+          <span className="text-amber-200 text-xs">Click to place points · Shift=45° snap · Esc=finish</span>
+          <button
+            onClick={cancelDrawing}
+            className="px-2 py-0.5 bg-red-600 hover:bg-red-500 rounded text-xs"
+          >
+            Done
+          </button>
         </div>
       )}
     </div>

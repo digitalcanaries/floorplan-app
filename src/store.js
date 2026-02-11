@@ -64,6 +64,16 @@ const useStore = create((set, get) => ({
   groups: saved?.groups || [],
   nextGroupId: saved?.nextGroupId || 1,
 
+  // Building Walls (structural walls drawn on PDF)
+  buildingWalls: saved?.buildingWalls || [],
+  nextBuildingWallId: saved?.nextBuildingWallId || 1,
+  buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 0.5, height: null, color: '#8B4513' },
+  buildingWallsVisible: saved?.buildingWallsVisible ?? true,
+
+  // Drawing mode (transient, not persisted)
+  drawingMode: null, // null | 'building-wall'
+  drawingWallPoints: [], // temporary points while drawing
+
   // Layers visibility (by category)
   layerVisibility: saved?.layerVisibility || {},
 
@@ -96,7 +106,11 @@ const useStore = create((set, get) => ({
     const updatedSets = get().sets.map(s =>
       s.lockedToPdf ? { ...s, x: s.x + dx, y: s.y + dy } : s
     )
-    set({ pdfPosition: pos, sets: updatedSets })
+    // Move all locked-to-PDF building walls with the PDF
+    const updatedBW = get().buildingWalls.map(w =>
+      w.lockedToPdf ? { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy } : w
+    )
+    set({ pdfPosition: pos, sets: updatedSets, buildingWalls: updatedBW })
     get().autosave()
   },
   setPixelsPerUnit: (p) => {
@@ -171,10 +185,12 @@ const useStore = create((set, get) => ({
       rules: JSON.parse(JSON.stringify(state.rules)),
       annotations: JSON.parse(JSON.stringify(state.annotations)),
       groups: JSON.parse(JSON.stringify(state.groups)),
+      buildingWalls: JSON.parse(JSON.stringify(state.buildingWalls)),
       nextSetId: state.nextSetId,
       nextRuleId: state.nextRuleId,
       nextAnnotationId: state.nextAnnotationId,
       nextGroupId: state.nextGroupId,
+      nextBuildingWallId: state.nextBuildingWallId,
     }
     const past = [...state._past, snapshot]
     if (past.length > state._maxHistory) past.shift()
@@ -182,14 +198,15 @@ const useStore = create((set, get) => ({
   },
 
   undo: () => {
-    const { _past, _future, sets, rules, annotations, groups, nextSetId, nextRuleId, nextAnnotationId, nextGroupId } = get()
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId } = get()
     if (_past.length === 0) return
     const currentSnapshot = {
       sets: JSON.parse(JSON.stringify(sets)),
       rules: JSON.parse(JSON.stringify(rules)),
       annotations: JSON.parse(JSON.stringify(annotations)),
       groups: JSON.parse(JSON.stringify(groups)),
-      nextSetId, nextRuleId, nextAnnotationId, nextGroupId,
+      buildingWalls: JSON.parse(JSON.stringify(buildingWalls)),
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId,
     }
     const previous = _past[_past.length - 1]
     set({
@@ -198,10 +215,12 @@ const useStore = create((set, get) => ({
       rules: JSON.parse(JSON.stringify(previous.rules)),
       annotations: JSON.parse(JSON.stringify(previous.annotations || [])),
       groups: JSON.parse(JSON.stringify(previous.groups || [])),
+      buildingWalls: JSON.parse(JSON.stringify(previous.buildingWalls || [])),
       nextSetId: previous.nextSetId,
       nextRuleId: previous.nextRuleId,
       nextAnnotationId: previous.nextAnnotationId || get().nextAnnotationId,
       nextGroupId: previous.nextGroupId || get().nextGroupId,
+      nextBuildingWallId: previous.nextBuildingWallId || get().nextBuildingWallId,
       _past: _past.slice(0, -1),
       _future: [currentSnapshot, ..._future],
       selectedSetId: null,
@@ -211,14 +230,15 @@ const useStore = create((set, get) => ({
   },
 
   redo: () => {
-    const { _past, _future, sets, rules, annotations, groups, nextSetId, nextRuleId, nextAnnotationId, nextGroupId } = get()
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId } = get()
     if (_future.length === 0) return
     const currentSnapshot = {
       sets: JSON.parse(JSON.stringify(sets)),
       rules: JSON.parse(JSON.stringify(rules)),
       annotations: JSON.parse(JSON.stringify(annotations)),
       groups: JSON.parse(JSON.stringify(groups)),
-      nextSetId, nextRuleId, nextAnnotationId, nextGroupId,
+      buildingWalls: JSON.parse(JSON.stringify(buildingWalls)),
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId,
     }
     const next = _future[0]
     set({
@@ -227,10 +247,12 @@ const useStore = create((set, get) => ({
       rules: JSON.parse(JSON.stringify(next.rules)),
       annotations: JSON.parse(JSON.stringify(next.annotations || [])),
       groups: JSON.parse(JSON.stringify(next.groups || [])),
+      buildingWalls: JSON.parse(JSON.stringify(next.buildingWalls || [])),
       nextSetId: next.nextSetId,
       nextRuleId: next.nextRuleId,
       nextAnnotationId: next.nextAnnotationId || get().nextAnnotationId,
       nextGroupId: next.nextGroupId || get().nextGroupId,
+      nextBuildingWallId: next.nextBuildingWallId || get().nextBuildingWallId,
       _past: [..._past, currentSnapshot],
       _future: _future.slice(1),
       selectedSetId: null,
@@ -601,6 +623,92 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Building Wall CRUD
+  addBuildingWall: (wall) => {
+    get()._pushHistory()
+    const id = get().nextBuildingWallId
+    const defaults = get().buildingWallDefaults
+    const pdfPos = get().pdfPosition
+    const newWall = {
+      id,
+      x1: wall.x1, y1: wall.y1,
+      x2: wall.x2, y2: wall.y2,
+      thickness: wall.thickness ?? defaults.thickness,
+      height: wall.height ?? defaults.height ?? get().defaultWallHeight,
+      color: wall.color ?? defaults.color,
+      label: wall.label || '',
+      lockedToPdf: true,
+      pdfOffsetX1: wall.x1 - pdfPos.x, pdfOffsetY1: wall.y1 - pdfPos.y,
+      pdfOffsetX2: wall.x2 - pdfPos.x, pdfOffsetY2: wall.y2 - pdfPos.y,
+    }
+    set({ buildingWalls: [...get().buildingWalls, newWall], nextBuildingWallId: id + 1 })
+    get().autosave()
+    return id
+  },
+  updateBuildingWall: (id, updates) => {
+    get()._pushHistory()
+    set({ buildingWalls: get().buildingWalls.map(w => w.id === id ? { ...w, ...updates } : w) })
+    get().autosave()
+  },
+  deleteBuildingWall: (id) => {
+    get()._pushHistory()
+    set({ buildingWalls: get().buildingWalls.filter(w => w.id !== id) })
+    get().autosave()
+  },
+  clearBuildingWalls: () => {
+    get()._pushHistory()
+    set({ buildingWalls: [], nextBuildingWallId: 1 })
+    get().autosave()
+  },
+
+  // Drawing mode
+  setDrawingMode: (mode) => set({ drawingMode: mode, drawingWallPoints: [] }),
+  cancelDrawing: () => set({ drawingMode: null, drawingWallPoints: [] }),
+  addDrawingPoint: (pt) => {
+    const state = get()
+    const points = [...state.drawingWallPoints, pt]
+
+    if (points.length >= 2) {
+      // Create a wall segment from the two most recent points
+      const prev = points[points.length - 2]
+      const curr = points[points.length - 1]
+      state._pushHistory()
+      const id = state.nextBuildingWallId
+      const defaults = state.buildingWallDefaults
+      const pdfPos = state.pdfPosition
+      const wall = {
+        id,
+        x1: prev.x, y1: prev.y,
+        x2: curr.x, y2: curr.y,
+        thickness: defaults.thickness,
+        height: defaults.height ?? state.defaultWallHeight,
+        color: defaults.color,
+        label: '',
+        lockedToPdf: true,
+        pdfOffsetX1: prev.x - pdfPos.x, pdfOffsetY1: prev.y - pdfPos.y,
+        pdfOffsetX2: curr.x - pdfPos.x, pdfOffsetY2: curr.y - pdfPos.y,
+      }
+      set({
+        buildingWalls: [...state.buildingWalls, wall],
+        nextBuildingWallId: id + 1,
+        drawingWallPoints: [curr], // keep last point as start of next segment (chain)
+      })
+      state.autosave()
+    } else {
+      set({ drawingWallPoints: points })
+    }
+  },
+
+  // Building wall defaults
+  setBuildingWallDefaults: (updates) => {
+    set({ buildingWallDefaults: { ...get().buildingWallDefaults, ...updates } })
+    get().autosave()
+  },
+  setBuildingWallsVisible: (v) => {
+    set({ buildingWallsVisible: v })
+    get().autosave()
+  },
+
   // Group CRUD
   addGroup: (name, setIds) => {
     get()._pushHistory()
@@ -713,6 +821,10 @@ const useStore = create((set, get) => ({
       nextAnnotationId: state.nextAnnotationId,
       groups: state.groups,
       nextGroupId: state.nextGroupId,
+      buildingWalls: state.buildingWalls,
+      nextBuildingWallId: state.nextBuildingWallId,
+      buildingWallDefaults: state.buildingWallDefaults,
+      buildingWallsVisible: state.buildingWallsVisible,
     }
     try {
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data))
@@ -752,6 +864,10 @@ const useStore = create((set, get) => ({
       nextAnnotationId: state.nextAnnotationId,
       groups: state.groups,
       nextGroupId: state.nextGroupId,
+      buildingWalls: state.buildingWalls,
+      nextBuildingWallId: state.nextBuildingWallId,
+      buildingWallDefaults: state.buildingWallDefaults,
+      buildingWallsVisible: state.buildingWallsVisible,
     }
     try {
       const saves = loadSavedProjects()
@@ -813,6 +929,10 @@ const useStore = create((set, get) => ({
       nextAnnotationId: state.nextAnnotationId,
       groups: state.groups,
       nextGroupId: state.nextGroupId,
+      buildingWalls: state.buildingWalls,
+      nextBuildingWallId: state.nextBuildingWallId,
+      buildingWallDefaults: state.buildingWallDefaults,
+      buildingWallsVisible: state.buildingWallsVisible,
     }
   },
 
@@ -845,6 +965,10 @@ const useStore = create((set, get) => ({
       nextAnnotationId: data.nextAnnotationId || 1,
       groups: data.groups || [],
       nextGroupId: data.nextGroupId || 1,
+      buildingWalls: data.buildingWalls || [],
+      nextBuildingWallId: data.nextBuildingWallId || 1,
+      buildingWallDefaults: data.buildingWallDefaults || { thickness: 0.5, height: null, color: '#8B4513' },
+      buildingWallsVisible: data.buildingWallsVisible ?? true,
       selectedSetId: null,
       _past: [], _future: [],
     })
@@ -867,6 +991,12 @@ const useStore = create((set, get) => ({
       nextAnnotationId: 1,
       groups: [],
       nextGroupId: 1,
+      buildingWalls: [],
+      nextBuildingWallId: 1,
+      buildingWallDefaults: { thickness: 0.5, height: null, color: '#8B4513' },
+      buildingWallsVisible: true,
+      drawingMode: null,
+      drawingWallPoints: [],
       layerVisibility: {},
       selectedSetId: null,
       _past: [], _future: [],

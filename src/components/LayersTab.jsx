@@ -39,6 +39,7 @@ export default function LayersTab() {
     gridVisible, setGridVisible,
     showHoverTooltips, setShowHoverTooltips,
     unit, pixelsPerUnit,
+    buildingWalls, buildingWallsVisible, setBuildingWallsVisible,
   } = useStore()
 
   const [newGroupName, setNewGroupName] = useState('')
@@ -83,6 +84,11 @@ export default function LayersTab() {
         <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
           <input type="checkbox" checked={showHoverTooltips} onChange={e => setShowHoverTooltips(e.target.checked)} className="accent-indigo-500" />
           <span className="text-gray-300">Hover Tooltips</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
+          <input type="checkbox" checked={buildingWallsVisible} onChange={e => setBuildingWallsVisible(e.target.checked)} className="accent-amber-500" />
+          <span className="text-amber-400">Building Walls</span>
+          <span className="text-[10px] text-gray-500">({buildingWalls.length})</span>
         </label>
       </div>
 

@@ -23,6 +23,37 @@ const TIMBER_SIZE = 0.0625       // 1×3 actual is ~0.75" = 0.0625' (depth on fl
 const TIMBER_WIDTH = 0.208       // 1×3 actual is ~2.5" = 0.208' width
 const LUAN_THICKNESS = 0.021     // ~1/4" luan
 
+// ─── Building Wall 3D ────────────────────────────────────────────────
+function BuildingWall3D({ wall, ppu, defaultWallHeight }) {
+  const x1ft = wall.x1 / ppu
+  const z1ft = wall.y1 / ppu
+  const x2ft = wall.x2 / ppu
+  const z2ft = wall.y2 / ppu
+
+  const dx = x2ft - x1ft
+  const dz = z2ft - z1ft
+  const lengthFt = Math.sqrt(dx * dx + dz * dz)
+  if (lengthFt < 0.1) return null
+
+  const angle = Math.atan2(dz, dx) // rotation around Y axis
+  const cx = (x1ft + x2ft) / 2
+  const cz = (z1ft + z2ft) / 2
+  const wallH = wall.height || defaultWallHeight
+  const thickness = wall.thickness || 0.5
+
+  return (
+    <mesh
+      position={[cx, wallH / 2, cz]}
+      rotation={[0, -angle, 0]}
+      castShadow
+      receiveShadow
+    >
+      <boxGeometry args={[lengthFt, wallH, thickness]} />
+      <meshStandardMaterial color={wall.color || '#8B4513'} roughness={0.85} />
+    </mesh>
+  )
+}
+
 // ─── Coordinate helpers ──────────────────────────────────────────────
 // 2D canvas: set.x, set.y are pixel positions (top-left corner of bounding box)
 // 2D canvas: set.width, set.height are in feet
@@ -1151,7 +1182,7 @@ function SetLabel3D({ set, ppu, defaultWallHeight }) {
 
 // ─── Main Scene Content ────────────────────────────────────────────
 function SceneContent({ controlMode, orbitRef, locked3D, rKeyRef }) {
-  const { sets, pixelsPerUnit, layerVisibility, labelsVisible, wallRenderMode, defaultWallHeight } = useStore()
+  const { sets, pixelsPerUnit, layerVisibility, labelsVisible, wallRenderMode, defaultWallHeight, buildingWalls, buildingWallsVisible } = useStore()
 
   const ppu = pixelsPerUnit || 1
 
@@ -1258,6 +1289,11 @@ function SceneContent({ controlMode, orbitRef, locked3D, rKeyRef }) {
         ppu={ppu}
         defaultWallHeight={defaultWallHeight}
       />
+
+      {/* Building Walls (fixed structural walls) */}
+      {buildingWallsVisible && buildingWalls.map(bw => (
+        <BuildingWall3D key={`bw-${bw.id}`} wall={bw} ppu={ppu} defaultWallHeight={defaultWallHeight} />
+      ))}
 
       {/* Doors */}
       {doorSets.map(s => (

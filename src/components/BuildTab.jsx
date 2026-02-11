@@ -25,7 +25,12 @@ const CATEGORY_TEXT = {
 }
 
 export default function BuildTab() {
-  const { addSet, unit, viewMode, setViewMode } = useStore()
+  const {
+    addSet, unit, viewMode, setViewMode, pixelsPerUnit,
+    buildingWalls, deleteBuildingWall, clearBuildingWalls,
+    drawingMode, setDrawingMode, cancelDrawing,
+    buildingWallDefaults, setBuildingWallDefaults,
+  } = useStore()
   const [components, setComponents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -125,6 +130,83 @@ export default function BuildTab() {
 
   return (
     <div className="p-3 flex flex-col gap-3">
+      {/* Building Walls Section */}
+      <div className="border border-amber-700/40 bg-amber-900/10 rounded p-2">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-bold text-amber-400">Building Walls</span>
+          <span className="text-[10px] text-gray-500">{buildingWalls.length} segments</span>
+        </div>
+
+        {/* Draw toggle */}
+        <button
+          onClick={() => drawingMode === 'building-wall' ? cancelDrawing() : setDrawingMode('building-wall')}
+          className={`w-full px-2 py-1.5 rounded text-xs font-medium transition-colors mb-2 ${
+            drawingMode === 'building-wall'
+              ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse'
+              : 'bg-amber-700 hover:bg-amber-600 text-white'
+          }`}
+        >
+          {drawingMode === 'building-wall' ? '■ Stop Drawing (Esc)' : '✏ Draw Building Walls'}
+        </button>
+
+        {/* Defaults */}
+        <div className="flex gap-2 mb-2">
+          <div className="flex-1">
+            <label className="text-[10px] text-gray-500 block">Thickness</label>
+            <select
+              value={buildingWallDefaults.thickness}
+              onChange={e => setBuildingWallDefaults({ thickness: parseFloat(e.target.value) })}
+              className="w-full text-[10px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white"
+            >
+              <option value={0.25}>3" (0.25')</option>
+              <option value={0.5}>6" (0.5')</option>
+              <option value={0.75}>9" (0.75')</option>
+              <option value={1}>12" (1')</option>
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="text-[10px] text-gray-500 block">Color</label>
+            <input
+              type="color"
+              value={buildingWallDefaults.color}
+              onChange={e => setBuildingWallDefaults({ color: e.target.value })}
+              className="w-full h-6 rounded border-0 cursor-pointer bg-transparent"
+            />
+          </div>
+        </div>
+
+        {/* Wall list */}
+        {buildingWalls.length > 0 && (
+          <div className="flex flex-col gap-0.5 max-h-32 overflow-y-auto mb-1">
+            {buildingWalls.map(bw => {
+              const lengthFt = Math.sqrt((bw.x2 - bw.x1) ** 2 + (bw.y2 - bw.y1) ** 2) / pixelsPerUnit
+              return (
+                <div key={bw.id} className="flex items-center justify-between px-2 py-1 bg-gray-800/50 rounded group">
+                  <span className="text-[10px] text-gray-300">
+                    {bw.label || `Wall ${bw.id}`} — {Math.round(lengthFt * 10) / 10}{unit}
+                  </span>
+                  <button
+                    onClick={() => deleteBuildingWall(bw.id)}
+                    className="text-red-400 hover:text-red-300 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {buildingWalls.length > 0 && (
+          <button
+            onClick={() => { if (confirm('Delete all building walls?')) clearBuildingWalls() }}
+            className="w-full px-2 py-1 bg-red-800/50 hover:bg-red-700/50 text-red-400 text-[10px] rounded"
+          >
+            Delete All Building Walls
+          </button>
+        )}
+      </div>
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold text-white">Component Library</h3>
