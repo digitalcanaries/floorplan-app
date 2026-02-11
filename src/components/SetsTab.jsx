@@ -43,6 +43,7 @@ export default function SetsTab() {
     category: 'Set', wallGap: '', opacity: '1', noCut: false,
     wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
     removedWalls: { top: false, right: false, bottom: false, left: false },
+    rotation: '0',
   })
   const [editing, setEditing] = useState(null)
   const [cuttingSetId, setCuttingSetId] = useState(null)
@@ -65,12 +66,14 @@ export default function SetsTab() {
       gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
       removedWalls: !isWallType && Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
       opacity: parseFloat(form.opacity) || 1,
+      rotation: parseFloat(form.rotation) || 0,
     })
     setForm({
       name: '', width: '', height: '', color: COLORS[(sets.length + 1) % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
       removedWalls: { top: false, right: false, bottom: false, left: false },
+      rotation: '0',
     })
   }
 
@@ -90,6 +93,7 @@ export default function SetsTab() {
       gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
       removedWalls: !isWallType && Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
       opacity: parseFloat(form.opacity) || 1,
+      rotation: parseFloat(form.rotation) || 0,
     })
     setEditing(null)
     setForm({
@@ -97,6 +101,7 @@ export default function SetsTab() {
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
       removedWalls: { top: false, right: false, bottom: false, left: false },
+      rotation: '0',
     })
   }
 
@@ -110,6 +115,7 @@ export default function SetsTab() {
       wallHeight: String(s.wallHeight || ''),
       gapSides: s.gapSides || { top: true, right: true, bottom: true, left: true },
       removedWalls: s.removedWalls || { top: false, right: false, bottom: false, left: false },
+      rotation: String(s.rotation || 0),
     })
   }
 
@@ -120,6 +126,7 @@ export default function SetsTab() {
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
       removedWalls: { top: false, right: false, bottom: false, left: false },
+      rotation: '0',
     })
   }
 
@@ -435,6 +442,27 @@ export default function SetsTab() {
             className="flex-1 h-1 accent-indigo-500"
           />
           <span className="text-[10px] text-gray-400 w-6 text-right">{Math.round((form.opacity || 1) * 100)}%</span>
+        </div>
+
+        {/* Rotation — precision control with nudge buttons */}
+        <div className="flex items-center gap-1">
+          <label className="text-xs text-gray-400 mr-1">Rotation:</label>
+          <button type="button" onClick={() => setForm({ ...form, rotation: String(((parseFloat(form.rotation) || 0) - 5 + 360) % 360) })}
+            className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600" title="-5°">-5</button>
+          <button type="button" onClick={() => setForm({ ...form, rotation: String(((parseFloat(form.rotation) || 0) - 1 + 360) % 360) })}
+            className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600" title="-1°">-1</button>
+          <input type="number" min="0" max="359" step="1"
+            value={form.rotation}
+            onChange={e => setForm({ ...form, rotation: e.target.value })}
+            className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-white w-16 text-center"
+          />
+          <span className="text-[10px] text-gray-400">°</span>
+          <button type="button" onClick={() => setForm({ ...form, rotation: String(((parseFloat(form.rotation) || 0) + 1) % 360) })}
+            className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600" title="+1°">+1</button>
+          <button type="button" onClick={() => setForm({ ...form, rotation: String(((parseFloat(form.rotation) || 0) + 5) % 360) })}
+            className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600" title="+5°">+5</button>
+          <button type="button" onClick={() => setForm({ ...form, rotation: String(((parseFloat(form.rotation) || 0) + 90) % 360) })}
+            className="px-1.5 py-0.5 bg-indigo-600 rounded text-[10px] text-white hover:bg-indigo-500" title="+90°">90</button>
         </div>
 
         {/* Remove walls — shown for room-type sets only */}
@@ -760,11 +788,14 @@ export default function SetsTab() {
                 </button>
               )}
 
-              {/* Rotate */}
+              {/* Rotation controls */}
+              <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { rotation: ((s.rotation || 0) - 1 + 360) % 360 }) }}
+                className="text-[10px] text-yellow-400 hover:text-yellow-300" title="-1°">&#x25C1;</button>
+              <span className="text-[9px] text-gray-500 min-w-[24px] text-center inline-block">{s.rotation || 0}°</span>
+              <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { rotation: ((s.rotation || 0) + 1) % 360 }) }}
+                className="text-[10px] text-yellow-400 hover:text-yellow-300" title="+1°">&#x25B7;</button>
               <button onClick={(e) => handleRotate(e, s)}
-                className="text-xs text-yellow-400 hover:text-yellow-300" title={`Rotate (${s.rotation || 0}\u00B0)`}>
-                &#x21BB;
-              </button>
+                className="text-[10px] text-yellow-400 hover:text-yellow-300" title="Rotate 90°">&#x21BB;</button>
 
               {/* Z-order */}
               <button onClick={(e) => { e.stopPropagation(); bringForward(s.id) }}

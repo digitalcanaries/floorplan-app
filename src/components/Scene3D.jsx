@@ -1307,7 +1307,7 @@ export default function Scene3D() {
   const [controlMode, setControlMode] = useState('orbit')
   const [locked3D, setLocked3D] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
-  const { wallRenderMode, setWallRenderMode, setSelectedSetId, sets, pixelsPerUnit } = useStore()
+  const { wallRenderMode, setWallRenderMode, setSelectedSetId, selectedSetId, updateSet, sets, pixelsPerUnit } = useStore()
   const orbitRef = useRef()
   const rKeyRef = useRef(false)
 
@@ -1404,6 +1404,31 @@ export default function Scene3D() {
           }
         </div>
       )}
+
+      {/* Selected set rotation/properties panel */}
+      {controlMode === 'orbit' && selectedSetId && (() => {
+        const sel = sets.find(s => s.id === selectedSetId)
+        if (!sel) return null
+        return (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 bg-gray-800/95 rounded-lg px-3 py-2 border border-gray-600 flex items-center gap-2">
+            <span className="text-[10px] text-gray-400 max-w-[100px] truncate">{sel.name}</span>
+            <div className="w-px h-4 bg-gray-600" />
+            <span className="text-[10px] text-gray-400">Rot:</span>
+            <button onClick={() => updateSet(selectedSetId, { rotation: ((sel.rotation || 0) - 5 + 360) % 360 })}
+              className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">-5°</button>
+            <button onClick={() => updateSet(selectedSetId, { rotation: ((sel.rotation || 0) - 1 + 360) % 360 })}
+              className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">-1°</button>
+            <span className="text-xs text-white font-mono min-w-[32px] text-center">{sel.rotation || 0}°</span>
+            <button onClick={() => updateSet(selectedSetId, { rotation: ((sel.rotation || 0) + 1) % 360 })}
+              className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">+1°</button>
+            <button onClick={() => updateSet(selectedSetId, { rotation: ((sel.rotation || 0) + 5) % 360 })}
+              className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">+5°</button>
+            <div className="w-px h-4 bg-gray-600" />
+            <button onClick={() => updateSet(selectedSetId, { rotation: ((sel.rotation || 0) + 90) % 360 })}
+              className="px-1.5 py-0.5 bg-indigo-600 rounded text-[10px] text-white hover:bg-indigo-500">90°</button>
+          </div>
+        )
+      })()}
 
       {/* Debug panel */}
       {showDebug && (
