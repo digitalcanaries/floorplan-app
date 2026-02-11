@@ -67,7 +67,7 @@ const useStore = create((set, get) => ({
   // Building Walls (structural walls drawn on PDF)
   buildingWalls: saved?.buildingWalls || [],
   nextBuildingWallId: saved?.nextBuildingWallId || 1,
-  buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 0.5, height: null, color: '#8B4513' },
+  buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 1, height: 14, color: '#8B4513' },
   buildingWallsVisible: saved?.buildingWallsVisible ?? true,
 
   // Drawing mode (transient, not persisted)
@@ -677,6 +677,64 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Toggle lock on individual building wall
+  toggleBuildingWallLock: (id) => {
+    get()._pushHistory()
+    const state = get()
+    const pdfPos = state.pdfPosition
+    const updatedWalls = state.buildingWalls.map(w => {
+      if (w.id !== id) return w
+      if (w.lockedToPdf) {
+        // Unlocking — remove offset data, keep absolute position
+        const { pdfOffsetX1, pdfOffsetY1, pdfOffsetX2, pdfOffsetY2, ...rest } = w
+        return { ...rest, lockedToPdf: false }
+      } else {
+        // Locking — store offsets from PDF origin
+        return {
+          ...w,
+          lockedToPdf: true,
+          pdfOffsetX1: w.x1 - pdfPos.x, pdfOffsetY1: w.y1 - pdfPos.y,
+          pdfOffsetX2: w.x2 - pdfPos.x, pdfOffsetY2: w.y2 - pdfPos.y,
+        }
+      }
+    })
+    set({ buildingWalls: updatedWalls })
+    get().autosave()
+  },
+
+  // Rotate a building wall around its midpoint by a given angle in degrees
+  rotateBuildingWall: (id, angleDeg) => {
+    get()._pushHistory()
+    const state = get()
+    const pdfPos = state.pdfPosition
+    const updatedWalls = state.buildingWalls.map(w => {
+      if (w.id !== id) return w
+      const cx = (w.x1 + w.x2) / 2
+      const cy = (w.y1 + w.y2) / 2
+      const rad = angleDeg * Math.PI / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      // Rotate endpoints around midpoint
+      const dx1 = w.x1 - cx, dy1 = w.y1 - cy
+      const dx2 = w.x2 - cx, dy2 = w.y2 - cy
+      const nx1 = cx + dx1 * cos - dy1 * sin
+      const ny1 = cy + dx1 * sin + dy1 * cos
+      const nx2 = cx + dx2 * cos - dy2 * sin
+      const ny2 = cy + dx2 * sin + dy2 * cos
+      const updated = { ...w, x1: nx1, y1: ny1, x2: nx2, y2: ny2 }
+      // Update PDF offsets if locked
+      if (w.lockedToPdf) {
+        updated.pdfOffsetX1 = nx1 - pdfPos.x
+        updated.pdfOffsetY1 = ny1 - pdfPos.y
+        updated.pdfOffsetX2 = nx2 - pdfPos.x
+        updated.pdfOffsetY2 = ny2 - pdfPos.y
+      }
+      return updated
+    })
+    set({ buildingWalls: updatedWalls })
+    get().autosave()
+  },
+
   // Drawing mode
   setDrawingMode: (mode) => set({ drawingMode: mode, drawingWallPoints: [] }),
   cancelDrawing: () => set({ drawingMode: null, drawingWallPoints: [] }),
@@ -989,7 +1047,7 @@ const useStore = create((set, get) => ({
       nextGroupId: data.nextGroupId || 1,
       buildingWalls: data.buildingWalls || [],
       nextBuildingWallId: data.nextBuildingWallId || 1,
-      buildingWallDefaults: data.buildingWallDefaults || { thickness: 0.5, height: null, color: '#8B4513' },
+      buildingWallDefaults: data.buildingWallDefaults || { thickness: 1, height: 14, color: '#8B4513' },
       buildingWallsVisible: data.buildingWallsVisible ?? true,
       selectedSetId: null,
       _past: [], _future: [],
@@ -1015,7 +1073,7 @@ const useStore = create((set, get) => ({
       nextGroupId: 1,
       buildingWalls: [],
       nextBuildingWallId: 1,
-      buildingWallDefaults: { thickness: 0.5, height: null, color: '#8B4513' },
+      buildingWallDefaults: { thickness: 1, height: 14, color: '#8B4513' },
       buildingWallsVisible: true,
       drawingMode: null,
       drawingWallPoints: [],

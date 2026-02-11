@@ -28,6 +28,7 @@ export default function BuildTab() {
   const {
     addSet, unit, viewMode, setViewMode, pixelsPerUnit,
     buildingWalls, deleteBuildingWall, clearBuildingWalls,
+    updateBuildingWall, toggleBuildingWallLock, rotateBuildingWall,
     drawingMode, setDrawingMode, cancelDrawing, breakDrawingChain,
     drawingWallSnap, setDrawingWallSnap,
     buildingWallDefaults, setBuildingWallDefaults,
@@ -185,6 +186,24 @@ export default function BuildTab() {
               <option value={0.5}>6" (0.5')</option>
               <option value={0.75}>9" (0.75')</option>
               <option value={1}>12" (1')</option>
+              <option value={1.5}>18" (1.5')</option>
+              <option value={2}>24" (2')</option>
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="text-[10px] text-gray-500 block">Height</label>
+            <select
+              value={buildingWallDefaults.height || 14}
+              onChange={e => setBuildingWallDefaults({ height: parseFloat(e.target.value) })}
+              className="w-full text-[10px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white"
+            >
+              <option value={8}>8'</option>
+              <option value={10}>10'</option>
+              <option value={12}>12'</option>
+              <option value={14}>14'</option>
+              <option value={16}>16'</option>
+              <option value={20}>20'</option>
+              <option value={24}>24'</option>
             </select>
           </div>
           <div className="flex-1">
@@ -200,20 +219,75 @@ export default function BuildTab() {
 
         {/* Wall list */}
         {buildingWalls.length > 0 && (
-          <div className="flex flex-col gap-0.5 max-h-32 overflow-y-auto mb-1">
+          <div className="flex flex-col gap-1 max-h-48 overflow-y-auto mb-1">
             {buildingWalls.map(bw => {
               const lengthFt = Math.sqrt((bw.x2 - bw.x1) ** 2 + (bw.y2 - bw.y1) ** 2) / pixelsPerUnit
+              const angleDeg = Math.round(Math.atan2(bw.y2 - bw.y1, bw.x2 - bw.x1) * 180 / Math.PI * 10) / 10
               return (
-                <div key={bw.id} className="flex items-center justify-between px-2 py-1 bg-gray-800/50 rounded group">
-                  <span className="text-[10px] text-gray-300">
-                    {bw.label || `Wall ${bw.id}`} — {Math.round(lengthFt * 10) / 10}{unit}
-                  </span>
-                  <button
-                    onClick={() => deleteBuildingWall(bw.id)}
-                    className="text-red-400 hover:text-red-300 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    ×
-                  </button>
+                <div key={bw.id} className="px-2 py-1 bg-gray-800/50 rounded group">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-300 truncate flex-1">
+                      {bw.label || `Wall ${bw.id}`} — {Math.round(lengthFt * 10) / 10}{unit}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => toggleBuildingWallLock(bw.id)}
+                        className={`text-[10px] px-1 rounded transition-colors ${
+                          bw.lockedToPdf
+                            ? 'text-amber-400 hover:text-amber-300'
+                            : 'text-gray-500 hover:text-gray-300'
+                        }`}
+                        title={bw.lockedToPdf ? 'Locked to PDF — click to unlock' : 'Unlocked — click to lock to PDF'}
+                      >
+                        {bw.lockedToPdf ? '🔒' : '🔓'}
+                      </button>
+                      <button
+                        onClick={() => deleteBuildingWall(bw.id)}
+                        className="text-red-400 hover:text-red-300 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                  {/* Rotation controls */}
+                  <div className="flex items-center gap-1 mt-1">
+                    <span className="text-[9px] text-gray-500 w-10">{angleDeg}°</span>
+                    <button
+                      onClick={() => rotateBuildingWall(bw.id, -5)}
+                      className="text-[9px] px-1 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                      title="Rotate -5°"
+                    >
+                      -5°
+                    </button>
+                    <button
+                      onClick={() => rotateBuildingWall(bw.id, -1)}
+                      className="text-[9px] px-1 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                      title="Rotate -1°"
+                    >
+                      -1°
+                    </button>
+                    <button
+                      onClick={() => rotateBuildingWall(bw.id, 1)}
+                      className="text-[9px] px-1 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                      title="Rotate +1°"
+                    >
+                      +1°
+                    </button>
+                    <button
+                      onClick={() => rotateBuildingWall(bw.id, 5)}
+                      className="text-[9px] px-1 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                      title="Rotate +5°"
+                    >
+                      +5°
+                    </button>
+                    <button
+                      onClick={() => rotateBuildingWall(bw.id, 45)}
+                      className="text-[9px] px-1 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
+                      title="Rotate +45°"
+                    >
+                      45°
+                    </button>
+                  </div>
                 </div>
               )
             })}
