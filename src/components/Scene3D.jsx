@@ -34,44 +34,33 @@ const LUAN_THICKNESS = 0.021     // ~1/4" luan
 
 function get3DPosition(set, ppu) {
   const rot = ((set.rotation || 0) % 360 + 360) % 360
-  const rad = rot * Math.PI / 180
-  const cosR = Math.cos(rad)
-  const sinR = Math.sin(rad)
-  const w = set.width   // unrotated width in feet
-  const h = set.height  // unrotated height in feet
+  const isRotated = rot === 90 || rot === 270
+
+  // Visual bounding box dimensions (swapped when rotated 90/270)
+  const footprintW = isRotated ? set.height : set.width
+  const footprintH = isRotated ? set.width : set.height
 
   // Fabric.js (left, top) is the rotation pivot = top-left of UNROTATED rect.
-  // When rotated CW by θ in screen coords (y-down), the 4 corners relative to pivot:
-  //   TL: (0, 0)
-  //   TR: (w*cosθ, -w*sinθ)
-  //   BL: (h*sinθ,  h*cosθ)
-  //   BR: (w*cosθ + h*sinθ, -w*sinθ + h*cosθ)
-  // Visual bounding box = axis-aligned envelope of these corners.
-  const corners = [
-    { x: 0, y: 0 },
-    { x: w * cosR, y: -w * sinR },
-    { x: h * sinR, y: h * cosR },
-    { x: w * cosR + h * sinR, y: -w * sinR + h * cosR },
-  ]
-  const minCx = Math.min(...corners.map(c => c.x))
-  const minCy = Math.min(...corners.map(c => c.y))
-  const maxCx = Math.max(...corners.map(c => c.x))
-  const maxCy = Math.max(...corners.map(c => c.y))
+  // In screen coords (y-down), CW rotation shifts the visual bounding box:
+  //   0°:   no shift
+  //   90°:  bbox shifts LEFT by height (x -= height)
+  //   180°: bbox shifts LEFT by width and UP by height (x -= width, y -= height)
+  //   270°: bbox shifts UP by width (y -= width)
+  // (all in feet, where width/height are the unrotated dimensions)
+  let bboxX = set.x / ppu
+  let bboxZ = set.y / ppu
+  if (rot === 90) {
+    bboxX -= set.height
+  } else if (rot === 180) {
+    bboxX -= set.width
+    bboxZ -= set.height
+  } else if (rot === 270) {
+    bboxZ -= set.width
+  }
 
-  const footprintW = maxCx - minCx  // axis-aligned bbox width in feet
-  const footprintH = maxCy - minCy  // axis-aligned bbox height in feet
-
-  // Bbox top-left in feet = pivot position + min corner offset
-  const bboxX = set.x / ppu + minCx
-  const bboxZ = set.y / ppu + minCy
-
-  // Center of the rotated set = center of the unrotated rect rotated around pivot
-  // Unrotated center relative to pivot: (w/2, h/2)
-  // Rotated: (w/2*cosθ + h/2*sinθ, -w/2*sinθ + h/2*cosθ)
-  const cx = set.x / ppu + w / 2 * cosR + h / 2 * sinR
-  const cz = set.y / ppu + (-w / 2 * sinR + h / 2 * cosR)
-
-  const rotY = rot ? -(rad) : 0
+  const cx = bboxX + footprintW / 2
+  const cz = bboxZ + footprintH / 2
+  const rotY = rot ? -(rot * Math.PI / 180) : 0
   return { cx, cz, rotY, footprintW, footprintH }
 }
 
@@ -276,14 +265,15 @@ function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
   const depthFt = isLegacyHeight ? thickness : set.height
   const wallHeight = set.wallHeight || (isLegacyHeight ? set.height : null) || defaultWallHeight || DEFAULT_WALL_HEIGHT
 
-  // Compute 3D center using corrected depth (handles legacy data + arbitrary rotation)
-  const rot = ((set.rotation || 0) % 360 + 360) % 360
-  const rad = rot * Math.PI / 180
-  const cosR = Math.cos(rad)
-  const sinR = Math.sin(rad)
-  const cx = set.x / ppu + widthFt / 2 * cosR + depthFt / 2 * sinR
-  const cz = set.y / ppu + (-widthFt / 2 * sinR + depthFt / 2 * cosR)
-  const rotY = rot ? -rad : 0
+  // For legacy data, recalculate 3D position using corrected plan-view depth
+  const cx_raw = set.x / ppu
+  const cz_raw = set.y / ppu
+  const isRotated = (set.rotation || 0) % 180 !== 0
+  const footprintW = isRotated ? depthFt : widthFt
+  const footprintH = isRotated ? widthFt : depthFt
+  const cx = cx_raw + footprintW / 2
+  const cz = cz_raw + footprintH / 2
+  const rotY = set.rotation ? -(set.rotation * Math.PI / 180) : 0
 
   // Find doors/windows that overlap this wall to cut openings
   const openings = useMemo(() => {
@@ -639,11 +629,10 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
         const deltaPixels = moveEvt.clientX - ds.startClientX
         const deltaDegrees = deltaPixels * 0.5  // ~0.5 degree per pixel for smooth feedback
         const currentDeg = ds.startRotation + deltaDegrees
-        // Snap: hold Shift for 90° snap, otherwise free rotation snapped to 5°
-        const snapAngle = moveEvt.shiftKey ? 90 : 5
-        const snapped = ((Math.round(currentDeg / snapAngle) * snapAngle) % 360 + 360) % 360
-        const rotRad = -((snapped - ds.startRotation) * Math.PI / 180)
+        const rotRad = -(deltaDegrees * Math.PI / 180)
         setDragRotation(rotRad)
+        // Show snapped value in label
+        const snapped = ((Math.round(currentDeg / 90) * 90) % 360 + 360) % 360
         setDragLabel({ mode: 'rotate', value: snapped })
       }
     }
@@ -674,9 +663,8 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
           const deltaPixels = upEvt.clientX - ds.startClientX
           const deltaDegrees = deltaPixels * 0.5
           const currentDeg = ds.startRotation + deltaDegrees
-          // Snap: Shift for 90° snap, otherwise 5° snap (free rotation)
-          const snapAngle = upEvt.shiftKey ? 90 : 5
-          const snapped = ((Math.round(currentDeg / snapAngle) * snapAngle) % 360 + 360) % 360
+          // Snap to nearest 90°
+          const snapped = ((Math.round(currentDeg / 90) * 90) % 360 + 360) % 360
           if (snapped !== ds.startRotation) {
             updateSet(set.id, { rotation: snapped })
           }
@@ -739,31 +727,22 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
   const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
 
   const roomGroups = useMemo(() => {
-    // Helper: compute visual bounding box in feet, accounting for rotation pivot
-    // Supports arbitrary rotation angles (not just 0/90/180/270)
+    // Helper: compute visual bounding box top-left in feet, accounting for rotation pivot
     function getVisualBBox(s) {
       const rot = ((s.rotation || 0) % 360 + 360) % 360
-      const rad = rot * Math.PI / 180
-      const cosR = Math.cos(rad)
-      const sinR = Math.sin(rad)
-      const w = s.width, h = s.height  // unrotated dims in feet
-
-      // 4 corners of unrotated rect relative to pivot (top-left), rotated CW in screen coords
-      const corners = [
-        { x: 0, y: 0 },
-        { x: w * cosR, y: -w * sinR },
-        { x: h * sinR, y: h * cosR },
-        { x: w * cosR + h * sinR, y: -w * sinR + h * cosR },
-      ]
-      const minCx = Math.min(...corners.map(c => c.x))
-      const minCy = Math.min(...corners.map(c => c.y))
-      const maxCx = Math.max(...corners.map(c => c.x))
-      const maxCy = Math.max(...corners.map(c => c.y))
-
-      const fw = maxCx - minCx
-      const fh = maxCy - minCy
-      const x1 = s.x / ppu + minCx
-      const z1 = s.y / ppu + minCy
+      const isRot = rot === 90 || rot === 270
+      const fw = isRot ? s.height : s.width
+      const fh = isRot ? s.width : s.height
+      let x1 = s.x / ppu
+      let z1 = s.y / ppu
+      if (rot === 90) {
+        x1 -= s.height   // bbox shifts left by unrotated height
+      } else if (rot === 180) {
+        x1 -= s.width
+        z1 -= s.height
+      } else if (rot === 270) {
+        z1 -= s.width    // bbox shifts up by unrotated width
+      }
       return { x1, z1, x2: x1 + fw, z2: z1 + fh, fw, fh }
     }
 
@@ -1022,9 +1001,10 @@ function FloorPlane({ sets, ppu }) {
     if (sets.length === 0) return { cx: 0, cz: 0, w: 100, d: 100 }
     let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity
     for (const s of sets) {
-      const { cx, cz, footprintW, footprintH } = get3DPosition(s, ppu)
-      const hw = footprintW / 2
-      const hd = footprintH / 2
+      const { cx, cz } = get3DPosition(s, ppu)
+      const isRotated = (s.rotation || 0) % 180 !== 0
+      const hw = (isRotated ? s.height : s.width) / 2
+      const hd = (isRotated ? s.width : s.height) / 2
       minX = Math.min(minX, cx - hw)
       minZ = Math.min(minZ, cz - hd)
       maxX = Math.max(maxX, cx + hw)
@@ -1420,7 +1400,7 @@ export default function Scene3D() {
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-black/70 text-white text-xs px-4 py-2 rounded-lg">
           {locked3D
             ? 'Layout locked | Click to select | Right-drag to pan | Scroll to zoom | Left-drag to rotate'
-            : 'Click to select | Drag to move | Shift+Drag to raise/lower | R+Drag to rotate (Shift=90° snap) | Right-drag to pan | Scroll to zoom'
+            : 'Click to select | Drag to move | Shift+Drag to raise/lower | R+Drag to rotate | Right-drag to pan | Scroll to zoom'
           }
         </div>
       )}
