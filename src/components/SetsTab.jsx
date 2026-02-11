@@ -43,6 +43,8 @@ export default function SetsTab() {
     category: 'Set', wallGap: '', opacity: '1', noCut: false,
     wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
     removedWalls: { top: false, right: false, bottom: false, left: false },
+    hiddenWalls: { top: false, right: false, bottom: false, left: false },
+    wallExtensions: { top: '', right: '', bottom: '', left: '' },
     rotation: '0',
   })
   const [editing, setEditing] = useState(null)
@@ -64,7 +66,9 @@ export default function SetsTab() {
       wallGap: parseFloat(form.wallGap) || 0,
       wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
       gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
-      removedWalls: !isWallType && Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
+      removedWalls: Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
+      hiddenWalls: Object.values(form.hiddenWalls).some(v => v) ? form.hiddenWalls : null,
+      wallExtensions: Object.values(form.wallExtensions).some(v => parseFloat(v) > 0) ? { top: parseFloat(form.wallExtensions.top) || 0, right: parseFloat(form.wallExtensions.right) || 0, bottom: parseFloat(form.wallExtensions.bottom) || 0, left: parseFloat(form.wallExtensions.left) || 0 } : null,
       opacity: parseFloat(form.opacity) || 1,
       rotation: parseFloat(form.rotation) || 0,
     })
@@ -73,6 +77,8 @@ export default function SetsTab() {
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
       removedWalls: { top: false, right: false, bottom: false, left: false },
+      hiddenWalls: { top: false, right: false, bottom: false, left: false },
+      wallExtensions: { top: '', right: '', bottom: '', left: '' },
       rotation: '0',
     })
   }
@@ -91,7 +97,9 @@ export default function SetsTab() {
       wallGap: parseFloat(form.wallGap) || 0,
       wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
       gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
-      removedWalls: !isWallType && Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
+      removedWalls: Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
+      hiddenWalls: Object.values(form.hiddenWalls).some(v => v) ? form.hiddenWalls : null,
+      wallExtensions: Object.values(form.wallExtensions).some(v => parseFloat(v) > 0) ? { top: parseFloat(form.wallExtensions.top) || 0, right: parseFloat(form.wallExtensions.right) || 0, bottom: parseFloat(form.wallExtensions.bottom) || 0, left: parseFloat(form.wallExtensions.left) || 0 } : null,
       opacity: parseFloat(form.opacity) || 1,
       rotation: parseFloat(form.rotation) || 0,
     })
@@ -101,6 +109,8 @@ export default function SetsTab() {
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
       removedWalls: { top: false, right: false, bottom: false, left: false },
+      hiddenWalls: { top: false, right: false, bottom: false, left: false },
+      wallExtensions: { top: '', right: '', bottom: '', left: '' },
       rotation: '0',
     })
   }
@@ -115,6 +125,13 @@ export default function SetsTab() {
       wallHeight: String(s.wallHeight || ''),
       gapSides: s.gapSides || { top: true, right: true, bottom: true, left: true },
       removedWalls: s.removedWalls || { top: false, right: false, bottom: false, left: false },
+      hiddenWalls: s.hiddenWalls || { top: false, right: false, bottom: false, left: false },
+      wallExtensions: {
+        top: String(s.wallExtensions?.top || ''),
+        right: String(s.wallExtensions?.right || ''),
+        bottom: String(s.wallExtensions?.bottom || ''),
+        left: String(s.wallExtensions?.left || ''),
+      },
       rotation: String(s.rotation || 0),
     })
   }
@@ -126,6 +143,8 @@ export default function SetsTab() {
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
       wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
       removedWalls: { top: false, right: false, bottom: false, left: false },
+      hiddenWalls: { top: false, right: false, bottom: false, left: false },
+      wallExtensions: { top: '', right: '', bottom: '', left: '' },
       rotation: '0',
     })
   }
@@ -465,27 +484,66 @@ export default function SetsTab() {
             className="px-1.5 py-0.5 bg-indigo-600 rounded text-[10px] text-white hover:bg-indigo-500" title="+90°">90</button>
         </div>
 
-        {/* Remove walls — shown for room-type sets only */}
-        {(form.category === 'Set' || !form.category) && (
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-gray-400">Remove walls:</label>
-            <div className="flex gap-2">
-              {['top', 'right', 'bottom', 'left'].map(side => (
-                <label key={side} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                  <input type="checkbox"
-                    checked={form.removedWalls[side]}
-                    onChange={e => setForm({
-                      ...form,
-                      removedWalls: { ...form.removedWalls, [side]: e.target.checked }
-                    })}
-                    className="w-3 h-3 accent-red-500"
-                  />
-                  {side.charAt(0).toUpperCase() + side.slice(1)}
-                </label>
-              ))}
-            </div>
+        {/* Remove walls — available for all set types */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-gray-400">Remove walls:</label>
+          <div className="flex gap-2">
+            {['top', 'right', 'bottom', 'left'].map(side => (
+              <label key={side} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
+                <input type="checkbox"
+                  checked={form.removedWalls[side]}
+                  onChange={e => setForm({
+                    ...form,
+                    removedWalls: { ...form.removedWalls, [side]: e.target.checked }
+                  })}
+                  className="w-3 h-3 accent-red-500"
+                />
+                {side.charAt(0).toUpperCase() + side.slice(1)}
+              </label>
+            ))}
           </div>
-        )}
+        </div>
+
+        {/* Hide walls — invisible but structurally present */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-gray-400">Hide walls (ghosted):</label>
+          <div className="flex gap-2">
+            {['top', 'right', 'bottom', 'left'].map(side => (
+              <label key={side} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
+                <input type="checkbox"
+                  checked={form.hiddenWalls[side]}
+                  onChange={e => setForm({
+                    ...form,
+                    hiddenWalls: { ...form.hiddenWalls, [side]: e.target.checked }
+                  })}
+                  className="w-3 h-3 accent-gray-500"
+                />
+                {side.charAt(0).toUpperCase() + side.slice(1)}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Wall extensions — extend walls beyond set boundary */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-gray-400">Extend walls ({unit}):</label>
+          <div className="grid grid-cols-4 gap-1">
+            {['top', 'right', 'bottom', 'left'].map(side => (
+              <div key={side} className="flex flex-col items-center">
+                <span className="text-[9px] text-gray-500">{side.charAt(0).toUpperCase() + side.slice(1)}</span>
+                <input
+                  type="number" min="0" step="0.5" placeholder="0"
+                  value={form.wallExtensions[side]}
+                  onChange={e => setForm({
+                    ...form,
+                    wallExtensions: { ...form.wallExtensions, [side]: e.target.value }
+                  })}
+                  className="w-full px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[10px] text-white text-center"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* No-cut toggle */}
         <label className="flex items-center gap-2 text-xs cursor-pointer">
@@ -748,6 +806,27 @@ export default function SetsTab() {
                 <span className="text-[9px] text-sky-400" title={`Wall height: ${s.wallHeight || defaultWallHeight}${unit}`}>
                   H:{s.wallHeight || defaultWallHeight}
                 </span>
+              )}
+
+              {/* Per-set wall render mode toggle (for wall categories) */}
+              {WALL_CATEGORIES.includes(s.category) && (
+                <button onClick={(e) => {
+                  e.stopPropagation()
+                  const modes = [null, 'finished', 'construction-front']
+                  const current = s.wallRenderMode || null
+                  const idx = modes.indexOf(current)
+                  const next = modes[(idx + 1) % modes.length]
+                  updateSet(s.id, { wallRenderMode: next })
+                }}
+                  className={`text-[9px] px-1 rounded ${
+                    s.wallRenderMode === 'finished' ? 'bg-emerald-700 text-emerald-200'
+                    : s.wallRenderMode === 'construction-front' ? 'bg-amber-700 text-amber-200'
+                    : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                  title={`Render: ${s.wallRenderMode || 'Global'} — click to cycle`}
+                >
+                  {s.wallRenderMode === 'finished' ? 'F' : s.wallRenderMode === 'construction-front' ? 'C' : 'G'}
+                </button>
               )}
 
               {/* Wall gap indicator */}

@@ -851,12 +851,23 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
 
       const sideNames = ['top', 'bottom', 'left', 'right']  // matches edges array order
       const removedWalls = b.s.removedWalls || {}
+      const hiddenWalls = b.s.hiddenWalls || {}
+      const wallExtensions = b.s.wallExtensions || {}
 
       for (let edgeIdx = 0; edgeIdx < edges.length; edgeIdx++) {
         const edge = edges[edgeIdx]
+        const sideName = sideNames[edgeIdx]
 
         // --- Step 0: Manual wall removal — skip entire edge if user removed it ---
-        if (removedWalls[sideNames[edgeIdx]]) continue
+        if (removedWalls[sideName]) continue
+        const isHidden = hiddenWalls[sideName]
+
+        // Apply wall extension to expand the edge range
+        const ext = wallExtensions[sideName] || 0
+        if (ext > 0) {
+          edge.rMin -= ext
+          edge.rMax += ext
+        }
 
         // --- Step 1: Dedup — find overlap intervals from lower-index rooms ---
         const dedupIntervals = []
@@ -950,7 +961,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
               roomGroups[b.s.id].segments.push({
                 dir: edge.dir, fixedVal: edge.fixedVal,
                 rMin: cursor, rMax: op.min,
-                yBot: 0, yH: wh, color,
+                yBot: 0, yH: wh, color, hidden: isHidden,
               })
             }
             // Wall above opening (header to ceiling)
@@ -958,7 +969,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
               roomGroups[b.s.id].segments.push({
                 dir: edge.dir, fixedVal: edge.fixedVal,
                 rMin: op.min, rMax: op.max,
-                yBot: op.headH, yH: wh - op.headH, color,
+                yBot: op.headH, yH: wh - op.headH, color, hidden: isHidden,
               })
             }
             // Wall below window (sill)
@@ -966,7 +977,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
               roomGroups[b.s.id].segments.push({
                 dir: edge.dir, fixedVal: edge.fixedVal,
                 rMin: op.min, rMax: op.max,
-                yBot: 0, yH: op.sillH, color,
+                yBot: 0, yH: op.sillH, color, hidden: isHidden,
               })
             }
             cursor = Math.max(cursor, op.max)
@@ -976,7 +987,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
             roomGroups[b.s.id].segments.push({
               dir: edge.dir, fixedVal: edge.fixedVal,
               rMin: cursor, rMax: range.max,
-              yBot: 0, yH: wh, color,
+              yBot: 0, yH: wh, color, hidden: isHidden,
             })
           }
         }
@@ -1013,9 +1024,9 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
               }
 
               return (
-                <mesh key={`wall-${i}`} position={pos} castShadow receiveShadow>
+                <mesh key={`wall-${i}`} position={pos} castShadow={!seg.hidden} receiveShadow={!seg.hidden}>
                   <boxGeometry args={size} />
-                  <meshStandardMaterial color={seg.color} roughness={0.8} />
+                  <meshStandardMaterial color={seg.color} roughness={0.8} transparent={!!seg.hidden} opacity={seg.hidden ? 0.15 : 1} />
                 </mesh>
               )
             })}
@@ -1277,7 +1288,7 @@ function SceneContent({ controlMode, orbitRef, locked3D, rKeyRef }) {
       {/* Individual wall pieces (flat components) */}
       {wallSets.map(s => (
         <DraggableSetGroup key={s.id} set={s} ppu={ppu} defaultWallHeight={defaultWallHeight}>
-          <WallMesh set={s} ppu={ppu} allSets={visibleSets} renderMode={wallRenderMode} defaultWallHeight={defaultWallHeight} />
+          <WallMesh set={s} ppu={ppu} allSets={visibleSets} renderMode={s.wallRenderMode || wallRenderMode} defaultWallHeight={defaultWallHeight} />
         </DraggableSetGroup>
       ))}
 
@@ -1446,9 +1457,24 @@ export default function Scene3D() {
         const sel = sets.find(s => s.id === selectedSetId)
         if (!sel) return null
         return (
-          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 bg-gray-800/95 rounded-lg px-3 py-2 border border-gray-600 flex items-center gap-2">
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 bg-gray-800/95 rounded-lg px-3 py-2 border border-gray-600 flex items-center gap-2 flex-wrap justify-center max-w-lg">
             <span className="text-[10px] text-gray-400 max-w-[100px] truncate">{sel.name}</span>
             <div className="w-px h-4 bg-gray-600" />
+            {/* Resize controls */}
+            <span className="text-[10px] text-gray-400">W:</span>
+            <button onClick={() => updateSet(selectedSetId, { width: Math.max(0.5, sel.width - 0.5) })}
+              className="px-1 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">-</button>
+            <span className="text-xs text-white font-mono min-w-[28px] text-center">{sel.width}</span>
+            <button onClick={() => updateSet(selectedSetId, { width: sel.width + 0.5 })}
+              className="px-1 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">+</button>
+            <span className="text-[10px] text-gray-400">H:</span>
+            <button onClick={() => updateSet(selectedSetId, { height: Math.max(0.5, sel.height - 0.5) })}
+              className="px-1 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">-</button>
+            <span className="text-xs text-white font-mono min-w-[28px] text-center">{sel.height}</span>
+            <button onClick={() => updateSet(selectedSetId, { height: sel.height + 0.5 })}
+              className="px-1 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">+</button>
+            <div className="w-px h-4 bg-gray-600" />
+            {/* Rotation controls */}
             <span className="text-[10px] text-gray-400">Rot:</span>
             <button onClick={() => updateSet(selectedSetId, { rotation: ((sel.rotation || 0) - 5 + 360) % 360 })}
               className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600">-5°</button>

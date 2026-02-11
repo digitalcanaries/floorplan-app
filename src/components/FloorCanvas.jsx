@@ -509,9 +509,13 @@ export default function FloorCanvas({ onCanvasSize }) {
           originX: 'left',
           originY: 'top',
           name: SET_PREFIX + s.id,
-          hasControls: false,
+          hasControls: !isLocked,
           lockRotation: true,
-          cornerSize: 0,
+          cornerSize: !isLocked ? 7 : 0,
+          cornerStyle: 'circle',
+          cornerColor: '#6366f1',
+          cornerStrokeColor: '#ffffff',
+          transparentCorners: false,
           selectable: !isLocked,
           evented: true,
           hoverCursor: isLocked ? 'default' : 'move',
@@ -644,7 +648,18 @@ export default function FloorCanvas({ onCanvasSize }) {
           clearSnapLines()
           const fx = isPolygon ? this.left + this.pathOffset.x : this.left
           const fy = isPolygon ? this.top + this.pathOffset.y : this.top
-          updateSet(s.id, { x: fx, y: fy })
+          // Check if shape was scaled (resized)
+          const sx = this.scaleX || 1
+          const sy = this.scaleY || 1
+          if (Math.abs(sx - 1) > 0.001 || Math.abs(sy - 1) > 0.001) {
+            // Resize: convert scale to new width/height in feet, snap to 0.5ft
+            const newW = Math.max(0.5, Math.round(s.width * sx * 2) / 2)
+            const newH = Math.max(0.5, Math.round(s.height * sy * 2) / 2)
+            this.set({ scaleX: 1, scaleY: 1, width: newW * ppu, height: newH * ppu })
+            updateSet(s.id, { x: fx, y: fy, width: newW, height: newH })
+          } else {
+            updateSet(s.id, { x: fx, y: fy })
+          }
         })
 
         shape.on('mousedblclick', function () {
@@ -659,33 +674,36 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       fc.add(shape)
 
-      // Per-side wall line rendering with overlap clipping for room sets
-      // Only applies to non-rotated sets (0°) where AABB matches the rect exactly.
-      // For rotated sets, the AABB is the outer envelope and doesn't match the rect outline.
+      // Per-side wall line rendering with overlap clipping
+      // Works for ALL categories at 0° rotation where AABB matches the rect exactly.
       const isRoomSet = !s.category || s.category === 'Set'
       const hasRemovedWalls = s.removedWalls && Object.values(s.removedWalls).some(v => v)
+      const hasHiddenWalls = s.hiddenWalls && Object.values(s.hiddenWalls).some(v => v)
+      const hasWallExtensions = s.wallExtensions && Object.values(s.wallExtensions).some(v => v > 0)
       const setRot = ((s.rotation || 0) % 360 + 360) % 360
-      if (isRoomSet && setRot === 0) {
-        // Compute room AABBs for overlap detection (pixel coords)
+      if (setRot === 0 && (hasRemovedWalls || hasHiddenWalls || hasWallExtensions || isRoomSet)) {
+        // Compute room AABBs for overlap detection (pixel coords) — only for room sets
         const myAABB = getAABB(s, ppu)
-        const otherRoomAABBs = visibleSets
+        const otherRoomAABBs = isRoomSet ? visibleSets
           .filter(o => o.id !== s.id && (!o.category || o.category === 'Set'))
-          .map(o => getAABB(o, ppu))
+          .map(o => getAABB(o, ppu)) : []
 
         // Check if any other room overlaps this one
-        const hasOverlap = otherRoomAABBs.some(oabb => {
+        const hasOverlap = isRoomSet && otherRoomAABBs.some(oabb => {
           const overlap = getOverlapRect(myAABB, oabb)
           return overlap && overlap.w > 2 && overlap.h > 2
         })
 
-        if (hasRemovedWalls || hasOverlap) {
+        if (hasRemovedWalls || hasHiddenWalls || hasWallExtensions || hasOverlap) {
           // Make the rect stroke transparent — use individual wall lines instead
           shape.set({ stroke: 'transparent', strokeWidth: 0 })
 
-          const wallColor = isSelected ? '#ffffff' : isLocked ? '#f59e0b' : s.color
+          const wallColor = isSelected ? '#ffffff' : showLockVis ? '#f59e0b' : s.color
           const wallWidth = isSelected ? 3 : 2
-          const wallDash = isLocked ? [6, 3] : []
+          const wallDash = showLockVis ? [6, 3] : []
           const removedWalls = s.removedWalls || {}
+          const hiddenWalls = s.hiddenWalls || {}
+          const wallExtensions = s.wallExtensions || {}
 
           // At 0° rotation, AABB matches the rect exactly
           const bx = s.x, by = s.y, bw = w, bh = h
@@ -701,19 +719,19 @@ export default function FloorCanvas({ onCanvasSize }) {
           for (const ws of wallSides) {
             // Skip manually removed walls
             if (removedWalls[ws.side]) continue
+            const isHidden = hiddenWalls[ws.side]
+            const extension = (wallExtensions[ws.side] || 0) * ppu // convert feet to pixels
 
             // Compute overlap intervals — portions of this wall inside another room
             const clipIntervals = []
             for (const oabb of otherRoomAABBs) {
               if (ws.dir === 'h') {
-                // Horizontal wall at Y=fixed. Is this Y inside other room's Y range?
                 if (ws.fixed > oabb.y + 1 && ws.fixed < oabb.y + oabb.h - 1) {
                   const oMin = Math.max(ws.rangeMin, oabb.x)
                   const oMax = Math.min(ws.rangeMax, oabb.x + oabb.w)
                   if (oMax > oMin + 1) clipIntervals.push({ min: oMin, max: oMax })
                 }
               } else {
-                // Vertical wall at X=fixed. Is this X inside other room's X range?
                 if (ws.fixed > oabb.x + 1 && ws.fixed < oabb.x + oabb.w - 1) {
                   const oMin = Math.max(ws.rangeMin, oabb.y)
                   const oMax = Math.min(ws.rangeMax, oabb.y + oabb.h)
@@ -756,14 +774,48 @@ export default function FloorCanvas({ onCanvasSize }) {
               } else {
                 x1 = ws.fixed; y1 = seg.min; x2 = ws.fixed; y2 = seg.max
               }
+              // Determine style: hidden walls get ghosted look
+              const lineStroke = isHidden ? (wallColor + '40') : wallColor
+              const lineDash = isHidden ? [4, 4] : (wallDash.length ? [...wallDash] : undefined)
+              const lineWidth = isHidden ? 1 : wallWidth
+
               fc.add(new fabric.Line([x1, y1, x2, y2], {
-                stroke: wallColor,
-                strokeWidth: wallWidth,
-                strokeDashArray: wallDash.length ? [...wallDash] : undefined,
+                stroke: lineStroke,
+                strokeWidth: lineWidth,
+                strokeDashArray: lineDash,
                 selectable: false,
                 evented: false,
                 name: WALL_LINE_PREFIX + s.id + '-' + ws.side + '-' + si,
               }))
+            }
+
+            // Draw wall extension lines beyond the set boundary
+            if (extension > 0 && !isHidden) {
+              const lastSeg = segments[segments.length - 1]
+              const firstSeg = segments[0]
+              if (firstSeg && lastSeg) {
+                let ex1, ey1, ex2, ey2, ex3, ey3, ex4, ey4
+                if (ws.dir === 'h') {
+                  // Extend horizontally: before first segment and after last segment
+                  ex1 = firstSeg.min - extension; ey1 = ws.fixed; ex2 = firstSeg.min; ey2 = ws.fixed
+                  ex3 = lastSeg.max; ey3 = ws.fixed; ex4 = lastSeg.max + extension; ey4 = ws.fixed
+                } else {
+                  ex1 = ws.fixed; ey1 = firstSeg.min - extension; ex2 = ws.fixed; ey2 = firstSeg.min
+                  ex3 = ws.fixed; ey3 = lastSeg.max; ex4 = ws.fixed; ey4 = lastSeg.max + extension
+                }
+                // Extension before
+                fc.add(new fabric.Line([ex1, ey1, ex2, ey2], {
+                  stroke: '#fbbf24', strokeWidth: 2, strokeDashArray: [8, 4],
+                  selectable: false, evented: false,
+                  name: WALL_LINE_PREFIX + s.id + '-' + ws.side + '-ext-before',
+                }))
+                // Extension after
+                fc.add(new fabric.Line([ex3, ey3, ex4, ey4], {
+                  stroke: '#fbbf24', strokeWidth: 2, strokeDashArray: [8, 4],
+                  selectable: false, evented: false,
+                  name: WALL_LINE_PREFIX + s.id + '-' + ws.side + '-ext-after',
+                }))
+              }
             }
           }
         }
