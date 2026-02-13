@@ -741,7 +741,7 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
 //   2. Deduplicate: if another room (with lower array index) shares the same
 //      edge position AND overlaps on the range axis, skip that overlap portion
 //      so we don't get double-thickness walls. The lower-index room "owns" it.
-function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }) {
+function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight, wallRenderMode }) {
   const WALL_T = 0.292
   const EDGE_TOL = 0.5 // feet — tolerance for edge coincidence (dedup only)
   const OPEN_TOL = 1.0  // feet — tolerance for door/window proximity to wall edge
@@ -822,11 +822,14 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
       const isCardinal = rotDeg === 0 || rotDeg === 90 || rotDeg === 180 || rotDeg === 270
 
       // Room center and rotation from get3DPosition
+      const roomRenderMode = b.s.wallRenderMode || wallRenderMode
       roomGroups[b.s.id] = {
         set: b.s,
         segments: [],   // local-space segments (relative to room center, unrotated)
         floor: { cx: b.cx, cz: b.cz, w: b.footprintW, d: b.footprintH, color },
         rotY: b.rotY,
+        renderMode: roomRenderMode,
+        flatStyle: b.s.componentProperties?.style || 'hollywood',
       }
 
       // Walls are defined in LOCAL coordinates (unrotated, centered on room center).
@@ -961,7 +964,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
     }
 
     return roomGroups
-  }, [roomSets, doorSets, windowSets, ppu, defaultWallHeight])
+  }, [roomSets, doorSets, windowSets, ppu, defaultWallHeight, wallRenderMode])
 
   return (
     <>
@@ -976,29 +979,54 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight }
                 <meshStandardMaterial color={group.floor.color} transparent opacity={0.2} side={THREE.DoubleSide} />
               </mesh>
               {/* Wall segments in local (unrotated) space */}
-              {group.segments.map((seg, i) => {
-                const len = seg.rMax - seg.rMin
-                const mid = (seg.rMin + seg.rMax) / 2
-                const yCenter = seg.yBot + seg.yH / 2 + elev
+              {(() => {
+                const isConstruction = group.renderMode === 'construction-front' || group.renderMode === 'construction-rear'
+                const constructionSide = group.renderMode === 'construction-rear' ? 'rear' : 'front'
+                return group.segments.map((seg, i) => {
+                  const len = seg.rMax - seg.rMin
+                  const mid = (seg.rMin + seg.rMax) / 2
 
-                let pos, size
-                if (seg.dir === 'h') {
-                  // Horizontal edge: runs along local X, fixed at local Z
-                  pos = [mid, yCenter, seg.fixedVal]
-                  size = [len, seg.yH, WALL_T]
-                } else {
-                  // Vertical edge: runs along local Z, fixed at local X
-                  pos = [seg.fixedVal, yCenter, mid]
-                  size = [WALL_T, seg.yH, len]
-                }
-
-                return (
-                  <mesh key={`wall-${i}`} position={pos} castShadow={!seg.hidden} receiveShadow={!seg.hidden}>
-                    <boxGeometry args={size} />
-                    <meshStandardMaterial color={seg.color} roughness={0.8} transparent={!!seg.hidden} opacity={seg.hidden ? 0.15 : 1} />
-                  </mesh>
-                )
-              })}
+                  if (seg.dir === 'h') {
+                    // Horizontal edge: runs along local X, fixed at local Z
+                    const pos = [mid, elev, seg.fixedVal]
+                    if (isConstruction && !seg.hidden) {
+                      return (
+                        <FlatConstructionFrame key={`wall-${i}`}
+                          widthFt={len} heightFt={seg.yH} depthFt={WALL_T}
+                          position={pos} rotation={[0, 0, 0]}
+                          side={constructionSide} style={group.flatStyle}
+                        />
+                      )
+                    }
+                    const yCenter = seg.yBot + seg.yH / 2 + elev
+                    return (
+                      <mesh key={`wall-${i}`} position={[mid, yCenter, seg.fixedVal]} castShadow={!seg.hidden} receiveShadow={!seg.hidden}>
+                        <boxGeometry args={[len, seg.yH, WALL_T]} />
+                        <meshStandardMaterial color={seg.color} roughness={0.8} transparent={!!seg.hidden} opacity={seg.hidden ? 0.15 : 1} />
+                      </mesh>
+                    )
+                  } else {
+                    // Vertical edge: runs along local Z, fixed at local X
+                    const pos = [seg.fixedVal, elev, mid]
+                    if (isConstruction && !seg.hidden) {
+                      return (
+                        <FlatConstructionFrame key={`wall-${i}`}
+                          widthFt={len} heightFt={seg.yH} depthFt={WALL_T}
+                          position={pos} rotation={[0, Math.PI / 2, 0]}
+                          side={constructionSide} style={group.flatStyle}
+                        />
+                      )
+                    }
+                    const yCenter = seg.yBot + seg.yH / 2 + elev
+                    return (
+                      <mesh key={`wall-${i}`} position={[seg.fixedVal, yCenter, mid]} castShadow={!seg.hidden} receiveShadow={!seg.hidden}>
+                        <boxGeometry args={[WALL_T, seg.yH, len]} />
+                        <meshStandardMaterial color={seg.color} roughness={0.8} transparent={!!seg.hidden} opacity={seg.hidden ? 0.15 : 1} />
+                      </mesh>
+                    )
+                  }
+                })
+              })()}
             </group>
           </DraggableSetGroup>
         )
@@ -1272,6 +1300,7 @@ function SceneContent({ controlMode, orbitRef, locked3D, rKeyRef }) {
         windowSets={windowSets}
         ppu={ppu}
         defaultWallHeight={defaultWallHeight}
+        wallRenderMode={wallRenderMode}
       />
 
       {/* Building Walls (fixed structural walls) */}
