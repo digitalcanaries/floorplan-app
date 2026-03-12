@@ -22,6 +22,8 @@ function binPack(sets, ppu, canvasW, canvasH) {
   const maxW = canvasW || 2000
 
   return sorted.map(set => {
+    // Don't reposition fixed or locked sets
+    if (set.fixed) return set
     const dims = getSetDims(set, ppu)
     if (curX + dims.w + padding > maxW && curX > padding) {
       curX = padding
@@ -38,7 +40,7 @@ function binPack(sets, ppu, canvasW, canvasH) {
 // Random perturbation of positions
 function perturb(sets, ppu, magnitude) {
   return sets.map(set => {
-    // Don't move FIXED sets
+    // Don't move FIXED or locked-to-PDF sets
     if (set.fixed) return set
     return {
       ...set,
@@ -51,7 +53,13 @@ function perturb(sets, ppu, magnitude) {
 export function autoLayout(sets, rules, ppu, canvasW, canvasH, iterations = 100) {
   if (sets.length === 0) return sets
 
-  // Mark fixed sets based on FIXED rules
+  // Only layout sets that are on the plan
+  const onPlan = sets.filter(s => s.onPlan !== false)
+  const offPlan = sets.filter(s => s.onPlan === false)
+
+  if (onPlan.length === 0) return sets
+
+  // Mark fixed sets based on FIXED rules AND lockedToPdf
   const fixedIds = new Set()
   for (const rule of rules) {
     if (rule.type === 'FIXED') {
@@ -60,14 +68,17 @@ export function autoLayout(sets, rules, ppu, canvasW, canvasH, iterations = 100)
     }
   }
 
-  const markedSets = sets.map(s => ({ ...s, fixed: fixedIds.has(s.id) }))
+  const markedSets = onPlan.map(s => ({
+    ...s,
+    fixed: fixedIds.has(s.id) || s.lockedToPdf,
+  }))
 
   // Start with bin-packed layout
   let best = binPack(markedSets, ppu, canvasW, canvasH)
   // Restore fixed positions
   best = best.map(s => {
     if (s.fixed) {
-      const original = sets.find(o => o.id === s.id)
+      const original = onPlan.find(o => o.id === s.id)
       return { ...s, x: original.x, y: original.y }
     }
     return s
@@ -86,11 +97,13 @@ export function autoLayout(sets, rules, ppu, canvasW, canvasH, iterations = 100)
     }
   }
 
-  // Clean up temp fixed flag
-  return best.map(s => {
+  // Clean up temp fixed flag and merge back with off-plan sets
+  const result = best.map(s => {
     const { fixed, ...rest } = s
     return rest
   })
+
+  return [...result, ...offPlan]
 }
 
 export function tryAlternate(sets, rules, ppu, canvasW, canvasH) {
