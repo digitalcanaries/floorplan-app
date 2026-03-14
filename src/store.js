@@ -500,6 +500,11 @@ const useStore = create((set, get) => ({
       groups: structuredClone(state.groups),
       buildingWalls: structuredClone(state.buildingWalls),
       buildingColumns: structuredClone(state.buildingColumns),
+      // PDF state — needed so undo restores PDF + overlay positions together
+      pdfLayers: structuredClone(state.pdfLayers),
+      pdfPosition: structuredClone(state.pdfPosition),
+      pdfScale: state.pdfScale,
+      pdfRotation: state.pdfRotation,
       nextSetId: state.nextSetId,
       nextRuleId: state.nextRuleId,
       nextAnnotationId: state.nextAnnotationId,
@@ -513,7 +518,8 @@ const useStore = create((set, get) => ({
   },
 
   undo: () => {
-    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = get()
+    const state = get()
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, pdfLayers, pdfPosition, pdfScale, pdfRotation, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = state
     if (_past.length === 0) return
     const currentSnapshot = {
       sets: structuredClone(sets),
@@ -522,10 +528,13 @@ const useStore = create((set, get) => ({
       groups: structuredClone(groups),
       buildingWalls: structuredClone(buildingWalls),
       buildingColumns: structuredClone(buildingColumns),
+      pdfLayers: structuredClone(pdfLayers),
+      pdfPosition: structuredClone(pdfPosition),
+      pdfScale, pdfRotation,
       nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId,
     }
     const previous = _past[_past.length - 1]
-    set({
+    const restoreUpdate = {
       _recording: false,
       sets: structuredClone(previous.sets),
       rules: structuredClone(previous.rules),
@@ -535,20 +544,27 @@ const useStore = create((set, get) => ({
       buildingColumns: structuredClone(previous.buildingColumns || []),
       nextSetId: previous.nextSetId,
       nextRuleId: previous.nextRuleId,
-      nextAnnotationId: previous.nextAnnotationId || get().nextAnnotationId,
-      nextGroupId: previous.nextGroupId || get().nextGroupId,
-      nextBuildingWallId: previous.nextBuildingWallId || get().nextBuildingWallId,
-      nextBuildingColumnId: previous.nextBuildingColumnId || get().nextBuildingColumnId,
+      nextAnnotationId: previous.nextAnnotationId || state.nextAnnotationId,
+      nextGroupId: previous.nextGroupId || state.nextGroupId,
+      nextBuildingWallId: previous.nextBuildingWallId || state.nextBuildingWallId,
+      nextBuildingColumnId: previous.nextBuildingColumnId || state.nextBuildingColumnId,
       _past: _past.slice(0, -1),
       _future: [currentSnapshot, ..._future],
       selectedSetId: null,
       _recording: true,
-    })
+    }
+    // Restore PDF state if present in snapshot (backward compat with old snapshots)
+    if (previous.pdfLayers) restoreUpdate.pdfLayers = structuredClone(previous.pdfLayers)
+    if (previous.pdfPosition) restoreUpdate.pdfPosition = structuredClone(previous.pdfPosition)
+    if (previous.pdfScale !== undefined) restoreUpdate.pdfScale = previous.pdfScale
+    if (previous.pdfRotation !== undefined) restoreUpdate.pdfRotation = previous.pdfRotation
+    set(restoreUpdate)
     get().autosave()
   },
 
   redo: () => {
-    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = get()
+    const state = get()
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, pdfLayers, pdfPosition, pdfScale, pdfRotation, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = state
     if (_future.length === 0) return
     const currentSnapshot = {
       sets: structuredClone(sets),
@@ -557,10 +573,13 @@ const useStore = create((set, get) => ({
       groups: structuredClone(groups),
       buildingWalls: structuredClone(buildingWalls),
       buildingColumns: structuredClone(buildingColumns),
+      pdfLayers: structuredClone(pdfLayers),
+      pdfPosition: structuredClone(pdfPosition),
+      pdfScale, pdfRotation,
       nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId,
     }
     const next = _future[0]
-    set({
+    const restoreUpdate = {
       _recording: false,
       sets: structuredClone(next.sets),
       rules: structuredClone(next.rules),
@@ -570,15 +589,20 @@ const useStore = create((set, get) => ({
       buildingColumns: structuredClone(next.buildingColumns || []),
       nextSetId: next.nextSetId,
       nextRuleId: next.nextRuleId,
-      nextAnnotationId: next.nextAnnotationId || get().nextAnnotationId,
-      nextGroupId: next.nextGroupId || get().nextGroupId,
-      nextBuildingWallId: next.nextBuildingWallId || get().nextBuildingWallId,
-      nextBuildingColumnId: next.nextBuildingColumnId || get().nextBuildingColumnId,
+      nextAnnotationId: next.nextAnnotationId || state.nextAnnotationId,
+      nextGroupId: next.nextGroupId || state.nextGroupId,
+      nextBuildingWallId: next.nextBuildingWallId || state.nextBuildingWallId,
+      nextBuildingColumnId: next.nextBuildingColumnId || state.nextBuildingColumnId,
       _past: [..._past, currentSnapshot],
       _future: _future.slice(1),
       selectedSetId: null,
       _recording: true,
-    })
+    }
+    if (next.pdfLayers) restoreUpdate.pdfLayers = structuredClone(next.pdfLayers)
+    if (next.pdfPosition) restoreUpdate.pdfPosition = structuredClone(next.pdfPosition)
+    if (next.pdfScale !== undefined) restoreUpdate.pdfScale = next.pdfScale
+    if (next.pdfRotation !== undefined) restoreUpdate.pdfRotation = next.pdfRotation
+    set(restoreUpdate)
     get().autosave()
   },
 
