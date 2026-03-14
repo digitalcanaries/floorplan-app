@@ -227,14 +227,23 @@ const useStore = create((set, get) => ({
       lockedToSetOffset: null,    // { dx, dy } relative to set's x,y
       zOrder: 'back',             // 'back' (behind sets) or 'front' (above sets)
     }
-    set({
+    // Only set as active (master) if no active layer exists yet
+    // This prevents overlay PDFs from hijacking the master plan's lock behaviour
+    const currentActive = get().activePdfLayerId
+    const isFirstLayer = !currentActive
+    const updates = {
       pdfLayers: [...get().pdfLayers, layer],
       nextPdfLayerId: id + 1,
-      activePdfLayerId: id,
-      // Sync legacy fields to active layer
-      pdfImage: image, pdfRotation: 0, pdfPosition: { x: 0, y: 0 },
-      pdfScale: 1, pdfOriginalSize: { width: originalWidth, height: originalHeight },
-    })
+    }
+    if (isFirstLayer) {
+      updates.activePdfLayerId = id
+      updates.pdfImage = image
+      updates.pdfRotation = 0
+      updates.pdfPosition = { x: 0, y: 0 }
+      updates.pdfScale = 1
+      updates.pdfOriginalSize = { width: originalWidth, height: originalHeight }
+    }
+    set(updates)
     get().autosave()
     return id
   },
@@ -374,6 +383,7 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
   setPdfPosition: (pos) => {
+    get()._pushHistory()
     const oldPos = get().pdfPosition
     const dx = pos.x - oldPos.x
     const dy = pos.y - oldPos.y
