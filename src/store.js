@@ -223,6 +223,9 @@ const useStore = create((set, get) => ({
       rotation: 0, position: { x: 0, y: 0 },
       scale: 1, originalSize: { width: originalWidth, height: originalHeight },
       visible: true, opacity: 0.6,
+      lockedToSetId: null,        // null = free, or set ID to pin to
+      lockedToSetOffset: null,    // { dx, dy } relative to set's x,y
+      zOrder: 'back',             // 'back' (behind sets) or 'front' (above sets)
     }
     set({
       pdfLayers: [...get().pdfLayers, layer],
@@ -311,6 +314,42 @@ const useStore = create((set, get) => ({
     set({
       pdfLayers: get().pdfLayers.map(l =>
         l.id === id ? { ...l, name } : l
+      ),
+    })
+    get().autosave()
+  },
+
+  // Lock a PDF layer to a set (moves with the set)
+  lockPdfToSet: (pdfLayerId, setId) => {
+    const state = get()
+    const layer = state.pdfLayers.find(l => l.id === pdfLayerId)
+    const parentSet = state.sets.find(s => s.id === setId)
+    if (!layer || !parentSet) return
+    set({
+      pdfLayers: state.pdfLayers.map(l =>
+        l.id === pdfLayerId ? {
+          ...l,
+          lockedToSetId: setId,
+          lockedToSetOffset: { dx: l.position.x - parentSet.x, dy: l.position.y - parentSet.y },
+        } : l
+      ),
+    })
+    get().autosave()
+  },
+
+  unlockPdfFromSet: (pdfLayerId) => {
+    set({
+      pdfLayers: get().pdfLayers.map(l =>
+        l.id === pdfLayerId ? { ...l, lockedToSetId: null, lockedToSetOffset: null } : l
+      ),
+    })
+    get().autosave()
+  },
+
+  setPdfLayerZOrder: (pdfLayerId, zOrder) => {
+    set({
+      pdfLayers: get().pdfLayers.map(l =>
+        l.id === pdfLayerId ? { ...l, zOrder } : l
       ),
     })
     get().autosave()
@@ -590,6 +629,23 @@ const useStore = create((set, get) => ({
   updateSet: (id, updates) => {
     get()._pushHistory()
     set({ sets: get().sets.map(s => s.id === id ? { ...s, ...updates } : s) })
+    // Move any PDF layers locked to this set when position changes
+    if (updates.x !== undefined || updates.y !== undefined) {
+      const state = get()
+      const updatedSet = state.sets.find(s => s.id === id)
+      if (updatedSet) {
+        const lockedPdfs = state.pdfLayers.filter(l => l.lockedToSetId === id)
+        if (lockedPdfs.length > 0) {
+          set({
+            pdfLayers: state.pdfLayers.map(l => {
+              if (l.lockedToSetId !== id) return l
+              const off = l.lockedToSetOffset || { dx: 0, dy: 0 }
+              return { ...l, position: { x: updatedSet.x + off.dx, y: updatedSet.y + off.dy } }
+            }),
+          })
+        }
+      }
+    }
     get().autosave()
   },
   deleteSet: (id) => {
@@ -600,6 +656,10 @@ const useStore = create((set, get) => ({
         .map(s => s.lockedToSetId === id ? { ...s, lockedToSetId: null, lockedToSetOffset: null } : s),
       rules: get().rules.filter(r => r.setA !== id && r.setB !== id),
       selectedSetId: get().selectedSetId === id ? null : get().selectedSetId,
+      // Unlock any PDF layers pinned to the deleted set
+      pdfLayers: get().pdfLayers.map(l =>
+        l.lockedToSetId === id ? { ...l, lockedToSetId: null, lockedToSetOffset: null } : l
+      ),
     })
     get().autosave()
   },

@@ -477,7 +477,7 @@ export default function FloorCanvas({ onCanvasSize }) {
 
   // Compute a structural key: only changes when layers are added, removed, or visibility/opacity/image changes
   // Position and scale changes from dragging should NOT trigger a full rebuild
-  const pdfStructureKey = pdfLayers.map(l => `${l.id}:${l.visible}:${l.opacity}:${l.image ? 1 : 0}`).join('|')
+  const pdfStructureKey = pdfLayers.map(l => `${l.id}:${l.visible}:${l.opacity}:${l.image ? 1 : 0}:${l.zOrder || 'back'}`).join('|')
 
   // Draw PDF layers — only rebuilds when structure changes, not on every drag
   useEffect(() => {
@@ -557,16 +557,28 @@ export default function FloorCanvas({ onCanvasSize }) {
         fImg.on('modified', function () {
           const newPos = { x: this.left, y: this.top }
           const newScale = this.scaleX
-          // Call setPdfPosition FIRST — it computes the delta and moves locked walls/sets
-          if (layerId === useStore.getState().activePdfLayerId) {
-            setPdfPosition(newPos)
-            setPdfScale(newScale)
+          const currentLayer = useStore.getState().pdfLayers.find(l => l.id === layerId)
+
+          if (currentLayer && currentLayer.lockedToSetId) {
+            // Locked to a set — recalculate offset relative to parent set
+            const parentSet = useStore.getState().sets.find(s => s.id === currentLayer.lockedToSetId)
+            if (parentSet) {
+              updatePdfLayer(layerId, {
+                position: newPos,
+                scale: newScale,
+                lockedToSetOffset: { dx: newPos.x - parentSet.x, dy: newPos.y - parentSet.y },
+              })
+            } else {
+              updatePdfLayer(layerId, { position: newPos, scale: newScale })
+            }
+          } else {
+            // Free-floating — call setPdfPosition for master PDF (moves locked walls/sets)
+            if (layerId === useStore.getState().activePdfLayerId) {
+              setPdfPosition(newPos)
+              setPdfScale(newScale)
+            }
+            updatePdfLayer(layerId, { position: newPos, scale: newScale })
           }
-          // Then update the PDF layer data in the store
-          updatePdfLayer(layerId, {
-            position: newPos,
-            scale: newScale,
-          })
         })
 
         // Also remove any stray canvas objects with this name
@@ -575,7 +587,12 @@ export default function FloorCanvas({ onCanvasSize }) {
 
         pdfFabricRefs.current[layerId] = fImg
         fc.add(fImg)
-        fc.sendObjectToBack(fImg)
+
+        // Z-order: back layers go behind everything, front layers stay above sets
+        if ((layer.zOrder || 'back') === 'back') {
+          fc.sendObjectToBack(fImg)
+        }
+        // 'front' layers are just added — they'll be above sets already
 
         loaded++
         if (loaded === layersToAdd.length) {
@@ -1008,6 +1025,17 @@ export default function FloorCanvas({ onCanvasSize }) {
               }
             }
           }
+
+          // Move PDF layers pinned to this set in real-time during drag
+          const dragState = useStore.getState()
+          const dragLockedPdfs = dragState.pdfLayers.filter(l => l.lockedToSetId === s.id)
+          for (const lp of dragLockedPdfs) {
+            const fObj = pdfFabricRefs.current[lp.id]
+            if (fObj) {
+              const off = lp.lockedToSetOffset || { dx: 0, dy: 0 }
+              fObj.set({ left: x + off.dx, top: y + off.dy })
+            }
+          }
         })
 
         shape.on('modified', function () {
@@ -1039,6 +1067,18 @@ export default function FloorCanvas({ onCanvasSize }) {
               }),
             })
             useStore.getState().autosave()
+          }
+
+          // Move PDF layers pinned to this set (visual sync — store already updated via updateSet)
+          const curState = useStore.getState()
+          const lockedPdfs = curState.pdfLayers.filter(l => l.lockedToSetId === s.id)
+          for (const lp of lockedPdfs) {
+            const off = lp.lockedToSetOffset || { dx: 0, dy: 0 }
+            const fObj = pdfFabricRefs.current[lp.id]
+            if (fObj) {
+              fObj.set({ left: fx + off.dx, top: fy + off.dy })
+              fObj.setCoords()
+            }
           }
         })
 

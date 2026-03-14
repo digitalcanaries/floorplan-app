@@ -70,6 +70,22 @@ export default function PdfUploader() {
     if (!file) return
 
     try {
+      // Image files: load directly as data URL
+      if (file.type.startsWith('image/')) {
+        const name = file.name.replace(/\.[^.]+$/, '') || 'Image'
+        const reader = new FileReader()
+        reader.onload = () => {
+          const img = new Image()
+          img.onload = () => addPdfLayer(name, reader.result, img.width, img.height)
+          img.onerror = () => alert('Failed to load image')
+          img.src = reader.result
+        }
+        reader.readAsDataURL(file)
+        e.target.value = ''
+        return
+      }
+
+      // PDF files: render via pdf.js
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
       lastPdfDoc = pdf
@@ -91,8 +107,8 @@ export default function PdfUploader() {
 
       addPdfLayer(name, dataUrl, canvas.width, canvas.height)
     } catch (err) {
-      console.error('PDF load error:', err)
-      alert('Failed to load PDF: ' + err.message)
+      console.error('File load error:', err)
+      alert('Failed to load file: ' + err.message)
     }
 
     e.target.value = ''
@@ -104,9 +120,9 @@ export default function PdfUploader() {
         onClick={() => fileRef.current?.click()}
         className="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm font-medium"
       >
-        {pdfLayers.length === 0 ? 'Upload PDF Floor Plan' : 'Add Another PDF'}
+        {pdfLayers.length === 0 ? 'Upload PDF Floor Plan' : 'Add PDF / Image'}
       </button>
-      <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handleFile} />
+      <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" className="hidden" onChange={handleFile} />
     </div>
   )
 }
