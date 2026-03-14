@@ -35,7 +35,7 @@ export default function TopBar({ canvasSize }) {
   const [savedProjects, setSavedProjectsList] = useState({})
   const [saveFlash, setSaveFlash] = useState(false)
   const [serverProjects, setServerProjects] = useState([])
-  const [serverProjectId, setServerProjectId] = useState(null)
+  const [serverProjectId, setServerProjectId] = useState(() => useStore.getState().getServerProjectId())
   const [shareUsername, setShareUsername] = useState('')
   const [shareError, setShareError] = useState(null)
   const [shareSuccess, setShareSuccess] = useState(null)
@@ -119,6 +119,7 @@ export default function TopBar({ canvasSize }) {
           body: JSON.stringify({ name: projectName, data }),
         })
         setServerProjectId(result.id)
+        useStore.getState().setServerProjectId(result.id)
       }
       setSaveFlash(true)
       setTimeout(() => setSaveFlash(false), 1500)
@@ -139,10 +140,25 @@ export default function TopBar({ canvasSize }) {
         body: JSON.stringify({ name: name.trim(), data }),
       })
       setServerProjectId(result.id)
+      useStore.getState().setServerProjectId(result.id)
       setShowSaveMenu(false)
     } catch (e) {
       alert('Save failed: ' + e.message)
     }
+  }
+
+  // Download backup JSON file with timestamp
+  const handleBackupDownload = () => {
+    const data = exportProject()
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const safeName = projectName.replace(/[^a-zA-Z0-9-_ ]/g, '')
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `BACKUP-${safeName}-${ts}.json`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   // Load server projects list
@@ -160,6 +176,7 @@ export default function TopBar({ canvasSize }) {
       importProject(project.data)
       setProjectName(project.name)
       setServerProjectId(id)
+      useStore.getState().setServerProjectId(id)
       setShowLoadMenu(false)
     } catch (e) {
       alert('Load failed: ' + e.message)
@@ -172,7 +189,10 @@ export default function TopBar({ canvasSize }) {
     try {
       await apiFetch(`/projects/${id}`, { method: 'DELETE' })
       loadServerProjects()
-      if (serverProjectId === id) setServerProjectId(null)
+      if (serverProjectId === id) {
+        setServerProjectId(null)
+        useStore.getState().setServerProjectId(null)
+      }
     } catch (e) {
       alert('Delete failed: ' + e.message)
     }
@@ -579,6 +599,16 @@ export default function TopBar({ canvasSize }) {
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-gray-400">
               Export to File
             </button>
+            <div className="h-px bg-gray-600" />
+            <button onClick={() => { handleBackupDownload(); setShowSaveMenu(false) }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-amber-400">
+              ⬇ Download Backup
+            </button>
+            {serverProjectId && (
+              <div className="px-3 py-1 text-[10px] text-gray-500 border-t border-gray-600">
+                Linked: Server #{serverProjectId}
+              </div>
+            )}
           </div>
         )}
       </div>

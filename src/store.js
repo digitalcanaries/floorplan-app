@@ -2,9 +2,80 @@ import { create } from 'zustand'
 
 const AUTOSAVE_KEY = 'floorplan-app-autosave'
 const SAVES_KEY = 'floorplan-app-saves'
+const SERVER_PROJECT_KEY = 'floorplan-server-project-id'
 
 // Debounced autosave — coalesces rapid changes into a single write
 let _autosaveTimer = null
+let _serverSaveTimer = null
+
+// Build complete save data object from state — single source of truth for all save paths
+function buildSaveData(state, extraFields = {}) {
+  return {
+    version: 1,
+    projectName: state.projectName,
+    lastSaved: new Date().toISOString(),
+    pdfLayers: state.pdfLayers,
+    nextPdfLayerId: state.nextPdfLayerId,
+    activePdfLayerId: state.activePdfLayerId,
+    pdfImage: state.pdfImage,
+    pdfRotation: state.pdfRotation,
+    pdfPosition: state.pdfPosition,
+    pdfScale: state.pdfScale,
+    pdfOriginalSize: state.pdfOriginalSize,
+    pixelsPerUnit: state.pixelsPerUnit,
+    unit: state.unit,
+    gridVisible: state.gridVisible,
+    snapToGrid: state.snapToGrid,
+    snapToSets: state.snapToSets,
+    gridSize: state.gridSize,
+    labelsVisible: state.labelsVisible,
+    labelMode: state.labelMode,
+    labelFontSize: state.labelFontSize,
+    labelColor: state.labelColor,
+    showOverlaps: state.showOverlaps,
+    viewMode: state.viewMode,
+    wallRenderMode: state.wallRenderMode,
+    showDimensions: state.showDimensions,
+    dimMode: state.dimMode,
+    showClearance: state.showClearance,
+    crawlSpace: state.crawlSpace,
+    exclusionZones: state.exclusionZones,
+    nextExclusionZoneId: state.nextExclusionZoneId,
+    showHoverTooltips: state.showHoverTooltips,
+    showLockIndicators: state.showLockIndicators,
+    defaultWallHeight: state.defaultWallHeight,
+    layerVisibility: state.layerVisibility,
+    sets: state.sets,
+    nextSetId: state.nextSetId,
+    rules: state.rules,
+    nextRuleId: state.nextRuleId,
+    annotations: state.annotations,
+    nextAnnotationId: state.nextAnnotationId,
+    groups: state.groups,
+    nextGroupId: state.nextGroupId,
+    buildingWalls: state.buildingWalls,
+    nextBuildingWallId: state.nextBuildingWallId,
+    buildingWallDefaults: state.buildingWallDefaults,
+    buildingWallsVisible: state.buildingWallsVisible,
+    buildingColumns: state.buildingColumns,
+    nextBuildingColumnId: state.nextBuildingColumnId,
+    buildingColumnsVisible: state.buildingColumnsVisible,
+    ...extraFields,
+  }
+}
+
+// Load persisted server project ID
+function loadServerProjectId() {
+  try { return parseInt(localStorage.getItem(SERVER_PROJECT_KEY)) || null }
+  catch { return null }
+}
+
+function saveServerProjectId(id) {
+  try {
+    if (id) localStorage.setItem(SERVER_PROJECT_KEY, String(id))
+    else localStorage.removeItem(SERVER_PROJECT_KEY)
+  } catch { /* ignore */ }
+}
 
 function loadAutosave() {
   try {
@@ -1258,108 +1329,52 @@ const useStore = create((set, get) => ({
 
       const now = new Date().toISOString()
       set({ lastSaved: now })
-      const data = {
-        projectName: state.projectName,
-        lastSaved: now,
-        pdfLayers: state.pdfLayers,
-        nextPdfLayerId: state.nextPdfLayerId,
-        activePdfLayerId: state.activePdfLayerId,
-        pdfImage: state.pdfImage,
-        pdfRotation: state.pdfRotation,
-        pdfPosition: state.pdfPosition,
-        pdfScale: state.pdfScale,
-        pdfOriginalSize: state.pdfOriginalSize,
-        pixelsPerUnit: state.pixelsPerUnit,
-        unit: state.unit,
-        gridVisible: state.gridVisible,
-        snapToGrid: state.snapToGrid,
-        snapToSets: state.snapToSets,
-        gridSize: state.gridSize,
-        labelsVisible: state.labelsVisible,
-        labelMode: state.labelMode,
-        labelFontSize: state.labelFontSize,
-        labelColor: state.labelColor,
-        showOverlaps: state.showOverlaps,
-        viewMode: state.viewMode,
-        wallRenderMode: state.wallRenderMode,
-        showDimensions: state.showDimensions,
-        dimMode: state.dimMode,
-        showClearance: state.showClearance,
-        crawlSpace: state.crawlSpace,
-        exclusionZones: state.exclusionZones,
-        nextExclusionZoneId: state.nextExclusionZoneId,
-        showHoverTooltips: state.showHoverTooltips,
-        showLockIndicators: state.showLockIndicators,
-        defaultWallHeight: state.defaultWallHeight,
-        layerVisibility: state.layerVisibility,
-        sets: state.sets,
-        nextSetId: state.nextSetId,
-        rules: state.rules,
-        nextRuleId: state.nextRuleId,
-        annotations: state.annotations,
-        nextAnnotationId: state.nextAnnotationId,
-        groups: state.groups,
-        nextGroupId: state.nextGroupId,
-        buildingWalls: state.buildingWalls,
-        nextBuildingWallId: state.nextBuildingWallId,
-        buildingWallDefaults: state.buildingWallDefaults,
-        buildingWallsVisible: state.buildingWallsVisible,
-        buildingColumns: state.buildingColumns,
-        nextBuildingColumnId: state.nextBuildingColumnId,
-        buildingColumnsVisible: state.buildingColumnsVisible,
-      }
+      const data = buildSaveData(state, { lastSaved: now })
       try {
         localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data))
       } catch (e) { /* ignore quota errors */ }
+
+      // Periodic server autosave — every 2 minutes if linked to a server project
+      const srvId = loadServerProjectId()
+      if (srvId && !_serverSaveTimer) {
+        _serverSaveTimer = setTimeout(() => {
+          _serverSaveTimer = null
+          get().saveToServer(srvId).catch(() => {})
+        }, 120000) // 2 minutes
+      }
     }, 500)
   },
 
+  // Save to server by project ID (called by autosave and UI)
+  saveToServer: async (projectId) => {
+    const state = get()
+    const data = buildSaveData(state)
+    const token = localStorage.getItem('floorplan-token')
+    if (!token) return
+    const method = projectId ? 'PUT' : 'POST'
+    const url = projectId ? `/api/projects/${projectId}` : '/api/projects'
+    const resp = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ name: state.projectName, data }),
+    })
+    if (!resp.ok) throw new Error('Server save failed: ' + resp.status)
+    const result = await resp.json()
+    if (!projectId && result.id) {
+      saveServerProjectId(result.id)
+    }
+    return result
+  },
+
+  // Get/set the linked server project ID
+  getServerProjectId: () => loadServerProjectId(),
+  setServerProjectId: (id) => saveServerProjectId(id),
+
   // Named project saves (stored in localStorage)
   saveProjectAs: (name) => {
-    const state = get()
     set({ projectName: name })
-    const data = {
-      projectName: name,
-      lastSaved: new Date().toISOString(),
-      pdfLayers: state.pdfLayers,
-      nextPdfLayerId: state.nextPdfLayerId,
-      activePdfLayerId: state.activePdfLayerId,
-      pdfImage: state.pdfImage,
-      pdfRotation: state.pdfRotation,
-      pdfPosition: state.pdfPosition,
-      pdfScale: state.pdfScale,
-      pdfOriginalSize: state.pdfOriginalSize,
-      pixelsPerUnit: state.pixelsPerUnit,
-      unit: state.unit,
-      gridVisible: state.gridVisible,
-      snapToGrid: state.snapToGrid,
-      snapToSets: state.snapToSets,
-      gridSize: state.gridSize,
-      labelsVisible: state.labelsVisible,
-      labelMode: state.labelMode,
-      labelFontSize: state.labelFontSize,
-      labelColor: state.labelColor,
-      showOverlaps: state.showOverlaps,
-      viewMode: state.viewMode,
-      wallRenderMode: state.wallRenderMode,
-      showDimensions: state.showDimensions,
-      showHoverTooltips: state.showHoverTooltips,
-      showLockIndicators: state.showLockIndicators,
-      defaultWallHeight: state.defaultWallHeight,
-      layerVisibility: state.layerVisibility,
-      sets: state.sets,
-      nextSetId: state.nextSetId,
-      rules: state.rules,
-      nextRuleId: state.nextRuleId,
-      annotations: state.annotations,
-      nextAnnotationId: state.nextAnnotationId,
-      groups: state.groups,
-      nextGroupId: state.nextGroupId,
-      buildingWalls: state.buildingWalls,
-      nextBuildingWallId: state.nextBuildingWallId,
-      buildingWallDefaults: state.buildingWallDefaults,
-      buildingWallsVisible: state.buildingWallsVisible,
-    }
+    const state = get()
+    const data = buildSaveData(state, { projectName: name })
     try {
       const saves = loadSavedProjects()
       saves[name] = data
@@ -1390,52 +1405,7 @@ const useStore = create((set, get) => ({
   },
 
   exportProject: () => {
-    const state = get()
-    return {
-      version: 1,
-      projectName: state.projectName,
-      pdfLayers: state.pdfLayers,
-      nextPdfLayerId: state.nextPdfLayerId,
-      activePdfLayerId: state.activePdfLayerId,
-      pdfImage: state.pdfImage,
-      pdfRotation: state.pdfRotation,
-      pdfPosition: state.pdfPosition,
-      pdfScale: state.pdfScale,
-      pdfOriginalSize: state.pdfOriginalSize,
-      pixelsPerUnit: state.pixelsPerUnit,
-      unit: state.unit,
-      gridVisible: state.gridVisible,
-      snapToGrid: state.snapToGrid,
-      snapToSets: state.snapToSets,
-      gridSize: state.gridSize,
-      labelsVisible: state.labelsVisible,
-      labelMode: state.labelMode,
-      labelFontSize: state.labelFontSize,
-      labelColor: state.labelColor,
-      showOverlaps: state.showOverlaps,
-      viewMode: state.viewMode,
-      wallRenderMode: state.wallRenderMode,
-      showDimensions: state.showDimensions,
-      showHoverTooltips: state.showHoverTooltips,
-      showLockIndicators: state.showLockIndicators,
-      defaultWallHeight: state.defaultWallHeight,
-      layerVisibility: state.layerVisibility,
-      sets: state.sets,
-      nextSetId: state.nextSetId,
-      rules: state.rules,
-      nextRuleId: state.nextRuleId,
-      annotations: state.annotations,
-      nextAnnotationId: state.nextAnnotationId,
-      groups: state.groups,
-      nextGroupId: state.nextGroupId,
-      buildingWalls: state.buildingWalls,
-      nextBuildingWallId: state.nextBuildingWallId,
-      buildingWallDefaults: state.buildingWallDefaults,
-      buildingWallsVisible: state.buildingWallsVisible,
-      buildingColumns: state.buildingColumns,
-      nextBuildingColumnId: state.nextBuildingColumnId,
-      buildingColumnsVisible: state.buildingColumnsVisible,
-    }
+    return buildSaveData(get())
   },
 
   importProject: (data) => {

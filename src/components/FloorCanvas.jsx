@@ -722,13 +722,60 @@ export default function FloorCanvas({ onCanvasSize }) {
       .filter(s => s.onPlan !== false && !s.hidden && (layerVisibility[s.category || 'Set'] !== false))
       .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
 
+    // --- Auto-cut: windows/doors automatically cut openings into overlapping sets ---
+    const AUTOCUT_CATS = ['Window', 'Door']
+    const autoCutMap = {} // setId -> [cutout, ...]
+    const cutterItems = visibleSets.filter(s => AUTOCUT_CATS.includes(s.category) && !s.noCut)
+    const parentCandidates = visibleSets.filter(s => !AUTOCUT_CATS.includes(s.category) && s.category !== 'Wall' && !s.noCut)
+
+    for (const comp of cutterItems) {
+      const cRot = (comp.rotation || 0) % 180 !== 0
+      const cw = cRot ? comp.height * ppu : comp.width * ppu
+      const ch = cRot ? comp.width * ppu : comp.height * ppu
+
+      for (const parent of parentCandidates) {
+        if (parent.id === comp.id) continue
+        const pRot = (parent.rotation || 0) % 180 !== 0
+        const pw = pRot ? parent.height * ppu : parent.width * ppu
+        const ph = pRot ? parent.width * ppu : parent.height * ppu
+
+        // AABB overlap check
+        const ox1 = Math.max(comp.x, parent.x)
+        const oy1 = Math.max(comp.y, parent.y)
+        const ox2 = Math.min(comp.x + cw, parent.x + pw)
+        const oy2 = Math.min(comp.y + ch, parent.y + ph)
+
+        if (ox2 <= ox1 || oy2 <= oy1) continue // no overlap
+
+        // Convert overlap to parent's local coordinate space (in ft)
+        const dx = (ox1 - parent.x) / ppu
+        const dy = (oy1 - parent.y) / ppu
+        const ow = (ox2 - ox1) / ppu
+        const oh = (oy2 - oy1) / ppu
+        if (ow < 0.1 || oh < 0.1) continue
+
+        const rot = (parent.rotation || 0) % 360
+        let cutout
+        switch (rot) {
+          case 0:   cutout = { x: dx, y: dy, w: ow, h: oh }; break
+          case 90:  cutout = { x: dy, y: parent.height - dx - ow, w: oh, h: ow }; break
+          case 180: cutout = { x: parent.width - dx - ow, y: parent.height - dy - oh, w: ow, h: oh }; break
+          case 270: cutout = { x: parent.width - dy - oh, y: dx, w: oh, h: ow }; break
+          default:  cutout = { x: dx, y: dy, w: ow, h: oh }
+        }
+        if (!autoCutMap[parent.id]) autoCutMap[parent.id] = []
+        autoCutMap[parent.id].push(cutout)
+      }
+    }
+
     for (const s of visibleSets) {
       const w = s.width * ppu
       const h = s.height * ppu
       // Selection state NOT used for shapes/labels here — applied by separate selection effect
       const isLocked = s.lockedToPdf || !!s.lockedToSetId
       const showLockVis = (s.lockedToPdf && showLockIndicators) // amber visual for PDF lock
-      const hasCutouts = s.cutouts && s.cutouts.length > 0
+      const allCutouts = [...(s.cutouts || []), ...(autoCutMap[s.id] || [])]
+      const hasCutouts = allCutouts.length > 0
       const setOpacity = s.opacity ?? 1
 
       // Compute fill alpha based on opacity and lock state
@@ -759,7 +806,7 @@ export default function FloorCanvas({ onCanvasSize }) {
         })
         fc.add(ghostRect)
 
-        const localPoints = buildCutPolygon(s.width, s.height, s.cutouts)
+        const localPoints = buildCutPolygon(s.width, s.height, allCutouts)
         const pixelPoints = localPoints.map(p => ({ x: p.x * ppu, y: p.y * ppu }))
         shape = new fabric.Polygon(pixelPoints, {
           left: s.x,
