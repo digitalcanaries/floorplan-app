@@ -62,7 +62,7 @@ export async function extractPdfTextOCR(onProgress) {
 }
 
 export default function PdfUploader() {
-  const { setPdfImage } = useStore()
+  const { addPdfLayer, pdfLayers } = useStore()
   const fileRef = useRef(null)
 
   const handleFile = async (e) => {
@@ -85,7 +85,11 @@ export default function PdfUploader() {
       await page.render({ canvasContext: ctx, viewport }).promise
       const dataUrl = canvas.toDataURL('image/png')
       lastPdfCanvasDataUrl = dataUrl
-      setPdfImage(dataUrl)
+
+      // Derive a name from the filename (strip extension)
+      const name = file.name.replace(/\.pdf$/i, '') || 'Floor Plan'
+
+      addPdfLayer(name, dataUrl, canvas.width, canvas.height)
     } catch (err) {
       console.error('PDF load error:', err)
       alert('Failed to load PDF: ' + err.message)
@@ -100,7 +104,7 @@ export default function PdfUploader() {
         onClick={() => fileRef.current?.click()}
         className="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm font-medium"
       >
-        Upload PDF Floor Plan
+        {pdfLayers.length === 0 ? 'Upload PDF Floor Plan' : 'Add Another PDF'}
       </button>
       <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handleFile} />
     </div>

@@ -3,6 +3,9 @@ import { create } from 'zustand'
 const AUTOSAVE_KEY = 'floorplan-app-autosave'
 const SAVES_KEY = 'floorplan-app-saves'
 
+// Debounced autosave — coalesces rapid changes into a single write
+let _autosaveTimer = null
+
 function loadAutosave() {
   try {
     const data = localStorage.getItem(AUTOSAVE_KEY)
@@ -23,9 +26,23 @@ const saved = loadAutosave()
 
 const useStore = create((set, get) => ({
   // PDF / Canvas state
+  // PDF layers — each PDF is an independent layer with its own position/scale/visibility
+  // Legacy single-PDF fields kept for backward compat on load, migrated to pdfLayers
+  pdfLayers: saved?.pdfLayers || (saved?.pdfImage ? [{
+    id: 1, name: 'Floor Plan', image: saved.pdfImage,
+    rotation: saved.pdfRotation || 0, position: saved.pdfPosition || { x: 0, y: 0 },
+    scale: saved.pdfScale || 1, originalSize: saved.pdfOriginalSize || null,
+    visible: true, opacity: 0.6,
+  }] : []),
+  nextPdfLayerId: saved?.nextPdfLayerId || 2,
+  activePdfLayerId: saved?.activePdfLayerId || (saved?.pdfImage ? 1 : null),
+
+  // Legacy fields — kept for backward compat reads, but pdfLayers is the source of truth
   pdfImage: saved?.pdfImage || null,
   pdfRotation: saved?.pdfRotation || 0,
   pdfPosition: saved?.pdfPosition || { x: 0, y: 0 },
+  pdfScale: saved?.pdfScale || 1,
+  pdfOriginalSize: saved?.pdfOriginalSize || null,
   pixelsPerUnit: saved?.pixelsPerUnit || 1,
   unit: saved?.unit || 'ft',
   gridVisible: saved?.gridVisible ?? true,
@@ -34,6 +51,8 @@ const useStore = create((set, get) => ({
   gridSize: saved?.gridSize || 50,
   labelsVisible: saved?.labelsVisible ?? true,
   labelMode: saved?.labelMode ?? 'inline',
+  labelFontSize: saved?.labelFontSize ?? 0, // 0 = auto-scale
+  labelColor: saved?.labelColor ?? '#ffffff',
   showOverlaps: saved?.showOverlaps ?? true,
   viewMode: saved?.viewMode ?? 'plan',
   wallRenderMode: saved?.wallRenderMode ?? 'finished', // 'finished', 'construction-front', 'construction-rear'
@@ -70,16 +89,38 @@ const useStore = create((set, get) => ({
   buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },
   buildingWallsVisible: saved?.buildingWallsVisible ?? true,
 
+  // Building Columns (structural columns locked to PDF)
+  buildingColumns: saved?.buildingColumns || [],
+  nextBuildingColumnId: saved?.nextBuildingColumnId || 1,
+  buildingColumnsVisible: saved?.buildingColumnsVisible ?? true,
+
   // Drawing mode (transient, not persisted)
-  drawingMode: null, // null | 'building-wall'
+  drawingMode: null, // null | 'building-wall' | 'place-column' | 'place-component' | 'exclusion-zone'
   drawingWallPoints: [], // temporary points while drawing
   drawingWallSnap: true, // auto H/V snap while drawing
+  // Column placement mode — stores the template for the next column to place
+  columnPlacementTemplate: null, // { width, height, shape, color, label }
+  selectedBuildingColumnId: null, // currently selected column on canvas
 
   // Layers visibility (by category)
   layerVisibility: saved?.layerVisibility || {},
 
   // Dimension lines
   showDimensions: saved?.showDimensions ?? false,
+  dimMode: saved?.dimMode ?? 'selected', // 'selected' | 'all'
+
+  // Clearance zone visibility
+  showClearance: saved?.showClearance ?? false,
+
+  // Exclusion zones (layout no-go areas)
+  exclusionZones: saved?.exclusionZones ?? [],
+  nextExclusionZoneId: saved?.nextExclusionZoneId || 1,
+
+  // Crawl space — minimum gap between sets (in feet)
+  crawlSpace: saved?.crawlSpace ?? 2, // 1.5 (18"), 2 (2'), 3 (3'), 0 (off)
+
+  // Layout score (shown after auto-layout runs)
+  layoutScore: null,
 
   // Hover tooltips
   showHoverTooltips: saved?.showHoverTooltips ?? true,
@@ -99,12 +140,129 @@ const useStore = create((set, get) => ({
   // UI state
   sidebarTab: 'sets',
   calibrating: false,
+  pendingFitAll: false,
   calibrationPoints: [],
   selectedSetId: null,
 
-  // PDF actions
+  // PDF Layer actions
+  addPdfLayer: (name, image, originalWidth, originalHeight) => {
+    const id = get().nextPdfLayerId
+    const layer = {
+      id, name, image,
+      rotation: 0, position: { x: 0, y: 0 },
+      scale: 1, originalSize: { width: originalWidth, height: originalHeight },
+      visible: true, opacity: 0.6,
+    }
+    set({
+      pdfLayers: [...get().pdfLayers, layer],
+      nextPdfLayerId: id + 1,
+      activePdfLayerId: id,
+      // Sync legacy fields to active layer
+      pdfImage: image, pdfRotation: 0, pdfPosition: { x: 0, y: 0 },
+      pdfScale: 1, pdfOriginalSize: { width: originalWidth, height: originalHeight },
+    })
+    get().autosave()
+    return id
+  },
+
+  removePdfLayer: (id) => {
+    const layers = get().pdfLayers.filter(l => l.id !== id)
+    const activeId = get().activePdfLayerId === id
+      ? (layers.length > 0 ? layers[0].id : null)
+      : get().activePdfLayerId
+    const active = layers.find(l => l.id === activeId)
+    set({
+      pdfLayers: layers,
+      activePdfLayerId: activeId,
+      pdfImage: active?.image || null,
+      pdfRotation: active?.rotation || 0,
+      pdfPosition: active?.position || { x: 0, y: 0 },
+      pdfScale: active?.scale || 1,
+      pdfOriginalSize: active?.originalSize || null,
+    })
+    get().autosave()
+  },
+
+  setActivePdfLayer: (id) => {
+    const layer = get().pdfLayers.find(l => l.id === id)
+    if (!layer) return
+    set({
+      activePdfLayerId: id,
+      pdfImage: layer.image,
+      pdfRotation: layer.rotation,
+      pdfPosition: layer.position,
+      pdfScale: layer.scale,
+      pdfOriginalSize: layer.originalSize,
+    })
+  },
+
+  togglePdfLayerVisibility: (id) => {
+    set({
+      pdfLayers: get().pdfLayers.map(l =>
+        l.id === id ? { ...l, visible: !l.visible } : l
+      ),
+    })
+    get().autosave()
+  },
+
+  setPdfLayerOpacity: (id, opacity) => {
+    set({
+      pdfLayers: get().pdfLayers.map(l =>
+        l.id === id ? { ...l, opacity } : l
+      ),
+    })
+    get().autosave()
+  },
+
+  updatePdfLayer: (id, updates) => {
+    set({
+      pdfLayers: get().pdfLayers.map(l =>
+        l.id === id ? { ...l, ...updates } : l
+      ),
+    })
+    // Sync legacy fields if this is the active layer
+    // Skip position/scale — those are handled by setPdfPosition/setPdfScale
+    // which also move locked walls/sets (calling set() here would bypass that)
+    if (get().activePdfLayerId === id) {
+      const layer = get().pdfLayers.find(l => l.id === id)
+      if (layer) {
+        set({
+          pdfImage: layer.image,
+          pdfRotation: layer.rotation,
+          pdfOriginalSize: layer.originalSize,
+        })
+      }
+    }
+    get().autosave()
+  },
+
+  renamePdfLayer: (id, name) => {
+    set({
+      pdfLayers: get().pdfLayers.map(l =>
+        l.id === id ? { ...l, name } : l
+      ),
+    })
+    get().autosave()
+  },
+
+  // Legacy PDF actions (now sync to active layer)
   setPdfImage: (img) => set({ pdfImage: img }),
-  setPdfRotation: (r) => set({ pdfRotation: r }),
+  setPdfRotation: (r) => {
+    set({ pdfRotation: r })
+    const activeId = get().activePdfLayerId
+    if (activeId) {
+      set({ pdfLayers: get().pdfLayers.map(l => l.id === activeId ? { ...l, rotation: r } : l) })
+    }
+    get().autosave()
+  },
+  setPdfScale: (s) => {
+    set({ pdfScale: s })
+    const activeId = get().activePdfLayerId
+    if (activeId) {
+      set({ pdfLayers: get().pdfLayers.map(l => l.id === activeId ? { ...l, scale: s } : l) })
+    }
+    get().autosave()
+  },
   setPdfPosition: (pos) => {
     const oldPos = get().pdfPosition
     const dx = pos.x - oldPos.x
@@ -117,7 +275,15 @@ const useStore = create((set, get) => ({
     const updatedBW = get().buildingWalls.map(w =>
       w.lockedToPdf ? { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy } : w
     )
-    set({ pdfPosition: pos, sets: updatedSets, buildingWalls: updatedBW })
+    // Move all locked-to-PDF building columns with the PDF
+    const updatedBC = get().buildingColumns.map(c =>
+      c.lockedToPdf ? { ...c, x: c.x + dx, y: c.y + dy } : c
+    )
+    set({ pdfPosition: pos, sets: updatedSets, buildingWalls: updatedBW, buildingColumns: updatedBC })
+    const activeId = get().activePdfLayerId
+    if (activeId) {
+      set({ pdfLayers: get().pdfLayers.map(l => l.id === activeId ? { ...l, position: pos } : l) })
+    }
     get().autosave()
   },
   setPixelsPerUnit: (p) => {
@@ -146,6 +312,14 @@ const useStore = create((set, get) => ({
   },
   setLabelMode: (mode) => {
     set({ labelMode: mode })
+    get().autosave()
+  },
+  setLabelFontSize: (size) => {
+    set({ labelFontSize: size })
+    get().autosave()
+  },
+  setLabelColor: (color) => {
+    set({ labelColor: color })
     get().autosave()
   },
   setShowOverlaps: (v) => {
@@ -188,16 +362,18 @@ const useStore = create((set, get) => ({
     const state = get()
     if (!state._recording) return
     const snapshot = {
-      sets: JSON.parse(JSON.stringify(state.sets)),
-      rules: JSON.parse(JSON.stringify(state.rules)),
-      annotations: JSON.parse(JSON.stringify(state.annotations)),
-      groups: JSON.parse(JSON.stringify(state.groups)),
-      buildingWalls: JSON.parse(JSON.stringify(state.buildingWalls)),
+      sets: structuredClone(state.sets),
+      rules: structuredClone(state.rules),
+      annotations: structuredClone(state.annotations),
+      groups: structuredClone(state.groups),
+      buildingWalls: structuredClone(state.buildingWalls),
+      buildingColumns: structuredClone(state.buildingColumns),
       nextSetId: state.nextSetId,
       nextRuleId: state.nextRuleId,
       nextAnnotationId: state.nextAnnotationId,
       nextGroupId: state.nextGroupId,
       nextBuildingWallId: state.nextBuildingWallId,
+      nextBuildingColumnId: state.nextBuildingColumnId,
     }
     const past = [...state._past, snapshot]
     if (past.length > state._maxHistory) past.shift()
@@ -205,29 +381,32 @@ const useStore = create((set, get) => ({
   },
 
   undo: () => {
-    const { _past, _future, sets, rules, annotations, groups, buildingWalls, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId } = get()
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = get()
     if (_past.length === 0) return
     const currentSnapshot = {
-      sets: JSON.parse(JSON.stringify(sets)),
-      rules: JSON.parse(JSON.stringify(rules)),
-      annotations: JSON.parse(JSON.stringify(annotations)),
-      groups: JSON.parse(JSON.stringify(groups)),
-      buildingWalls: JSON.parse(JSON.stringify(buildingWalls)),
-      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId,
+      sets: structuredClone(sets),
+      rules: structuredClone(rules),
+      annotations: structuredClone(annotations),
+      groups: structuredClone(groups),
+      buildingWalls: structuredClone(buildingWalls),
+      buildingColumns: structuredClone(buildingColumns),
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId,
     }
     const previous = _past[_past.length - 1]
     set({
       _recording: false,
-      sets: JSON.parse(JSON.stringify(previous.sets)),
-      rules: JSON.parse(JSON.stringify(previous.rules)),
-      annotations: JSON.parse(JSON.stringify(previous.annotations || [])),
-      groups: JSON.parse(JSON.stringify(previous.groups || [])),
-      buildingWalls: JSON.parse(JSON.stringify(previous.buildingWalls || [])),
+      sets: structuredClone(previous.sets),
+      rules: structuredClone(previous.rules),
+      annotations: structuredClone(previous.annotations || []),
+      groups: structuredClone(previous.groups || []),
+      buildingWalls: structuredClone(previous.buildingWalls || []),
+      buildingColumns: structuredClone(previous.buildingColumns || []),
       nextSetId: previous.nextSetId,
       nextRuleId: previous.nextRuleId,
       nextAnnotationId: previous.nextAnnotationId || get().nextAnnotationId,
       nextGroupId: previous.nextGroupId || get().nextGroupId,
       nextBuildingWallId: previous.nextBuildingWallId || get().nextBuildingWallId,
+      nextBuildingColumnId: previous.nextBuildingColumnId || get().nextBuildingColumnId,
       _past: _past.slice(0, -1),
       _future: [currentSnapshot, ..._future],
       selectedSetId: null,
@@ -237,29 +416,32 @@ const useStore = create((set, get) => ({
   },
 
   redo: () => {
-    const { _past, _future, sets, rules, annotations, groups, buildingWalls, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId } = get()
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = get()
     if (_future.length === 0) return
     const currentSnapshot = {
-      sets: JSON.parse(JSON.stringify(sets)),
-      rules: JSON.parse(JSON.stringify(rules)),
-      annotations: JSON.parse(JSON.stringify(annotations)),
-      groups: JSON.parse(JSON.stringify(groups)),
-      buildingWalls: JSON.parse(JSON.stringify(buildingWalls)),
-      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId,
+      sets: structuredClone(sets),
+      rules: structuredClone(rules),
+      annotations: structuredClone(annotations),
+      groups: structuredClone(groups),
+      buildingWalls: structuredClone(buildingWalls),
+      buildingColumns: structuredClone(buildingColumns),
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId,
     }
     const next = _future[0]
     set({
       _recording: false,
-      sets: JSON.parse(JSON.stringify(next.sets)),
-      rules: JSON.parse(JSON.stringify(next.rules)),
-      annotations: JSON.parse(JSON.stringify(next.annotations || [])),
-      groups: JSON.parse(JSON.stringify(next.groups || [])),
-      buildingWalls: JSON.parse(JSON.stringify(next.buildingWalls || [])),
+      sets: structuredClone(next.sets),
+      rules: structuredClone(next.rules),
+      annotations: structuredClone(next.annotations || []),
+      groups: structuredClone(next.groups || []),
+      buildingWalls: structuredClone(next.buildingWalls || []),
+      buildingColumns: structuredClone(next.buildingColumns || []),
       nextSetId: next.nextSetId,
       nextRuleId: next.nextRuleId,
       nextAnnotationId: next.nextAnnotationId || get().nextAnnotationId,
       nextGroupId: next.nextGroupId || get().nextGroupId,
       nextBuildingWallId: next.nextBuildingWallId || get().nextBuildingWallId,
+      nextBuildingColumnId: next.nextBuildingColumnId || get().nextBuildingColumnId,
       _past: [..._past, currentSnapshot],
       _future: _future.slice(1),
       selectedSetId: null,
@@ -277,8 +459,12 @@ const useStore = create((set, get) => ({
     get()._pushHistory()
     const id = get().nextSetId
     const maxZ = get().sets.length > 0 ? Math.max(...get().sets.map(s => s.zIndex || 0)) : 0
+    // Stagger new set positions so they don't all stack at (100,100)
+    const onPlanCount = get().sets.filter(s => s.onPlan !== false).length
+    const defaultX = s.x ?? (100 + (onPlanCount % 5) * 150)
+    const defaultY = s.y ?? (100 + Math.floor(onPlanCount / 5) * 150)
     const newSet = {
-      ...s, id, x: s.x ?? 100, y: s.y ?? 100, rotation: 0, lockedToPdf: false, onPlan: true,
+      ...s, id, x: defaultX, y: defaultY, rotation: 0, lockedToPdf: false, onPlan: true,
       category: s.category || 'Set', noCut: s.noCut ?? false, labelHidden: false,
       labelPosition: s.labelPosition || 'top-left',
       wallGap: s.wallGap || 0, opacity: s.opacity ?? 1, zIndex: s.zIndex ?? (maxZ + 1),
@@ -291,6 +477,8 @@ const useStore = create((set, get) => ({
       wallExtensions: s.wallExtensions || null, // { top: 0, right: 0, bottom: 0, left: 0 } in feet or null
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
+      lockedToSetId: s.lockedToSetId ?? null,
+      lockedToSetOffset: s.lockedToSetOffset ?? null,
     }
     set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
     get().autosave()
@@ -319,6 +507,8 @@ const useStore = create((set, get) => ({
       wallExtensions: s.wallExtensions || null,
       componentTypeId: s.componentTypeId || null,
       componentProperties: s.componentProperties || null,
+      lockedToSetId: s.lockedToSetId ?? null,
+      lockedToSetOffset: s.lockedToSetOffset ?? null,
     }))
     set({
       sets: [...get().sets, ...created],
@@ -334,12 +524,46 @@ const useStore = create((set, get) => ({
   deleteSet: (id) => {
     get()._pushHistory()
     set({
-      sets: get().sets.filter(s => s.id !== id),
+      sets: get().sets
+        .filter(s => s.id !== id)
+        .map(s => s.lockedToSetId === id ? { ...s, lockedToSetId: null, lockedToSetOffset: null } : s),
       rules: get().rules.filter(r => r.setA !== id && r.setB !== id),
       selectedSetId: get().selectedSetId === id ? null : get().selectedSetId,
     })
     get().autosave()
   },
+  // Lock a component to a parent set (moves with it)
+  lockToSet: (componentId, parentSetId) => {
+    get()._pushHistory()
+    const state = get()
+    const component = state.sets.find(s => s.id === componentId)
+    const parent = state.sets.find(s => s.id === parentSetId)
+    if (!component || !parent) return
+    // Prevent circular locking
+    if (parent.lockedToSetId === componentId) return
+    set({
+      sets: state.sets.map(s =>
+        s.id === componentId
+          ? { ...s, lockedToSetId: parentSetId, lockedToSetOffset: { dx: s.x - parent.x, dy: s.y - parent.y }, lockedToPdf: false }
+          : s
+      ),
+    })
+    get().autosave()
+  },
+
+  // Unlock a component from its parent set
+  unlockFromSet: (componentId) => {
+    get()._pushHistory()
+    set({
+      sets: get().sets.map(s =>
+        s.id === componentId
+          ? { ...s, lockedToSetId: null, lockedToSetOffset: null }
+          : s
+      ),
+    })
+    get().autosave()
+  },
+
   setSets: (sets) => {
     get()._pushHistory()
     set({ sets })
@@ -390,9 +614,11 @@ const useStore = create((set, get) => ({
   removeSetFromPlan: (id) => {
     get()._pushHistory()
     set({
-      sets: get().sets.map(s =>
-        s.id === id ? { ...s, onPlan: false, lockedToPdf: false } : s
-      ),
+      sets: get().sets.map(s => {
+        if (s.id === id) return { ...s, onPlan: false, lockedToPdf: false }
+        if (s.lockedToSetId === id) return { ...s, lockedToSetId: null, lockedToSetOffset: null }
+        return s
+      }),
     })
     get().autosave()
   },
@@ -400,9 +626,10 @@ const useStore = create((set, get) => ({
   // Add set back to the plan
   addSetToPlan: (id) => {
     get()._pushHistory()
+    const onPlanCount = get().sets.filter(s => s.onPlan !== false).length
     set({
       sets: get().sets.map(s =>
-        s.id === id ? { ...s, onPlan: true, x: 100, y: 100 } : s
+        s.id === id ? { ...s, onPlan: true, x: 100 + (onPlanCount % 5) * 150, y: 100 + Math.floor(onPlanCount / 5) * 150 } : s
       ),
     })
     get().autosave()
@@ -412,9 +639,11 @@ const useStore = create((set, get) => ({
   hideSet: (id) => {
     get()._pushHistory()
     set({
-      sets: get().sets.map(s =>
-        s.id === id ? { ...s, hidden: true } : s
-      ),
+      sets: get().sets.map(s => {
+        if (s.id === id) return { ...s, hidden: true }
+        if (s.lockedToSetId === id) return { ...s, hidden: true }
+        return s
+      }),
     })
     get().autosave()
   },
@@ -584,6 +813,44 @@ const useStore = create((set, get) => ({
     set({ showDimensions: v })
     get().autosave()
   },
+  setDimMode: (v) => {
+    set({ dimMode: v })
+    get().autosave()
+  },
+
+  // Clearance zone toggle
+  setShowClearance: (v) => {
+    set({ showClearance: v })
+    get().autosave()
+  },
+
+  // Crawl space
+  setCrawlSpace: (v) => { set({ crawlSpace: v }); get().autosave() },
+
+  // Layout score
+  setLayoutScore: (v) => set({ layoutScore: v }),
+
+  // Exclusion zones
+  addExclusionZone: (zone) => {
+    const id = get().nextExclusionZoneId
+    set({
+      exclusionZones: [...get().exclusionZones, { ...zone, id }],
+      nextExclusionZoneId: id + 1,
+    })
+    get().autosave()
+  },
+  updateExclusionZone: (id, updates) => {
+    set({
+      exclusionZones: get().exclusionZones.map(z => z.id === id ? { ...z, ...updates } : z),
+    })
+    get().autosave()
+  },
+  deleteExclusionZone: (id) => {
+    set({
+      exclusionZones: get().exclusionZones.filter(z => z.id !== id),
+    })
+    get().autosave()
+  },
 
   // Hover tooltips toggle
   setShowHoverTooltips: (v) => {
@@ -739,9 +1006,101 @@ const useStore = create((set, get) => ({
     get().autosave()
   },
 
+  // Building Column CRUD (structural columns locked to PDF)
+  addBuildingColumn: (col) => {
+    get()._pushHistory()
+    const id = get().nextBuildingColumnId
+    const pdfPos = get().pdfPosition
+    const newCol = {
+      id,
+      x: col.x, y: col.y,
+      width: col.width || 1,   // feet
+      height: col.height || 1, // feet
+      shape: col.shape || 'square', // 'round' or 'square'
+      color: col.color || '#8B5CF6',
+      label: col.label || '',
+      lockedToPdf: true,
+      pdfOffsetX: col.x - pdfPos.x,
+      pdfOffsetY: col.y - pdfPos.y,
+    }
+    set({ buildingColumns: [...get().buildingColumns, newCol], nextBuildingColumnId: id + 1 })
+    get().autosave()
+    return id
+  },
+  updateBuildingColumn: (id, updates) => {
+    get()._pushHistory()
+    set({ buildingColumns: get().buildingColumns.map(c => c.id === id ? { ...c, ...updates } : c) })
+    get().autosave()
+  },
+  deleteBuildingColumn: (id) => {
+    get()._pushHistory()
+    set({ buildingColumns: get().buildingColumns.filter(c => c.id !== id) })
+    get().autosave()
+  },
+  clearBuildingColumns: () => {
+    get()._pushHistory()
+    set({ buildingColumns: [], nextBuildingColumnId: 1 })
+    get().autosave()
+  },
+  toggleBuildingColumnLock: (id) => {
+    get()._pushHistory()
+    const state = get()
+    const pdfPos = state.pdfPosition
+    const updatedCols = state.buildingColumns.map(c => {
+      if (c.id !== id) return c
+      if (c.lockedToPdf) {
+        const { pdfOffsetX, pdfOffsetY, ...rest } = c
+        return { ...rest, lockedToPdf: false }
+      } else {
+        return {
+          ...c,
+          lockedToPdf: true,
+          pdfOffsetX: c.x - pdfPos.x,
+          pdfOffsetY: c.y - pdfPos.y,
+        }
+      }
+    })
+    set({ buildingColumns: updatedCols })
+    get().autosave()
+  },
+
   // Drawing mode
-  setDrawingMode: (mode) => set({ drawingMode: mode, drawingWallPoints: [] }),
-  cancelDrawing: () => set({ drawingMode: null, drawingWallPoints: [] }),
+  setDrawingMode: (mode) => set({ drawingMode: mode, drawingWallPoints: [], columnPlacementTemplate: null, componentPlacementTemplate: null }),
+  cancelDrawing: () => set({ drawingMode: null, drawingWallPoints: [], columnPlacementTemplate: null, componentPlacementTemplate: null }),
+
+  // Column placement mode
+  startColumnPlacement: (template) => set({
+    drawingMode: 'place-column',
+    columnPlacementTemplate: template,
+    drawingWallPoints: [],
+  }),
+
+  // Generic component placement mode (windows, doors, walls, furniture, etc.)
+  startComponentPlacement: (template) => set({
+    drawingMode: 'place-component',
+    componentPlacementTemplate: template,
+    drawingWallPoints: [],
+  }),
+  setSelectedBuildingColumnId: (id) => set({ selectedBuildingColumnId: id }),
+
+  // Duplicate a building column (offset by a small amount)
+  duplicateBuildingColumn: (id) => {
+    const state = get()
+    const col = state.buildingColumns.find(c => c.id === id)
+    if (!col) return
+    const ppu = state.pixelsPerUnit || 50
+    const offset = ppu * 2 // offset by 2 feet
+    const newId = get().addBuildingColumn({
+      x: col.x + offset,
+      y: col.y + offset,
+      width: col.width,
+      height: col.height,
+      shape: col.shape,
+      color: col.color,
+      label: col.label,
+    })
+    set({ selectedBuildingColumnId: newId })
+  },
   breakDrawingChain: () => set({ drawingWallPoints: [] }), // break chain but stay in drawing mode
   setDrawingWallSnap: (v) => set({ drawingWallSnap: v }),
   addDrawingPoint: (pt) => {
@@ -816,9 +1175,13 @@ const useStore = create((set, get) => ({
     get()._pushHistory()
     const group = get().groups.find(g => g.id === groupId)
     if (!group) return
-    const updatedSets = get().sets.map(s =>
-      group.setIds.includes(s.id) ? { ...s, x: s.x + dx, y: s.y + dy } : s
-    )
+    const movedIds = new Set(group.setIds)
+    const updatedSets = get().sets.map(s => {
+      if (movedIds.has(s.id)) return { ...s, x: s.x + dx, y: s.y + dy }
+      // Also move children locked to any moved parent
+      if (s.lockedToSetId && movedIds.has(s.lockedToSetId)) return { ...s, x: s.x + dx, y: s.y + dy }
+      return s
+    })
     set({ sets: updatedSets })
     get().autosave()
   },
@@ -869,47 +1232,86 @@ const useStore = create((set, get) => ({
 
   // Save/Load
   autosave: () => {
-    const state = get()
-    const now = new Date().toISOString()
-    set({ lastSaved: now })
-    const data = {
-      projectName: state.projectName,
-      lastSaved: now,
-      pdfImage: state.pdfImage,
-      pdfRotation: state.pdfRotation,
-      pdfPosition: state.pdfPosition,
-      pixelsPerUnit: state.pixelsPerUnit,
-      unit: state.unit,
-      gridVisible: state.gridVisible,
-      snapToGrid: state.snapToGrid,
-      snapToSets: state.snapToSets,
-      gridSize: state.gridSize,
-      labelsVisible: state.labelsVisible,
-      labelMode: state.labelMode,
-      showOverlaps: state.showOverlaps,
-      viewMode: state.viewMode,
-      wallRenderMode: state.wallRenderMode,
-      showDimensions: state.showDimensions,
-      showHoverTooltips: state.showHoverTooltips,
-      showLockIndicators: state.showLockIndicators,
-      defaultWallHeight: state.defaultWallHeight,
-      layerVisibility: state.layerVisibility,
-      sets: state.sets,
-      nextSetId: state.nextSetId,
-      rules: state.rules,
-      nextRuleId: state.nextRuleId,
-      annotations: state.annotations,
-      nextAnnotationId: state.nextAnnotationId,
-      groups: state.groups,
-      nextGroupId: state.nextGroupId,
-      buildingWalls: state.buildingWalls,
-      nextBuildingWallId: state.nextBuildingWallId,
-      buildingWallDefaults: state.buildingWallDefaults,
-      buildingWallsVisible: state.buildingWallsVisible,
-    }
-    try {
-      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data))
-    } catch (e) { /* ignore quota errors */ }
+    // Debounce: coalesce rapid changes into a single localStorage write
+    if (_autosaveTimer) clearTimeout(_autosaveTimer)
+    _autosaveTimer = setTimeout(() => {
+      _autosaveTimer = null
+      const state = get()
+
+      // SAFETY: Never overwrite autosave with empty/default state
+      // This prevents hot-reload from wiping real work
+      if (!state.pdfImage && state.pdfLayers.length === 0 && state.sets.length === 0 &&
+          state.buildingWalls.length === 0 && state.buildingColumns.length === 0 &&
+          state.annotations.length === 0) {
+        return // nothing to save — don't wipe existing autosave
+      }
+
+      // Rotate backups: keep previous 2 autosaves
+      try {
+        const prev = localStorage.getItem(AUTOSAVE_KEY)
+        if (prev) {
+          const backup1 = localStorage.getItem(AUTOSAVE_KEY + '-backup-1')
+          if (backup1) localStorage.setItem(AUTOSAVE_KEY + '-backup-2', backup1)
+          localStorage.setItem(AUTOSAVE_KEY + '-backup-1', prev)
+        }
+      } catch (e) { /* ignore quota errors on backups */ }
+
+      const now = new Date().toISOString()
+      set({ lastSaved: now })
+      const data = {
+        projectName: state.projectName,
+        lastSaved: now,
+        pdfLayers: state.pdfLayers,
+        nextPdfLayerId: state.nextPdfLayerId,
+        activePdfLayerId: state.activePdfLayerId,
+        pdfImage: state.pdfImage,
+        pdfRotation: state.pdfRotation,
+        pdfPosition: state.pdfPosition,
+        pdfScale: state.pdfScale,
+        pdfOriginalSize: state.pdfOriginalSize,
+        pixelsPerUnit: state.pixelsPerUnit,
+        unit: state.unit,
+        gridVisible: state.gridVisible,
+        snapToGrid: state.snapToGrid,
+        snapToSets: state.snapToSets,
+        gridSize: state.gridSize,
+        labelsVisible: state.labelsVisible,
+        labelMode: state.labelMode,
+        labelFontSize: state.labelFontSize,
+        labelColor: state.labelColor,
+        showOverlaps: state.showOverlaps,
+        viewMode: state.viewMode,
+        wallRenderMode: state.wallRenderMode,
+        showDimensions: state.showDimensions,
+        dimMode: state.dimMode,
+        showClearance: state.showClearance,
+        crawlSpace: state.crawlSpace,
+        exclusionZones: state.exclusionZones,
+        nextExclusionZoneId: state.nextExclusionZoneId,
+        showHoverTooltips: state.showHoverTooltips,
+        showLockIndicators: state.showLockIndicators,
+        defaultWallHeight: state.defaultWallHeight,
+        layerVisibility: state.layerVisibility,
+        sets: state.sets,
+        nextSetId: state.nextSetId,
+        rules: state.rules,
+        nextRuleId: state.nextRuleId,
+        annotations: state.annotations,
+        nextAnnotationId: state.nextAnnotationId,
+        groups: state.groups,
+        nextGroupId: state.nextGroupId,
+        buildingWalls: state.buildingWalls,
+        nextBuildingWallId: state.nextBuildingWallId,
+        buildingWallDefaults: state.buildingWallDefaults,
+        buildingWallsVisible: state.buildingWallsVisible,
+        buildingColumns: state.buildingColumns,
+        nextBuildingColumnId: state.nextBuildingColumnId,
+        buildingColumnsVisible: state.buildingColumnsVisible,
+      }
+      try {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data))
+      } catch (e) { /* ignore quota errors */ }
+    }, 500)
   },
 
   // Named project saves (stored in localStorage)
@@ -919,9 +1321,14 @@ const useStore = create((set, get) => ({
     const data = {
       projectName: name,
       lastSaved: new Date().toISOString(),
+      pdfLayers: state.pdfLayers,
+      nextPdfLayerId: state.nextPdfLayerId,
+      activePdfLayerId: state.activePdfLayerId,
       pdfImage: state.pdfImage,
       pdfRotation: state.pdfRotation,
       pdfPosition: state.pdfPosition,
+      pdfScale: state.pdfScale,
+      pdfOriginalSize: state.pdfOriginalSize,
       pixelsPerUnit: state.pixelsPerUnit,
       unit: state.unit,
       gridVisible: state.gridVisible,
@@ -930,6 +1337,8 @@ const useStore = create((set, get) => ({
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
       labelMode: state.labelMode,
+      labelFontSize: state.labelFontSize,
+      labelColor: state.labelColor,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
       wallRenderMode: state.wallRenderMode,
@@ -985,9 +1394,14 @@ const useStore = create((set, get) => ({
     return {
       version: 1,
       projectName: state.projectName,
+      pdfLayers: state.pdfLayers,
+      nextPdfLayerId: state.nextPdfLayerId,
+      activePdfLayerId: state.activePdfLayerId,
       pdfImage: state.pdfImage,
       pdfRotation: state.pdfRotation,
       pdfPosition: state.pdfPosition,
+      pdfScale: state.pdfScale,
+      pdfOriginalSize: state.pdfOriginalSize,
       pixelsPerUnit: state.pixelsPerUnit,
       unit: state.unit,
       gridVisible: state.gridVisible,
@@ -996,6 +1410,8 @@ const useStore = create((set, get) => ({
       gridSize: state.gridSize,
       labelsVisible: state.labelsVisible,
       labelMode: state.labelMode,
+      labelFontSize: state.labelFontSize,
+      labelColor: state.labelColor,
       showOverlaps: state.showOverlaps,
       viewMode: state.viewMode,
       wallRenderMode: state.wallRenderMode,
@@ -1016,15 +1432,33 @@ const useStore = create((set, get) => ({
       nextBuildingWallId: state.nextBuildingWallId,
       buildingWallDefaults: state.buildingWallDefaults,
       buildingWallsVisible: state.buildingWallsVisible,
+      buildingColumns: state.buildingColumns,
+      nextBuildingColumnId: state.nextBuildingColumnId,
+      buildingColumnsVisible: state.buildingColumnsVisible,
     }
   },
 
   importProject: (data) => {
+    // Migrate legacy single-PDF to pdfLayers if needed
+    const pdfLayers = data.pdfLayers || (data.pdfImage ? [{
+      id: 1, name: 'Floor Plan', image: data.pdfImage,
+      rotation: data.pdfRotation || 0, position: data.pdfPosition || { x: 0, y: 0 },
+      scale: data.pdfScale || 1, originalSize: data.pdfOriginalSize || null,
+      visible: true, opacity: 0.6,
+    }] : [])
+    const activePdfLayerId = data.activePdfLayerId || (pdfLayers.length > 0 ? pdfLayers[0].id : null)
+    const activeLayer = pdfLayers.find(l => l.id === activePdfLayerId)
+
     set({
       projectName: data.projectName || 'Untitled Project',
-      pdfImage: data.pdfImage || null,
-      pdfRotation: data.pdfRotation || 0,
-      pdfPosition: data.pdfPosition || { x: 0, y: 0 },
+      pdfLayers,
+      nextPdfLayerId: data.nextPdfLayerId || (pdfLayers.length > 0 ? Math.max(...pdfLayers.map(l => l.id)) + 1 : 1),
+      activePdfLayerId,
+      pdfImage: activeLayer?.image || data.pdfImage || null,
+      pdfRotation: activeLayer?.rotation || data.pdfRotation || 0,
+      pdfPosition: activeLayer?.position || data.pdfPosition || { x: 0, y: 0 },
+      pdfScale: activeLayer?.scale || data.pdfScale || 1,
+      pdfOriginalSize: activeLayer?.originalSize || data.pdfOriginalSize || null,
       pixelsPerUnit: data.pixelsPerUnit || 1,
       unit: data.unit || 'ft',
       gridVisible: data.gridVisible ?? true,
@@ -1033,10 +1467,17 @@ const useStore = create((set, get) => ({
       gridSize: data.gridSize || 50,
       labelsVisible: data.labelsVisible ?? true,
       labelMode: data.labelMode ?? 'inline',
+      labelFontSize: data.labelFontSize ?? 0,
+      labelColor: data.labelColor ?? '#ffffff',
       showOverlaps: data.showOverlaps ?? true,
       viewMode: data.viewMode ?? 'plan',
       wallRenderMode: data.wallRenderMode ?? 'finished',
       showDimensions: data.showDimensions ?? false,
+      dimMode: data.dimMode ?? 'selected',
+      showClearance: data.showClearance ?? false,
+      crawlSpace: data.crawlSpace ?? 2,
+      exclusionZones: data.exclusionZones ?? [],
+      nextExclusionZoneId: data.nextExclusionZoneId || 1,
       showHoverTooltips: data.showHoverTooltips ?? true,
       showLockIndicators: data.showLockIndicators ?? true,
       defaultWallHeight: data.defaultWallHeight ?? 10,
@@ -1053,19 +1494,90 @@ const useStore = create((set, get) => ({
       nextBuildingWallId: data.nextBuildingWallId || 1,
       buildingWallDefaults: data.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },
       buildingWallsVisible: data.buildingWallsVisible ?? true,
+      buildingColumns: data.buildingColumns || [],
+      nextBuildingColumnId: data.nextBuildingColumnId || 1,
+      buildingColumnsVisible: data.buildingColumnsVisible ?? true,
       selectedSetId: null,
       _past: [], _future: [],
+      pendingFitAll: true,
     })
     get().autosave()
+  },
+
+  // Import ONLY sets (and optionally building walls/columns) from another project,
+  // keeping the current PDF, scale, and canvas state intact.
+  importSetsOnly: (data, { includeBuildingWalls = true, includeBuildingColumns = true } = {}) => {
+    const state = get()
+    const incomingSets = data.sets || []
+    const incomingWalls = data.buildingWalls || []
+    const incomingCols = data.buildingColumns || []
+
+    if (incomingSets.length === 0 && incomingWalls.length === 0 && incomingCols.length === 0) {
+      return { setsAdded: 0, wallsAdded: 0, columnsAdded: 0 }
+    }
+
+    // Rescale: if source project had a different pixelsPerUnit, reposition objects
+    const srcPPU = data.pixelsPerUnit || 1
+    const dstPPU = state.pixelsPerUnit || 1
+    const scaleFactor = dstPPU / srcPPU
+
+    // Re-ID sets so they don't clash with existing
+    let nextId = state.nextSetId
+    const newSets = incomingSets.map(s => ({
+      ...s,
+      id: nextId++,
+      x: (s.x || 0) * scaleFactor,
+      y: (s.y || 0) * scaleFactor,
+      lockedToPdf: false,
+    }))
+
+    // Re-ID building walls
+    let nextBWId = state.nextBuildingWallId
+    const newWalls = includeBuildingWalls ? incomingWalls.map(w => ({
+      ...w,
+      id: nextBWId++,
+      x1: (w.x1 || 0) * scaleFactor,
+      y1: (w.y1 || 0) * scaleFactor,
+      x2: (w.x2 || 0) * scaleFactor,
+      y2: (w.y2 || 0) * scaleFactor,
+      lockedToPdf: false,
+    })) : []
+
+    // Re-ID building columns
+    let nextBCId = state.nextBuildingColumnId
+    const newCols = includeBuildingColumns ? incomingCols.map(c => ({
+      ...c,
+      id: nextBCId++,
+      x: (c.x || 0) * scaleFactor,
+      y: (c.y || 0) * scaleFactor,
+      lockedToPdf: false,
+    })) : []
+
+    set({
+      sets: [...state.sets, ...newSets],
+      nextSetId: nextId,
+      buildingWalls: [...state.buildingWalls, ...newWalls],
+      nextBuildingWallId: nextBWId,
+      buildingColumns: [...state.buildingColumns, ...newCols],
+      nextBuildingColumnId: nextBCId,
+    })
+    get().autosave()
+
+    return { setsAdded: newSets.length, wallsAdded: newWalls.length, columnsAdded: newCols.length }
   },
 
   clearAll: () => {
     set({
       projectName: 'Untitled Project',
       lastSaved: null,
+      pdfLayers: [],
+      nextPdfLayerId: 1,
+      activePdfLayerId: null,
       pdfImage: null,
       pdfRotation: 0,
       pdfPosition: { x: 0, y: 0 },
+      pdfScale: 1,
+      pdfOriginalSize: null,
       pixelsPerUnit: 1,
       sets: [],
       nextSetId: 1,
@@ -1079,6 +1591,9 @@ const useStore = create((set, get) => ({
       nextBuildingWallId: 1,
       buildingWallDefaults: { thickness: 1, height: 13, color: '#8B4513' },
       buildingWallsVisible: true,
+      buildingColumns: [],
+      nextBuildingColumnId: 1,
+      buildingColumnsVisible: true,
       drawingMode: null,
       drawingWallPoints: [],
       layerVisibility: {},
@@ -1086,6 +1601,47 @@ const useStore = create((set, get) => ({
       _past: [], _future: [],
     })
     localStorage.removeItem(AUTOSAVE_KEY)
+  },
+
+  // Restore from a backup autosave (backup-1 = most recent, backup-2 = older)
+  restoreBackup: (level = 1) => {
+    try {
+      const backupKey = AUTOSAVE_KEY + '-backup-' + level
+      const data = localStorage.getItem(backupKey)
+      if (!data) {
+        alert(`No backup-${level} found.`)
+        return false
+      }
+      const parsed = JSON.parse(data)
+      get().importProject(parsed)
+      alert(`Restored from backup-${level} (saved: ${parsed.lastSaved || 'unknown'}).\n${parsed.sets?.length || 0} sets, ${parsed.buildingWalls?.length || 0} walls, ${parsed.buildingColumns?.length || 0} columns.`)
+      return true
+    } catch (e) {
+      alert('Failed to restore backup: ' + e.message)
+      return false
+    }
+  },
+
+  // List available backups
+  getBackupInfo: () => {
+    const backups = []
+    for (let i = 1; i <= 2; i++) {
+      try {
+        const data = localStorage.getItem(AUTOSAVE_KEY + '-backup-' + i)
+        if (data) {
+          const parsed = JSON.parse(data)
+          backups.push({
+            level: i,
+            savedAt: parsed.lastSaved || 'unknown',
+            sets: parsed.sets?.length || 0,
+            walls: parsed.buildingWalls?.length || 0,
+            columns: parsed.buildingColumns?.length || 0,
+            projectName: parsed.projectName || 'Untitled',
+          })
+        }
+      } catch (e) { /* ignore */ }
+    }
+    return backups
   },
 }))
 

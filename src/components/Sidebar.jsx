@@ -9,9 +9,14 @@ import LayersTab from './LayersTab.jsx'
 const MIN_WIDTH = 200
 const MAX_WIDTH = 600
 const DEFAULT_WIDTH = 288
+const COLLAPSED_WIDTH = 36
 
 export default function Sidebar() {
-  const { sidebarTab, setSidebarTab } = useStore()
+  const sidebarTab = useStore(s => s.sidebarTab)
+  const setSidebarTab = useStore(s => s.setSidebarTab)
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('floorplan-sidebar-collapsed') === 'true' } catch { return false }
+  })
   const [width, setWidth] = useState(() => {
     try {
       const saved = localStorage.getItem('floorplan-sidebar-width')
@@ -23,6 +28,14 @@ export default function Sidebar() {
   const startX = useRef(0)
   const startWidth = useRef(DEFAULT_WIDTH)
   const latestWidth = useRef(width)
+
+  const toggleCollapse = useCallback(() => {
+    setCollapsed(prev => {
+      const next = !prev
+      try { localStorage.setItem('floorplan-sidebar-collapsed', String(next)) } catch {}
+      return next
+    })
+  }, [])
 
   const onMouseDown = useCallback((e) => {
     e.preventDefault()
@@ -55,55 +68,89 @@ export default function Sidebar() {
   }, [])
 
   return (
-    <div className="flex shrink-0 overflow-hidden" style={{ width }}>
-      <div className="flex-1 bg-gray-800 text-white flex flex-col overflow-hidden">
-        <PdfUploader />
-
-        <div className="flex border-b border-gray-700">
-          <button
-            onClick={() => setSidebarTab('sets')}
-            className={`flex-1 px-3 py-2 text-sm font-medium ${
-              sidebarTab === 'sets' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Sets
+    <div className="flex shrink-0 overflow-hidden transition-all duration-200" style={{ width: collapsed ? COLLAPSED_WIDTH : width }}>
+      {collapsed ? (
+        /* Collapsed strip — vertical tab buttons */
+        <div className="w-full bg-gray-800 text-white flex flex-col items-center py-1 gap-1">
+          <button onClick={toggleCollapse}
+            className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-700 text-gray-400 hover:text-white text-xs"
+            title="Expand sidebar">
+            &#x25B6;
           </button>
-          <button
-            onClick={() => setSidebarTab('build')}
-            className={`flex-1 px-3 py-2 text-sm font-medium ${
-              sidebarTab === 'build' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Build
-          </button>
-          <button
-            onClick={() => setSidebarTab('rules')}
-            className={`flex-1 px-3 py-2 text-sm font-medium ${
-              sidebarTab === 'rules' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Rules
-          </button>
-          <button
-            onClick={() => setSidebarTab('layers')}
-            className={`flex-1 px-3 py-2 text-sm font-medium ${
-              sidebarTab === 'layers' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            Layers
-          </button>
+          <div className="h-px w-5 bg-gray-700 my-0.5" />
+          {[
+            { key: 'sets', label: 'S', title: 'Sets' },
+            { key: 'build', label: 'B', title: 'Build' },
+            { key: 'rules', label: 'R', title: 'Rules' },
+            { key: 'layers', label: 'L', title: 'Layers' },
+          ].map(t => (
+            <button key={t.key}
+              onClick={() => { setSidebarTab(t.key); setCollapsed(false) }}
+              className={`w-7 h-7 flex items-center justify-center rounded text-xs font-medium ${
+                sidebarTab === t.key ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+              }`}
+              title={t.title}>
+              {t.label}
+            </button>
+          ))}
         </div>
+      ) : (
+        <>
+          <div className="flex-1 bg-gray-800 text-white flex flex-col overflow-hidden">
+            <PdfUploader />
 
-        <div className="flex-1 overflow-y-auto">
-          {sidebarTab === 'sets' ? <SetsTab /> : sidebarTab === 'build' ? <BuildTab /> : sidebarTab === 'layers' ? <LayersTab /> : <RulesTab />}
-        </div>
-      </div>
-      {/* Resize handle on right edge */}
-      <div
-        onMouseDown={onMouseDown}
-        className="w-1.5 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-500/70 transition-colors bg-gray-700 shrink-0"
-        title="Drag to resize sidebar"
-      />
+            <div className="flex border-b border-gray-700">
+              <button onClick={toggleCollapse}
+                className="px-1.5 py-2 text-gray-500 hover:text-white text-xs shrink-0"
+                title="Collapse sidebar">
+                &#x25C0;
+              </button>
+              <button
+                onClick={() => setSidebarTab('sets')}
+                className={`flex-1 px-3 py-2 text-sm font-medium ${
+                  sidebarTab === 'sets' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Sets
+              </button>
+              <button
+                onClick={() => setSidebarTab('build')}
+                className={`flex-1 px-3 py-2 text-sm font-medium ${
+                  sidebarTab === 'build' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Build
+              </button>
+              <button
+                onClick={() => setSidebarTab('rules')}
+                className={`flex-1 px-3 py-2 text-sm font-medium ${
+                  sidebarTab === 'rules' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Rules
+              </button>
+              <button
+                onClick={() => setSidebarTab('layers')}
+                className={`flex-1 px-3 py-2 text-sm font-medium ${
+                  sidebarTab === 'layers' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Layers
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {sidebarTab === 'sets' ? <SetsTab /> : sidebarTab === 'build' ? <BuildTab /> : sidebarTab === 'layers' ? <LayersTab /> : <RulesTab />}
+            </div>
+          </div>
+          {/* Resize handle on right edge */}
+          <div
+            onMouseDown={onMouseDown}
+            className="w-1.5 cursor-col-resize hover:bg-indigo-500/50 active:bg-indigo-500/70 transition-colors bg-gray-700 shrink-0"
+            title="Drag to resize sidebar"
+          />
+        </>
+      )}
     </div>
   )
 }

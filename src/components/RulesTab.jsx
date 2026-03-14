@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import useStore from '../store.js'
 
 const RULE_TYPES = ['NEAR', 'CONNECT', 'SEPARATE', 'FIXED']
 
-export default function RulesTab() {
-  const { sets, rules, addRule, deleteRule } = useStore()
+export default memo(function RulesTab() {
+  const {
+    sets, rules, addRule, deleteRule,
+    exclusionZones, deleteExclusionZone,
+    drawingMode, setDrawingMode, cancelDrawing,
+  } = useStore()
   const [form, setForm] = useState({ type: 'NEAR', setA: '', setB: '', distance: '100' })
 
   const handleAdd = (e) => {
@@ -33,6 +37,7 @@ export default function RulesTab() {
 
   return (
     <div className="p-3 flex flex-col gap-3">
+      {/* Layout Rules */}
       <form onSubmit={handleAdd} className="flex flex-col gap-2">
         <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}
           className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white">
@@ -86,6 +91,51 @@ export default function RulesTab() {
           </div>
         ))}
       </div>
+
+      {/* Exclusion Zones (No-Go Areas) */}
+      <div className="border-t border-gray-700 pt-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-gray-300 font-medium">Exclusion Zones</span>
+          <span className="text-[10px] text-gray-500">{exclusionZones.length} zone{exclusionZones.length !== 1 ? 's' : ''}</span>
+        </div>
+
+        {drawingMode === 'exclusion-zone' ? (
+          <div className="flex items-center gap-2 px-2 py-1.5 bg-red-900/40 border border-red-600/50 rounded text-xs mb-2">
+            <span className="text-red-300 animate-pulse">●</span>
+            <span className="text-red-200 flex-1">Click+drag on canvas to draw zone</span>
+            <button onClick={cancelDrawing}
+              className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-xs text-white">
+              Done
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setDrawingMode('exclusion-zone')}
+            className="w-full px-2 py-1.5 bg-red-800 hover:bg-red-700 rounded text-xs text-white mb-2">
+            ⛔ Draw Exclusion Zone
+          </button>
+        )}
+
+        <p className="text-[10px] text-gray-500 mb-2">
+          Auto-layout avoids these areas. Pillars on set edges are tolerated.
+        </p>
+
+        {exclusionZones.length > 0 && (
+          <div className="flex flex-col gap-1">
+            {exclusionZones.map(zone => (
+              <div key={zone.id}
+                className="flex items-center gap-2 px-2 py-1.5 bg-gray-700/50 rounded text-xs">
+                <span className="text-red-400">⛔</span>
+                <span className="flex-1 text-gray-300">{zone.label || 'No-Go'}</span>
+                <span className="text-[10px] text-gray-500">
+                  {Math.round(zone.w)}×{Math.round(zone.h)}px
+                </span>
+                <button onClick={() => deleteExclusionZone(zone.id)}
+                  className="text-red-400 hover:text-red-300 text-xs">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
-}
+})

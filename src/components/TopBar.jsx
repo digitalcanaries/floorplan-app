@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import useStore from '../store.js'
-import { autoLayout, tryAlternate } from '../engine/autoLayout.js'
+import { autoLayout, tryAlternate, layoutByCategory, layoutCompact, layoutShuffle, buildObstacles } from '../engine/autoLayout.js'
+import { scoreLayout } from '../engine/scoring.js'
 import { apiFetch } from '../api.js'
 import useAuthStore from '../authStore.js'
 import UserMenu from './UserMenu.jsx'
@@ -11,17 +12,22 @@ export default function TopBar({ canvasSize }) {
     sets, rules, pixelsPerUnit, setSets, pdfRotation, setPdfRotation,
     gridVisible, setGridVisible, snapToGrid, setSnapToGrid, snapToSets, setSnapToSets,
     labelsVisible, setLabelsVisible, labelMode, setLabelMode, showOverlaps, setShowOverlaps,
-    exportProject, importProject, clearAll,
+    exportProject, importProject, importSetsOnly, clearAll, restoreBackup, getBackupInfo,
     calibrating, setCalibrating,
     projectName, setProjectName, lastSaved,
     saveProjectAs, getSavedProjects, loadSavedProject, deleteSavedProject,
     undo, redo, _past, _future,
     viewMode, setViewMode,
-    showDimensions, setShowDimensions,
+    showDimensions, setShowDimensions, dimMode, setDimMode,
+    showClearance, setShowClearance,
+    crawlSpace, setCrawlSpace,
+    exclusionZones, layoutScore, setLayoutScore,
     annotations, sets: allSets, pixelsPerUnit: ppu,
+    pdfLayers, activePdfLayerId, pdfOriginalSize, setPdfScale, unit,
   } = useStore()
 
   const loadInputRef = useRef(null)
+  const loadSetsInputRef = useRef(null)
   const [showSaveMenu, setShowSaveMenu] = useState(false)
   const [showLoadMenu, setShowLoadMenu] = useState(false)
   const [editingName, setEditingName] = useState(false)
@@ -35,6 +41,7 @@ export default function TopBar({ canvasSize }) {
   const [shareSuccess, setShareSuccess] = useState(null)
   const { user } = useAuthStore()
   const [showHelp, setShowHelp] = useState(false)
+  const [showPngMenu, setShowPngMenu] = useState(false)
 
   // Flash the autosave indicator briefly when lastSaved changes
   useEffect(() => {
@@ -44,19 +51,31 @@ export default function TopBar({ canvasSize }) {
     return () => clearTimeout(t)
   }, [lastSaved])
 
-  const handleAutoLayout = () => {
-    const result = autoLayout(sets, rules, pixelsPerUnit, canvasSize.w, canvasSize.h)
+  const { buildingColumns } = useStore()
+  const obstacles = buildObstacles(buildingColumns, exclusionZones, pixelsPerUnit)
+
+  const layoutOpts = { crawlSpace }
+
+  const runLayout = (fn) => {
+    const result = fn(sets, rules, pixelsPerUnit, canvasSize.w, canvasSize.h, obstacles, layoutOpts)
     setSets(result)
+    const onPlan = result.filter(s => s.onPlan !== false)
+    const score = Math.round(scoreLayout(onPlan, rules, pixelsPerUnit, obstacles, layoutOpts))
+    setLayoutScore(score)
   }
 
-  const handleTryAlternate = () => {
-    const result = tryAlternate(sets, rules, pixelsPerUnit, canvasSize.w, canvasSize.h)
-    setSets(result)
-  }
+  const handleAutoLayout = () => runLayout(autoLayout)
+  const handleTryAlternate = () => runLayout(tryAlternate)
+  const handleLayoutByCategory = () => runLayout(layoutByCategory)
+  const handleLayoutCompact = () => runLayout(layoutCompact)
+  const handleLayoutShuffle = () => runLayout(layoutShuffle)
+
+  const [showStrategyMenu, setShowStrategyMenu] = useState(false)
 
   const handleClearLayout = () => {
     const cleared = sets.map(s => ({ ...s, x: 100, y: 100 }))
     setSets(cleared)
+    setLayoutScore(null)
   }
 
   // Save to file
@@ -193,6 +212,24 @@ export default function TopBar({ canvasSize }) {
     e.target.value = ''
   }
 
+  // Import only sets (& walls) from a project file, keeping current PDF/scale
+  const handleImportSetsFile = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result)
+        const result = importSetsOnly(data)
+        alert(`Imported ${result.setsAdded} sets and ${result.wallsAdded} building walls.\nSets have been rescaled to match your current calibration.`)
+      } catch (err) {
+        alert('Invalid project file: ' + err.message)
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
   const handleExportPNG = () => {
     const canvas = document.querySelector('canvas.upper-canvas, canvas')
     if (!canvas) return
@@ -202,6 +239,12 @@ export default function TopBar({ canvasSize }) {
     link.download = `${projectName.replace(/[^a-zA-Z0-9-_ ]/g, '')}.png`
     link.href = target.toDataURL('image/png')
     link.click()
+  }
+
+  const handleSaveToDrive = () => {
+    handleExportPNG()
+    window.open('https://drive.google.com/drive/my-drive', '_blank')
+    setShowPngMenu(false)
   }
 
   const handleExportPDF = () => {
@@ -340,6 +383,24 @@ export default function TopBar({ canvasSize }) {
         {calibrating ? 'Calibrating...' : 'Calibrate Scale'}
       </button>
 
+      {pdfLayers.length > 0 && (
+        <button onClick={() => {
+          const activeLayer = pdfLayers.find(l => l.id === activePdfLayerId)
+          if (!activeLayer?.originalSize) {
+            alert('No active PDF layer or missing dimensions. Upload a PDF first.')
+            return
+          }
+          const input = prompt(`Enter the real-world width of "${activeLayer.name}" in ${unit}:`)
+          const realWidth = parseFloat(input)
+          if (!realWidth || realWidth <= 0) return
+          const newScale = (realWidth * pixelsPerUnit) / activeLayer.originalSize.width
+          setPdfScale(newScale)
+        }}
+          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">
+          Scale PDF
+        </button>
+      )}
+
       <label className="flex items-center gap-1 text-xs cursor-pointer">
         <input type="checkbox" checked={gridVisible} onChange={e => setGridVisible(e.target.checked)} />
         Grid
@@ -375,10 +436,44 @@ export default function TopBar({ canvasSize }) {
         Overlaps
       </label>
 
+      {/* Dimension lines — Off / Sel / All */}
+      <div className="flex items-center gap-0.5 text-[10px]">
+        <span className="text-gray-400 mr-0.5">Dims</span>
+        {['off', 'selected', 'all'].map(m => (
+          <button key={m}
+            onClick={() => {
+              if (m === 'off') { setShowDimensions(false) }
+              else { setShowDimensions(true); setDimMode(m) }
+            }}
+            className={`px-1.5 py-0.5 rounded ${
+              (m === 'off' && !showDimensions) || (showDimensions && dimMode === m && m !== 'off')
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+            }`}
+          >
+            {m === 'off' ? 'Off' : m === 'selected' ? 'Sel' : 'All'}
+          </button>
+        ))}
+      </div>
+
+      {/* Clearance zones toggle */}
       <label className="flex items-center gap-1 text-xs cursor-pointer">
-        <input type="checkbox" checked={showDimensions} onChange={e => setShowDimensions(e.target.checked)} />
-        Dims
+        <input type="checkbox" checked={showClearance} onChange={e => setShowClearance(e.target.checked)} />
+        Clear
       </label>
+
+      {/* Crawl space selector */}
+      <div className="flex items-center gap-1 text-xs">
+        <span className="text-gray-400">Gap</span>
+        <select value={crawlSpace} onChange={e => setCrawlSpace(parseFloat(e.target.value))}
+          className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
+          title="Crawl space between sets">
+          <option value={0}>Off</option>
+          <option value={1.5}>18"</option>
+          <option value={2}>2'</option>
+          <option value={3}>3'</option>
+        </select>
+      </div>
 
       <div className="h-5 w-px bg-gray-600" />
 
@@ -409,14 +504,47 @@ export default function TopBar({ canvasSize }) {
         className="px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-xs">
         Auto Layout
       </button>
-      <button onClick={handleTryAlternate} disabled={sets.length === 0}
-        className="px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-xs">
-        Try Alternate
-      </button>
+
+      {/* Strategy dropdown */}
+      <div className="relative">
+        <button onClick={() => setShowStrategyMenu(!showStrategyMenu)} disabled={sets.length === 0}
+          className="px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-xs">
+          Try ▾
+        </button>
+        {showStrategyMenu && (
+          <div className="absolute top-full left-0 mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg z-50 min-w-[140px]"
+            onMouseLeave={() => setShowStrategyMenu(false)}>
+            <button onClick={() => { handleTryAlternate(); setShowStrategyMenu(false) }}
+              className="w-full px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-gray-700">
+              🔀 Shuffle
+            </button>
+            <button onClick={() => { handleLayoutByCategory(); setShowStrategyMenu(false) }}
+              className="w-full px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-gray-700">
+              📁 By Category
+            </button>
+            <button onClick={() => { handleLayoutCompact(); setShowStrategyMenu(false) }}
+              className="w-full px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-gray-700">
+              📐 Compact
+            </button>
+            <button onClick={() => { handleLayoutShuffle(); setShowStrategyMenu(false) }}
+              className="w-full px-3 py-1.5 text-left text-xs text-gray-200 hover:bg-gray-700">
+              🎲 Random (3× best)
+            </button>
+          </div>
+        )}
+      </div>
+
       <button onClick={handleClearLayout} disabled={sets.length === 0}
         className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded text-xs">
         Clear Layout
       </button>
+
+      {/* Layout score indicator */}
+      {layoutScore !== null && (
+        <span className="text-[10px] text-gray-400" title="Layout quality score (lower = better)">
+          Score: {layoutScore}
+        </span>
+      )}
 
       <div className="flex-1" />
 
@@ -565,15 +693,73 @@ export default function TopBar({ canvasSize }) {
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-gray-400">
               Load from File...
             </button>
+            <button onClick={() => { loadSetsInputRef.current?.click(); setShowLoadMenu(false) }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-indigo-400">
+              Import Sets from File...
+              <span className="text-[10px] text-gray-500 block">Keeps current PDF &amp; scale, adds sets from another project</span>
+            </button>
+
+            {/* Quick-import sets from 883 Islington template */}
+            <button onClick={async () => {
+              try {
+                const res = await fetch('/883-islington-floorplan.json')
+                const data = await res.json()
+                const result = importSetsOnly(data)
+                alert(`Imported ${result.setsAdded} sets and ${result.wallsAdded} building walls from 883 Islington.\nRescaled to match current calibration.`)
+                setShowLoadMenu(false)
+              } catch (err) { alert('Failed: ' + err.message) }
+            }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-indigo-300">
+              Import Sets from 883 Islington
+              <span className="text-[10px] text-gray-500 block">Add 883 Islington sets to current project</span>
+            </button>
+
+            {/* Restore from backup */}
+            <div className="px-3 py-1.5 text-[10px] text-gray-400 uppercase tracking-wide border-b border-t border-gray-600 mt-1">
+              Restore Backup
+            </div>
+            {(() => {
+              const backups = getBackupInfo()
+              if (backups.length === 0) return (
+                <div className="px-3 py-1.5 text-[10px] text-gray-500">No backups available</div>
+              )
+              return backups.map(b => (
+                <button key={b.level} onClick={() => {
+                  if (confirm(`Restore backup-${b.level}?\n"${b.projectName}" — ${b.sets} sets, ${b.walls} walls, ${b.columns} columns\nSaved: ${b.savedAt}`)) {
+                    restoreBackup(b.level)
+                    setShowLoadMenu(false)
+                  }
+                }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-orange-400">
+                  Backup {b.level}: {b.projectName}
+                  <span className="text-[10px] text-gray-500 block">{b.sets} sets, {b.walls} walls · {b.savedAt ? new Date(b.savedAt).toLocaleString() : '?'}</span>
+                </button>
+              ))
+            })()}
           </div>
         )}
       </div>
       <input ref={loadInputRef} type="file" accept=".json" className="hidden" onChange={handleLoadFile} />
+      <input ref={loadSetsInputRef} type="file" accept=".json" className="hidden" onChange={handleImportSetsFile} />
 
-      <button onClick={handleExportPNG}
-        className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs">
-        PNG
-      </button>
+      <div className="relative">
+        <button onClick={() => { setShowPngMenu(!showPngMenu); setShowSaveMenu(false); setShowLoadMenu(false) }}
+          className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs">
+          PNG ▾
+        </button>
+        {showPngMenu && (
+          <div className="absolute top-full mt-1 right-0 bg-gray-800 border border-gray-600 rounded shadow-lg z-50 min-w-[180px]">
+            <button onClick={() => { handleExportPNG(); setShowPngMenu(false) }}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-700 flex items-center gap-2">
+              <span>⬇</span> Download PNG
+            </button>
+            <button onClick={handleSaveToDrive}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-700 flex items-center gap-2 border-t border-gray-700">
+              <span>☁️</span> Save to Google Drive
+            </button>
+          </div>
+        )}
+      </div>
 
       <button onClick={handleExportPDF}
         className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs">
@@ -596,8 +782,8 @@ export default function TopBar({ canvasSize }) {
       {showHelp && <HelpGuide onClose={() => setShowHelp(false)} />}
 
       {/* Click away to close menus */}
-      {(showSaveMenu || showLoadMenu) && (
-        <div className="fixed inset-0 z-40" onClick={() => { setShowSaveMenu(false); setShowLoadMenu(false) }} />
+      {(showSaveMenu || showLoadMenu || showPngMenu) && (
+        <div className="fixed inset-0 z-40" onClick={() => { setShowSaveMenu(false); setShowLoadMenu(false); setShowPngMenu(false) }} />
       )}
     </div>
   )

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
 import useStore from '../store.js'
 import { apiFetch } from '../api.js'
 import FlatBuilder from './FlatBuilder.jsx'
@@ -7,6 +7,7 @@ const CATEGORY_ICONS = {
   Wall: '🧱',
   Window: '🪟',
   Door: '🚪',
+  Column: '🏛',
   Other: '📐',
 }
 
@@ -14,6 +15,7 @@ const CATEGORY_COLORS = {
   Wall: 'border-amber-500/40 bg-amber-900/20',
   Window: 'border-cyan-500/40 bg-cyan-900/20',
   Door: 'border-green-500/40 bg-green-900/20',
+  Column: 'border-purple-500/40 bg-purple-900/20',
   Other: 'border-gray-500/40 bg-gray-800/50',
 }
 
@@ -21,10 +23,11 @@ const CATEGORY_TEXT = {
   Wall: 'text-amber-400',
   Window: 'text-cyan-400',
   Door: 'text-green-400',
+  Column: 'text-purple-400',
   Other: 'text-gray-400',
 }
 
-export default function BuildTab() {
+export default memo(function BuildTab() {
   const {
     addSet, unit, viewMode, setViewMode, pixelsPerUnit,
     buildingWalls, deleteBuildingWall, clearBuildingWalls,
@@ -32,6 +35,13 @@ export default function BuildTab() {
     drawingMode, setDrawingMode, cancelDrawing, breakDrawingChain,
     drawingWallSnap, setDrawingWallSnap,
     buildingWallDefaults, setBuildingWallDefaults,
+    buildingColumns, addBuildingColumn, deleteBuildingColumn,
+    clearBuildingColumns, toggleBuildingColumnLock,
+    startColumnPlacement, columnPlacementTemplate,
+    startComponentPlacement, componentPlacementTemplate,
+    selectedBuildingColumnId, setSelectedBuildingColumnId,
+    duplicateBuildingColumn,
+    pdfPosition,
   } = useStore()
   const [components, setComponents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -69,15 +79,19 @@ export default function BuildTab() {
     : components
 
   for (const c of filteredComponents) {
-    if (!grouped[c.category]) grouped[c.category] = {}
-    const sub = c.subcategory || 'General'
-    if (!grouped[c.category][sub]) grouped[c.category][sub] = []
-    grouped[c.category][sub].push(c)
+    // Promote Column subcategory to its own top-level category in the UI
+    const displayCat = (c.category === 'Other' && c.subcategory === 'Column') ? 'Column' : c.category
+    if (!grouped[displayCat]) grouped[displayCat] = {}
+    const sub = displayCat === 'Column' ? 'General' : (c.subcategory || 'General')
+    if (!grouped[displayCat][sub]) grouped[displayCat][sub] = []
+    grouped[displayCat][sub].push(c)
   }
 
   const handleAddToCanvas = (comp) => {
-    const categoryMap = { Wall: 'Wall', Window: 'Window', Door: 'Door', Other: 'Other' }
-    const noCut = ['Wall', 'Window', 'Door'].includes(comp.category)
+    const categoryMap = { Wall: 'Wall', Window: 'Window', Door: 'Door', Column: 'Column', Other: 'Other' }
+    // Detect columns from Other/Column subcategory
+    const effectiveCategory = (comp.category === 'Other' && comp.subcategory === 'Column') ? 'Column' : comp.category
+    const noCut = ['Wall', 'Window', 'Door', 'Column'].includes(effectiveCategory)
     const props = comp.properties || {}
     // Derive wallHeight from explicit field, properties, or (for legacy wall seed data) from height
     const wallHeight = comp.wallHeight || props.elevationHeight || props.flatHeight || null
@@ -87,12 +101,14 @@ export default function BuildTab() {
       ? (comp.thickness || 0.292)
       : comp.height
     const effectiveWallHeight = wallHeight || (isWall && comp.height > (comp.thickness || 0.3) * 3 ? comp.height : null)
-    addSet({
+
+    // Enter click-to-place mode instead of adding at (0,0)
+    startComponentPlacement({
       name: comp.name,
       width: comp.width,
       height: planHeight,
-      color: getDefaultColor(comp.category),
-      category: categoryMap[comp.category] || 'Set',
+      color: getDefaultColor(effectiveCategory),
+      category: categoryMap[effectiveCategory] || 'Set',
       noCut,
       iconType: comp.icon_type || 'rect',
       thickness: comp.thickness,
@@ -128,7 +144,7 @@ export default function BuildTab() {
     }
   }
 
-  const categories = ['Wall', 'Window', 'Door', 'Other']
+  const categories = ['Wall', 'Window', 'Door', 'Column', 'Other']
 
   return (
     <div className="p-3 flex flex-col gap-3">
@@ -367,6 +383,146 @@ export default function BuildTab() {
         </button>
       </div>
 
+      {/* Structural Columns Section */}
+      <div className="border border-purple-700/40 bg-purple-900/10 rounded p-2">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-bold text-purple-400">🏛 Structural Columns</span>
+          <span className="text-[10px] text-gray-500">{buildingColumns.length} placed</span>
+        </div>
+
+        {/* Stop placement mode button */}
+        {drawingMode === 'place-column' && (
+          <button
+            onClick={cancelDrawing}
+            className="w-full px-2 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded mb-2 animate-pulse"
+          >
+            ■ Stop Placing Columns (Esc)
+          </button>
+        )}
+
+        {/* Click-to-place buttons — enter placement mode */}
+        <div className="flex gap-1.5 mb-1">
+          <button
+            onClick={() => startColumnPlacement({
+              width: 1, height: 1, shape: 'round', color: '#8B5CF6', label: "1' Round",
+            })}
+            className={`flex-1 px-2 py-1.5 text-white text-[11px] rounded transition-colors ${
+              drawingMode === 'place-column' && columnPlacementTemplate?.label === "1' Round"
+                ? 'bg-purple-500 ring-2 ring-white'
+                : 'bg-purple-700 hover:bg-purple-600'
+            }`}
+          >
+            ⊕ 1' Round
+          </button>
+          <button
+            onClick={() => startColumnPlacement({
+              width: 1, height: 1, shape: 'square', color: '#8B5CF6', label: "1'×1' Steel",
+            })}
+            className={`flex-1 px-2 py-1.5 text-white text-[11px] rounded transition-colors ${
+              drawingMode === 'place-column' && columnPlacementTemplate?.label === "1'×1' Steel"
+                ? 'bg-purple-500 ring-2 ring-white'
+                : 'bg-purple-700 hover:bg-purple-600'
+            }`}
+          >
+            ⊕ 1' Steel
+          </button>
+          <button
+            onClick={() => startColumnPlacement({
+              width: 2, height: 2, shape: 'square', color: '#8B5CF6', label: "2' Square",
+            })}
+            className={`flex-1 px-2 py-1.5 text-white text-[11px] rounded transition-colors ${
+              drawingMode === 'place-column' && columnPlacementTemplate?.label === "2' Square"
+                ? 'bg-purple-500 ring-2 ring-white'
+                : 'bg-purple-700 hover:bg-purple-600'
+            }`}
+          >
+            ⊕ 2' Square
+          </button>
+        </div>
+        <div className="flex gap-1.5 mb-2">
+          <button
+            onClick={() => startColumnPlacement({
+              width: 1, height: 2, shape: 'square', color: '#8B5CF6', label: "1'×2' Rect",
+            })}
+            className={`flex-1 px-2 py-1.5 text-white text-[11px] rounded transition-colors ${
+              drawingMode === 'place-column' && columnPlacementTemplate?.label === "1'×2' Rect"
+                ? 'bg-purple-500 ring-2 ring-white'
+                : 'bg-purple-700 hover:bg-purple-600'
+            }`}
+          >
+            ⊕ 1'×2' Rect
+          </button>
+        </div>
+
+        <p className="text-[9px] text-gray-500 mb-2">Click a button above, then click on the floor plan to place. Right-click or press D to duplicate. Esc to stop.</p>
+
+        {/* Column list */}
+        {buildingColumns.length > 0 && (
+          <div className="flex flex-col gap-1 max-h-36 overflow-y-auto mb-1">
+            {buildingColumns.map(col => (
+              <div
+                key={col.id}
+                onClick={() => setSelectedBuildingColumnId(col.id)}
+                className={`flex items-center justify-between px-2 py-1 rounded group cursor-pointer transition-colors ${
+                  col.id === selectedBuildingColumnId
+                    ? 'bg-purple-900/50 border border-purple-500/50'
+                    : 'bg-gray-800/50 hover:bg-gray-700/50'
+                }`}
+              >
+                <span className="text-[10px] text-gray-300 truncate flex-1">
+                  {col.label || `Col ${col.id}`} — {col.width}×{col.height}{unit} {col.shape === 'round' ? '⚪' : '⬜'}
+                </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); duplicateBuildingColumn(col.id) }}
+                    className="text-purple-400 hover:text-purple-300 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Duplicate column"
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleBuildingColumnLock(col.id) }}
+                    className={`text-[10px] px-1 rounded transition-colors ${
+                      col.lockedToPdf
+                        ? 'text-purple-400 hover:text-purple-300'
+                        : 'text-gray-500 hover:text-gray-300'
+                    }`}
+                    title={col.lockedToPdf ? 'Locked to PDF — click to unlock' : 'Unlocked — click to lock to PDF'}
+                  >
+                    {col.lockedToPdf ? '🔒' : '🔓'}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteBuildingColumn(col.id) }}
+                    className="text-red-400 hover:text-red-300 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {buildingColumns.length > 0 && (
+          <button
+            onClick={() => { if (confirm('Delete all structural columns?')) clearBuildingColumns() }}
+            className="w-full px-2 py-1 bg-red-800/50 hover:bg-red-700/50 text-red-400 text-[10px] rounded"
+          >
+            Delete All Columns
+          </button>
+        )}
+      </div>
+
+      {/* Stop component placement mode */}
+      {drawingMode === 'place-component' && componentPlacementTemplate && (
+        <button
+          onClick={cancelDrawing}
+          className="w-full px-2 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded mb-1 animate-pulse"
+        >
+          ■ Stop Placing {componentPlacementTemplate.name} (Esc)
+        </button>
+      )}
+
       {error && (
         <div className="bg-red-900/50 border border-red-700 text-red-300 px-2 py-1.5 rounded text-[11px]">
           {error}
@@ -434,9 +590,13 @@ export default function BuildTab() {
                                 )}
                                 <button
                                   onClick={() => handleAddToCanvas(comp)}
-                                  className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] rounded transition-colors"
+                                  className={`px-2 py-0.5 text-white text-[10px] rounded transition-colors ${
+                                    drawingMode === 'place-component' && componentPlacementTemplate?.name === comp.name
+                                      ? 'bg-green-600 ring-1 ring-green-400'
+                                      : 'bg-indigo-600 hover:bg-indigo-500'
+                                  }`}
                                 >
-                                  Add
+                                  {drawingMode === 'place-component' && componentPlacementTemplate?.name === comp.name ? 'Placing…' : 'Place'}
                                 </button>
                               </div>
                             </div>
@@ -469,13 +629,14 @@ export default function BuildTab() {
       )}
     </div>
   )
-}
+})
 
 function getDefaultColor(category) {
   switch (category) {
     case 'Wall': return '#D97706'
     case 'Window': return '#06B6D4'
     case 'Door': return '#10B981'
+    case 'Column': return '#8B5CF6'
     case 'Other': return '#6B7280'
     default: return '#3B82F6'
   }

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, memo } from 'react'
 import useStore from '../store.js'
 import { getAABB } from '../engine/geometry.js'
+import { toFeet, fromFeet, formatInUnit, UNITS, UNIT_OPTIONS } from '../engine/units.js'
 import BulkImport from './BulkImport.jsx'
 
 const COLORS = [
@@ -10,6 +11,8 @@ const COLORS = [
 
 const CATEGORIES = ['Set', 'Wall', 'Window', 'Door', 'Furniture', 'Other']
 const WALL_CATEGORIES = ['Wall', 'Window', 'Door']
+const SET_CATEGORIES = ['Set', 'Furniture', 'Other']
+const COMPONENT_CATEGORIES = ['Wall', 'Window', 'Door']
 const GAP_PRESETS = [
   { label: 'None', value: 0, desc: 'No gap (back-to-back)' },
   { label: '1ft', value: 1, desc: 'Minimal clearance' },
@@ -27,7 +30,7 @@ const CATEGORY_COLORS = {
   Other: 'text-gray-500',
 }
 
-export default function SetsTab() {
+export default memo(function SetsTab() {
   const {
     sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId, unit,
     pdfImage, toggleLockToPdf, lockAllToPdf, unlockAllFromPdf,
@@ -36,6 +39,8 @@ export default function SetsTab() {
     bringForward, sendBackward, bringToFront, sendToBack,
     labelMode,
     addGroup,
+    startComponentPlacement, drawingMode, cancelDrawing,
+    lockToSet, unlockFromSet,
   } = useStore()
   const { defaultWallHeight, setDefaultWallHeight } = useStore()
   const [form, setForm] = useState({
@@ -46,32 +51,64 @@ export default function SetsTab() {
     hiddenWalls: { top: false, right: false, bottom: false, left: false },
     wallExtensions: { top: '', right: '', bottom: '', left: '' },
     rotation: '0',
+    placeCount: '1',
+    placeSpacing: '',
+    elevation: '',
   })
   const [editing, setEditing] = useState(null)
   const [cuttingSetId, setCuttingSetId] = useState(null)
+  const [lockingComponentId, setLockingComponentId] = useState(null)
   const [categoryFilter, setCategoryFilter] = useState(null)
   const [multiSelected, setMultiSelected] = useState(new Set())
+  // Unit picker
+  const [inputUnit, setInputUnit] = useState('ft')
+  // Grouped sections
+  const [setsCollapsed, setSetsCollapsed] = useState(false)
+  const [componentsCollapsed, setComponentsCollapsed] = useState(false)
+  // Quick search
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [formCollapsed, setFormCollapsed] = useState(false)
+  // Auto-scroll refs
+  const rowRefs = useRef({})
 
-  const handleAdd = (e) => {
-    e.preventDefault()
-    if (!form.name || !form.width || !form.height) return
+  // When placement mode ends (Esc on canvas), reset the form
+  const prevDrawingMode = useRef(drawingMode)
+  useEffect(() => {
+    if (prevDrawingMode.current === 'place-component' && drawingMode !== 'place-component' && !editing) {
+      resetForm()
+    }
+    prevDrawingMode.current = drawingMode
+  })
+
+  // Helper: convert a form dimension value from inputUnit to feet
+  const dimToFeet = (val) => toFeet(parseFloat(val), inputUnit)
+
+  // Build the template object from current form state
+  const buildTemplate = () => {
     const isWallType = WALL_CATEGORIES.includes(form.category)
-    addSet({
+    return {
       name: form.name,
-      width: parseFloat(form.width),
-      height: parseFloat(form.height),
+      width: dimToFeet(form.width),
+      height: dimToFeet(form.height),
       color: form.color,
       category: form.category,
       noCut: form.noCut || isWallType,
-      wallGap: parseFloat(form.wallGap) || 0,
-      wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
+      wallGap: form.wallGap ? dimToFeet(form.wallGap) : 0,
+      wallHeight: isWallType ? (form.wallHeight ? dimToFeet(form.wallHeight) : defaultWallHeight) : null,
       gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
       removedWalls: Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
       hiddenWalls: Object.values(form.hiddenWalls).some(v => v) ? form.hiddenWalls : null,
-      wallExtensions: Object.values(form.wallExtensions).some(v => parseFloat(v) > 0) ? { top: parseFloat(form.wallExtensions.top) || 0, right: parseFloat(form.wallExtensions.right) || 0, bottom: parseFloat(form.wallExtensions.bottom) || 0, left: parseFloat(form.wallExtensions.left) || 0 } : null,
+      wallExtensions: Object.values(form.wallExtensions).some(v => parseFloat(v) > 0) ? { top: dimToFeet(form.wallExtensions.top) || 0, right: dimToFeet(form.wallExtensions.right) || 0, bottom: dimToFeet(form.wallExtensions.bottom) || 0, left: dimToFeet(form.wallExtensions.left) || 0 } : null,
       opacity: parseFloat(form.opacity) || 1,
       rotation: parseFloat(form.rotation) || 0,
-    })
+      placeCount: isWallType ? Math.max(1, parseInt(form.placeCount) || 1) : 1,
+      placeSpacing: isWallType && form.placeSpacing ? dimToFeet(form.placeSpacing) : 0,
+      elevation: isWallType && form.elevation ? dimToFeet(form.elevation) : 0,
+    }
+  }
+
+  const resetForm = () => {
     setForm({
       name: '', width: '', height: '', color: COLORS[(sets.length + 1) % COLORS.length],
       category: 'Set', wallGap: '', opacity: '1', noCut: false,
@@ -80,57 +117,56 @@ export default function SetsTab() {
       hiddenWalls: { top: false, right: false, bottom: false, left: false },
       wallExtensions: { top: '', right: '', bottom: '', left: '' },
       rotation: '0',
+      placeCount: '1', placeSpacing: '', elevation: '',
     })
+  }
+
+  const handleAdd = (e) => {
+    e.preventDefault()
+    if (!form.name || !form.width || !form.height) return
+    const isWallType = WALL_CATEGORIES.includes(form.category)
+    const template = buildTemplate()
+
+    if (isWallType) {
+      // Enter click-to-place mode — user clicks canvas to place multiple copies
+      startComponentPlacement(template)
+    } else {
+      // Sets add directly
+      addSet(template)
+      resetForm()
+    }
   }
 
   const handleUpdate = (e) => {
     e.preventDefault()
     if (!form.name || !form.width || !form.height) return
-    const isWallType = WALL_CATEGORIES.includes(form.category)
-    updateSet(editing, {
-      name: form.name,
-      width: parseFloat(form.width),
-      height: parseFloat(form.height),
-      color: form.color,
-      category: form.category,
-      noCut: form.noCut,
-      wallGap: parseFloat(form.wallGap) || 0,
-      wallHeight: isWallType ? (parseFloat(form.wallHeight) || defaultWallHeight) : null,
-      gapSides: isWallType && parseFloat(form.wallGap) > 0 ? form.gapSides : null,
-      removedWalls: Object.values(form.removedWalls).some(v => v) ? form.removedWalls : null,
-      hiddenWalls: Object.values(form.hiddenWalls).some(v => v) ? form.hiddenWalls : null,
-      wallExtensions: Object.values(form.wallExtensions).some(v => parseFloat(v) > 0) ? { top: parseFloat(form.wallExtensions.top) || 0, right: parseFloat(form.wallExtensions.right) || 0, bottom: parseFloat(form.wallExtensions.bottom) || 0, left: parseFloat(form.wallExtensions.left) || 0 } : null,
-      opacity: parseFloat(form.opacity) || 1,
-      rotation: parseFloat(form.rotation) || 0,
-    })
+    const template = buildTemplate()
+    updateSet(editing, template)
     setEditing(null)
-    setForm({
-      name: '', width: '', height: '', color: COLORS[sets.length % COLORS.length],
-      category: 'Set', wallGap: '', opacity: '1', noCut: false,
-      wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
-      removedWalls: { top: false, right: false, bottom: false, left: false },
-      hiddenWalls: { top: false, right: false, bottom: false, left: false },
-      wallExtensions: { top: '', right: '', bottom: '', left: '' },
-      rotation: '0',
-    })
+    resetForm()
   }
 
   const startEdit = (s) => {
     setEditing(s.id)
     setMultiSelected(new Set())
     setForm({
-      name: s.name, width: String(s.width), height: String(s.height), color: s.color,
-      category: s.category || 'Set', wallGap: String(s.wallGap || ''), opacity: String(s.opacity ?? 1),
+      name: s.name,
+      width: String(formatInUnit(s.width, inputUnit)),
+      height: String(formatInUnit(s.height, inputUnit)),
+      color: s.color,
+      category: s.category || 'Set',
+      wallGap: s.wallGap ? String(formatInUnit(s.wallGap, inputUnit)) : '',
+      opacity: String(s.opacity ?? 1),
       noCut: s.noCut || false,
-      wallHeight: String(s.wallHeight || ''),
+      wallHeight: s.wallHeight ? String(formatInUnit(s.wallHeight, inputUnit)) : '',
       gapSides: s.gapSides || { top: true, right: true, bottom: true, left: true },
       removedWalls: s.removedWalls || { top: false, right: false, bottom: false, left: false },
       hiddenWalls: s.hiddenWalls || { top: false, right: false, bottom: false, left: false },
       wallExtensions: {
-        top: String(s.wallExtensions?.top || ''),
-        right: String(s.wallExtensions?.right || ''),
-        bottom: String(s.wallExtensions?.bottom || ''),
-        left: String(s.wallExtensions?.left || ''),
+        top: s.wallExtensions?.top ? String(formatInUnit(s.wallExtensions.top, inputUnit)) : '',
+        right: s.wallExtensions?.right ? String(formatInUnit(s.wallExtensions.right, inputUnit)) : '',
+        bottom: s.wallExtensions?.bottom ? String(formatInUnit(s.wallExtensions.bottom, inputUnit)) : '',
+        left: s.wallExtensions?.left ? String(formatInUnit(s.wallExtensions.left, inputUnit)) : '',
       },
       rotation: String(s.rotation || 0),
     })
@@ -138,15 +174,7 @@ export default function SetsTab() {
 
   const cancelEdit = () => {
     setEditing(null)
-    setForm({
-      name: '', width: '', height: '', color: COLORS[sets.length % COLORS.length],
-      category: 'Set', wallGap: '', opacity: '1', noCut: false,
-      wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
-      removedWalls: { top: false, right: false, bottom: false, left: false },
-      hiddenWalls: { top: false, right: false, bottom: false, left: false },
-      wallExtensions: { top: '', right: '', bottom: '', left: '' },
-      rotation: '0',
-    })
+    resetForm()
   }
 
   const handleRotate = (e, setData) => {
@@ -336,20 +364,201 @@ export default function SetsTab() {
   const filteredOnPlan = categoryFilter
     ? onPlanSets.filter(s => (s.category || 'Set') === categoryFilter)
     : onPlanSets
+  const filteredSets = filteredOnPlan.filter(s => SET_CATEGORIES.includes(s.category || 'Set'))
+  const filteredComponents = filteredOnPlan.filter(s => COMPONENT_CATEGORIES.includes(s.category))
+
+  // Auto-scroll to selected set & expand its section
+  useEffect(() => {
+    if (!selectedSetId) return
+    const s = sets.find(s => s.id === selectedSetId)
+    if (!s) return
+    if (COMPONENT_CATEGORIES.includes(s.category)) {
+      setComponentsCollapsed(false)
+    } else {
+      setSetsCollapsed(false)
+    }
+    setTimeout(() => {
+      rowRefs.current[selectedSetId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 50)
+  }, [selectedSetId])
+
+  // Shared row renderer for both Sets and Components sections
+  const renderSetRow = (s) => (
+    <div key={s.id} ref={el => { rowRefs.current[s.id] = el }}>
+      <div
+        onClick={(e) => handleSetClick(e, s.id)}
+        title={`${s.name} — ${WALL_CATEGORIES.includes(s.category) ? `W:${formatInUnit(s.width, inputUnit)} × H:${formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)} × D:${formatInUnit(s.height, inputUnit)}${inputUnit}` : `${formatInUnit(s.width, inputUnit)}×${formatInUnit(s.height, inputUnit)}${inputUnit}`}${s.category && s.category !== 'Set' ? ` [${s.category}]` : ''}${s.wallGap > 0 ? ` Gap: ${formatInUnit(s.wallGap, inputUnit)}${inputUnit}` : ''}${s.lockedToPdf ? ' [Locked to PDF]' : ''}${s.lockedToSetId ? ` [Locked to ${sets.find(p => p.id === s.lockedToSetId)?.name || '?'}]` : ''}${s.noCut ? ' [No Cut]' : ''}${s.rotation ? ` ${s.rotation}\u00B0` : ''}`}
+        className={`flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer text-sm
+          ${multiSelected.has(s.id) ? 'bg-indigo-900/40 border border-indigo-500/50' : s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
+          ${s.lockedToPdf && !multiSelected.has(s.id) ? 'border border-amber-600/40' : s.lockedToSetId && !multiSelected.has(s.id) ? 'border border-purple-600/40' : ''}`}
+      >
+        <input type="checkbox" checked={multiSelected.has(s.id)}
+          onChange={(e) => toggleMultiSelect(e, s.id)} onClick={(e) => e.stopPropagation()}
+          className="w-3 h-3 shrink-0 accent-indigo-500 cursor-pointer" />
+        <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color, opacity: s.opacity ?? 1 }} />
+        <span className="flex-1 truncate text-xs">{s.name}</span>
+        {(s.category && s.category !== 'Set') && (
+          <span className={`text-[9px] ${CATEGORY_COLORS[s.category] || 'text-gray-500'}`}>{s.category}</span>
+        )}
+        {WALL_CATEGORIES.includes(s.category) ? (
+          <span className="text-[10px] text-gray-400" title={`W:${formatInUnit(s.width, inputUnit)} × H:${formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)} × D:${formatInUnit(s.height, inputUnit)}`}>
+            {formatInUnit(s.width, inputUnit)}×{formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)}×{formatInUnit(s.height, inputUnit)}
+          </span>
+        ) : (
+          <span className="text-[10px] text-gray-400">{formatInUnit(s.width, inputUnit)}×{formatInUnit(s.height, inputUnit)}</span>
+        )}
+        {WALL_CATEGORIES.includes(s.category) && (
+          <button onClick={(e) => {
+            e.stopPropagation()
+            const modes = [null, 'finished', 'construction-front']
+            const idx = modes.indexOf(s.wallRenderMode || null)
+            updateSet(s.id, { wallRenderMode: modes[(idx + 1) % modes.length] })
+          }}
+            className={`text-[9px] px-1 rounded ${
+              s.wallRenderMode === 'finished' ? 'bg-emerald-700 text-emerald-200'
+              : s.wallRenderMode === 'construction-front' ? 'bg-amber-700 text-amber-200'
+              : 'text-gray-500 hover:text-gray-300'
+            }`}
+            title={`Render: ${s.wallRenderMode || 'Global'} — click to cycle`}>
+            {s.wallRenderMode === 'finished' ? 'F' : s.wallRenderMode === 'construction-front' ? 'C' : 'G'}
+          </button>
+        )}
+        {s.wallGap > 0 && (
+          <span className="text-[9px] text-amber-500" title={`${formatInUnit(s.wallGap, inputUnit)}${inputUnit} access gap`}>
+            {formatInUnit(s.wallGap, inputUnit)}{inputUnit}
+          </span>
+        )}
+        {s.noCut && <span className="text-[10px] text-gray-500" title="No cut">&#x1F6E1;</span>}
+        {s.cutouts?.length > 0 && (
+          <button onClick={(e) => { e.stopPropagation(); clearCutouts(s.id) }}
+            className="text-[10px] text-red-400 hover:text-yellow-300" title="Restore original shape">[cut] &#x21A9;</button>
+        )}
+        {!s.noCut && (
+          <button onClick={(e) => { e.stopPropagation(); setCuttingSetId(cuttingSetId === s.id ? null : s.id) }}
+            className={`text-xs ${cuttingSetId === s.id ? 'text-red-400' : 'text-gray-500 hover:text-red-300'}`}
+            title="Cut this set into another set">&#x2702;</button>
+        )}
+        {pdfImage && (
+          <button onClick={(e) => { e.stopPropagation(); toggleLockToPdf(s.id) }}
+            className={`text-xs ${s.lockedToPdf ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}`}
+            title={s.lockedToPdf ? 'Unlock from PDF' : 'Lock to PDF position'}>
+            {s.lockedToPdf ? '\u{1F4CC}' : '\u{1F4CD}'}
+          </button>
+        )}
+        {/* Lock to Set button */}
+        <button onClick={(e) => {
+          e.stopPropagation()
+          if (s.lockedToSetId) {
+            unlockFromSet(s.id)
+          } else {
+            setLockingComponentId(lockingComponentId === s.id ? null : s.id)
+          }
+        }}
+          className={`text-xs ${s.lockedToSetId ? 'text-purple-400' : 'text-gray-500 hover:text-purple-300'}`}
+          title={s.lockedToSetId ? `Locked to ${sets.find(p => p.id === s.lockedToSetId)?.name || '?'} — click to unlock` : 'Lock to a set (moves with it)'}>
+          {s.lockedToSetId ? '\u{1F517}' : '\u{1F50D}'}
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { rotation: ((s.rotation || 0) - 1 + 360) % 360 }) }}
+          className="text-[10px] text-yellow-400 hover:text-yellow-300" title="-1°">&#x25C1;</button>
+        <span className="text-[9px] text-gray-500 min-w-[24px] text-center inline-block">{s.rotation || 0}°</span>
+        <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { rotation: ((s.rotation || 0) + 1) % 360 }) }}
+          className="text-[10px] text-yellow-400 hover:text-yellow-300" title="+1°">&#x25B7;</button>
+        <button onClick={(e) => handleRotate(e, s)}
+          className="text-[10px] text-yellow-400 hover:text-yellow-300" title="Rotate 90°">&#x21BB;</button>
+        <button onClick={(e) => { e.stopPropagation(); bringForward(s.id) }}
+          className="text-[10px] text-gray-500 hover:text-white" title="Bring forward">&#x25B2;</button>
+        <button onClick={(e) => { e.stopPropagation(); sendBackward(s.id) }}
+          className="text-[10px] text-gray-500 hover:text-white" title="Send backward">&#x25BC;</button>
+        <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { labelHidden: !s.labelHidden }) }}
+          className={`text-[10px] ${s.labelHidden ? 'text-gray-600' : 'text-gray-400 hover:text-white'}`}
+          title={s.labelHidden ? 'Show label' : 'Hide label'}>Aa</button>
+        {!s.labelHidden && labelMode === 'inline' && (
+          <select value={s.labelPosition || 'top-left'} onClick={e => e.stopPropagation()}
+            onChange={e => { e.stopPropagation(); updateSet(s.id, { labelPosition: e.target.value }) }}
+            className="text-[9px] bg-gray-700 border border-gray-600 rounded text-gray-400 px-0.5 py-0 w-8" title="Label position">
+            <option value="top-left">TL</option><option value="top">T</option><option value="top-right">TR</option>
+            <option value="left">L</option><option value="center">C</option><option value="right">R</option>
+            <option value="bottom-left">BL</option><option value="bottom">B</option><option value="bottom-right">BR</option>
+          </select>
+        )}
+        <button onClick={(e) => { e.stopPropagation(); duplicateSet(s.id) }}
+          className="text-xs text-cyan-400 hover:text-cyan-300" title="Duplicate set">&#x29C9;</button>
+        <button onClick={(e) => { e.stopPropagation(); hideSet(s.id) }}
+          className="text-xs text-gray-500 hover:text-gray-300" title="Hide from plan">&#x1F441;</button>
+        <button onClick={(e) => { e.stopPropagation(); removeSetFromPlan(s.id) }}
+          className="text-xs text-orange-400 hover:text-orange-300" title="Remove from plan">&#x2B07;</button>
+        <button onClick={(e) => { e.stopPropagation(); startEdit(s) }}
+          className="text-xs text-blue-400 hover:text-blue-300" title="Edit set">&#x270E;</button>
+        <button onClick={(e) => { e.stopPropagation(); deleteSet(s.id) }}
+          className="text-xs text-red-400 hover:text-red-300" title="Delete permanently">&#x2715;</button>
+      </div>
+      {cuttingSetId === s.id && (
+        <div className="ml-6 mt-1 mb-1 p-2 bg-gray-800 rounded border border-red-700/50">
+          <p className="text-[10px] text-gray-400 mb-1">Cut <span className="text-white">{s.name}</span> into:</p>
+          <div className="flex flex-col gap-0.5">
+            {onPlanSets.filter(t => t.id !== s.id && !t.noCut).map(t => (
+              <button key={t.id} onClick={() => handleCutInto(s.id, t.id)}
+                className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-left hover:bg-red-900/30 transition-colors">
+                <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: t.color }} />
+                <span className="text-gray-300">{t.name}</span>
+                <span className="text-[9px] text-gray-500">{formatInUnit(t.width, inputUnit)}x{formatInUnit(t.height, inputUnit)}</span>
+              </button>
+            ))}
+            {onPlanSets.filter(t => t.id !== s.id && !t.noCut).length === 0 && (
+              <p className="text-[10px] text-gray-500">No cuttable sets on plan</p>
+            )}
+          </div>
+          <button onClick={() => setCuttingSetId(null)} className="mt-1 text-[10px] text-gray-500 hover:text-gray-300">Cancel</button>
+        </div>
+      )}
+      {lockingComponentId === s.id && (
+        <div className="ml-6 mt-1 mb-1 p-2 bg-gray-800 rounded border border-purple-700/50">
+          <p className="text-[10px] text-gray-400 mb-1">Lock <span className="text-white">{s.name}</span> to:</p>
+          <div className="flex flex-col gap-0.5 max-h-32 overflow-y-auto">
+            {onPlanSets
+              .filter(t => t.id !== s.id && !t.lockedToSetId && !COMPONENT_CATEGORIES.includes(t.category))
+              .map(t => (
+              <button key={t.id} onClick={() => { lockToSet(s.id, t.id); setLockingComponentId(null) }}
+                className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-left hover:bg-purple-900/30 transition-colors">
+                <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: t.color }} />
+                <span className="text-gray-300">{t.name}</span>
+                <span className="text-[9px] text-gray-500">{formatInUnit(t.width, inputUnit)}x{formatInUnit(t.height, inputUnit)}</span>
+              </button>
+            ))}
+            {onPlanSets.filter(t => t.id !== s.id && !t.lockedToSetId && !COMPONENT_CATEGORIES.includes(t.category)).length === 0 && (
+              <p className="text-[10px] text-gray-500">No lockable sets on plan</p>
+            )}
+          </div>
+          <button onClick={() => setLockingComponentId(null)} className="mt-1 text-[10px] text-gray-500 hover:text-gray-300">Cancel</button>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="p-3 flex flex-col gap-3">
       <BulkImport />
 
+      {/* Collapsible form header */}
+      <button onClick={() => setFormCollapsed(!formCollapsed)}
+        className="flex items-center justify-between w-full px-2 py-1 bg-gray-700/50 rounded text-xs text-gray-300 hover:bg-gray-700">
+        <span className="flex items-center gap-1.5">
+          <span className="text-gray-500">{formCollapsed ? '\u25B8' : '\u25BE'}</span>
+          <span className="font-medium">{editing ? `Edit ${form.category}` : `Add / Place`}</span>
+        </span>
+        {formCollapsed && <span className="text-[10px] text-gray-500">click to expand</span>}
+      </button>
+
+      {!formCollapsed && <>
       {/* Global default wall height */}
       <div className="flex items-center gap-2 px-1">
         <label className="text-[10px] text-gray-400 whitespace-nowrap">Default Wall Height:</label>
         <input
-          type="number" value={defaultWallHeight} min="1" step="1"
-          onChange={e => setDefaultWallHeight(parseFloat(e.target.value) || 12)}
-          className="px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-[10px] text-white w-12"
+          type="number" value={formatInUnit(defaultWallHeight, inputUnit)} min="1" step="any"
+          onChange={e => setDefaultWallHeight(toFeet(parseFloat(e.target.value) || 12, inputUnit))}
+          className="px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-[10px] text-white w-14"
         />
-        <span className="text-[10px] text-gray-500">{unit}</span>
+        <span className="text-[10px] text-gray-500">{inputUnit}</span>
       </div>
 
       <div className="h-px bg-gray-700" />
@@ -376,56 +585,136 @@ export default function SetsTab() {
           onChange={e => setForm({ ...form, name: e.target.value })}
           className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white"
         />
-        <div className="flex gap-2">
+        <div className="flex gap-1 items-center">
           <input
-            type="number" placeholder={`W (${unit})`} value={form.width} min="1" step="0.5"
+            type="number" placeholder={`W (${inputUnit})`} value={form.width} min="0" step="any"
             onChange={e => setForm({ ...form, width: e.target.value })}
-            className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white w-1/2"
+            className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white flex-1 min-w-0"
           />
-          <input
-            type="number" placeholder={`H (${unit})`} value={form.height} min="1" step="0.5"
-            onChange={e => setForm({ ...form, height: e.target.value })}
-            className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white w-1/2"
-          />
+          <span className="text-gray-500 text-xs">×</span>
+          {WALL_CATEGORIES.includes(form.category) ? (
+            <>
+              <input
+                type="number" placeholder={`H (${inputUnit})`} value={form.wallHeight} min="0" step="any"
+                onChange={e => setForm({ ...form, wallHeight: e.target.value })}
+                className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white flex-1 min-w-0"
+              />
+              <span className="text-gray-500 text-xs">×</span>
+              <input
+                type="number" placeholder={`D (${inputUnit})`} value={form.height} min="0" step="any"
+                onChange={e => setForm({ ...form, height: e.target.value })}
+                className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white flex-1 min-w-0"
+                title="Depth — how far this projects from the wall on the floor plan"
+              />
+            </>
+          ) : (
+            <input
+              type="number" placeholder={`H (${inputUnit})`} value={form.height} min="0" step="any"
+              onChange={e => setForm({ ...form, height: e.target.value })}
+              className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white flex-1 min-w-0"
+            />
+          )}
+          <select value={inputUnit} onChange={e => {
+            const newU = e.target.value
+            const oldU = inputUnit
+            // Live-convert form values from old unit → feet → new unit
+            const conv = (v) => v ? String(formatInUnit(toFeet(parseFloat(v), oldU), newU)) : ''
+            setForm(f => ({
+              ...f,
+              width: conv(f.width), height: conv(f.height),
+              wallGap: conv(f.wallGap), wallHeight: conv(f.wallHeight),
+              placeSpacing: conv(f.placeSpacing), elevation: conv(f.elevation),
+              wallExtensions: Object.fromEntries(Object.entries(f.wallExtensions).map(([k, v]) => [k, conv(v)])),
+            }))
+            setInputUnit(newU)
+          }}
+            className="px-1 py-1 bg-gray-600 border border-gray-500 rounded text-xs text-white w-12 shrink-0"
+          >
+            {UNIT_OPTIONS.map(u => <option key={u} value={u}>{UNITS[u].label}</option>)}
+          </select>
         </div>
 
         {/* Wall gap — shown for Wall/Window/Door */}
         {WALL_CATEGORIES.includes(form.category) && (
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-400">Access Gap ({unit}):</label>
+              <label className="text-xs text-gray-400">Access Gap ({inputUnit}):</label>
               <input
-                type="number" placeholder="0" value={form.wallGap} min="0" step="0.5"
+                type="number" placeholder="0" value={form.wallGap} min="0" step="any"
                 onChange={e => setForm({ ...form, wallGap: e.target.value })}
                 className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-white w-16"
               />
             </div>
             <div className="flex gap-1 flex-wrap">
-              {GAP_PRESETS.map(p => (
-                <button key={p.value} type="button"
-                  onClick={() => setForm({ ...form, wallGap: String(p.value) })}
-                  className={`px-1.5 py-0.5 rounded text-[10px] border ${
-                    form.wallGap === String(p.value) ? 'bg-amber-700 border-amber-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'
-                  }`}
-                  title={p.desc}
-                >
-                  {p.label} <span className="text-gray-500">{p.desc}</span>
-                </button>
-              ))}
+              {GAP_PRESETS.map(p => {
+                const displayVal = String(formatInUnit(p.value, inputUnit))
+                return (
+                  <button key={p.value} type="button"
+                    onClick={() => setForm({ ...form, wallGap: displayVal })}
+                    className={`px-1.5 py-0.5 rounded text-[10px] border ${
+                      form.wallGap === displayVal ? 'bg-amber-700 border-amber-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'
+                    }`}
+                    title={p.desc}
+                  >
+                    {p.value === 0 ? p.label : `${displayVal}${inputUnit}`} <span className="text-gray-500">{p.desc}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
         )}
 
-        {/* Wall height — shown for Wall/Window/Door */}
-        {WALL_CATEGORIES.includes(form.category) && (
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-400">Height ({unit}):</label>
-            <input
-              type="number" placeholder={String(defaultWallHeight)} value={form.wallHeight} min="1" step="1"
-              onChange={e => setForm({ ...form, wallHeight: e.target.value })}
-              className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-white w-16"
-            />
-            <span className="text-[10px] text-gray-500">default: {defaultWallHeight}{unit}</span>
+        {/* Wall height default hint — shown for Wall/Window/Door (height input is now in the W×H×D row) */}
+        {WALL_CATEGORIES.includes(form.category) && !form.wallHeight && (
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500">H defaults to {formatInUnit(defaultWallHeight, inputUnit)}{inputUnit} if left blank</span>
+          </div>
+        )}
+
+        {/* Multi-placement — count, spacing, elevation — shown for Window/Door/Wall */}
+        {WALL_CATEGORIES.includes(form.category) && !editing && (
+          <div className="flex flex-col gap-1.5 p-2 bg-gray-800/50 rounded border border-gray-700">
+            <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Multi-Placement</span>
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-gray-400 w-12">Count:</label>
+              <input
+                type="number" min="1" max="20" step="1"
+                placeholder="1" value={form.placeCount}
+                onChange={e => setForm({ ...form, placeCount: e.target.value })}
+                className="px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-[10px] text-white w-14"
+              />
+              <div className="flex gap-0.5">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} type="button"
+                    onClick={() => setForm({ ...form, placeCount: String(n) })}
+                    className={`w-5 h-5 rounded text-[10px] ${
+                      String(form.placeCount) === String(n) ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                    }`}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-gray-400 w-12">Spacing:</label>
+              <input
+                type="number" min="0" step="any"
+                placeholder={`0 ${inputUnit}`} value={form.placeSpacing}
+                onChange={e => setForm({ ...form, placeSpacing: e.target.value })}
+                className="px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-[10px] text-white w-14"
+              />
+              <span className="text-[10px] text-gray-500">{inputUnit} between each</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-gray-400 w-12">Elev:</label>
+              <input
+                type="number" min="0" step="any"
+                placeholder={`0 ${inputUnit}`} value={form.elevation}
+                onChange={e => setForm({ ...form, elevation: e.target.value })}
+                className="px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-[10px] text-white w-14"
+              />
+              <span className="text-[10px] text-gray-500">{inputUnit} off ground</span>
+            </div>
           </div>
         )}
 
@@ -526,13 +815,13 @@ export default function SetsTab() {
 
         {/* Wall extensions — extend walls beyond set boundary */}
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-gray-400">Extend walls ({unit}):</label>
+          <label className="text-[10px] text-gray-400">Extend walls ({inputUnit}):</label>
           <div className="grid grid-cols-4 gap-1">
             {['top', 'right', 'bottom', 'left'].map(side => (
               <div key={side} className="flex flex-col items-center">
                 <span className="text-[9px] text-gray-500">{side.charAt(0).toUpperCase() + side.slice(1)}</span>
                 <input
-                  type="number" min="0" step="0.5" placeholder="0"
+                  type="number" min="0" step="any" placeholder="0"
                   value={form.wallExtensions[side]}
                   onChange={e => setForm({
                     ...form,
@@ -563,11 +852,30 @@ export default function SetsTab() {
             ))}
           </div>
         </div>
+        {/* Placement mode indicator */}
+        {drawingMode === 'place-component' && !editing && (
+          <div className="flex items-center gap-2 px-2 py-1.5 bg-indigo-900/60 border border-indigo-500/50 rounded text-sm">
+            <span className="text-indigo-200 animate-pulse">●</span>
+            <span className="text-indigo-100 flex-1">
+              {parseInt(form.placeCount) > 1 ? `Placing ${form.placeCount}× — ` : ''}Click canvas to place — Esc when done
+            </span>
+            <button type="button" onClick={() => { cancelDrawing(); resetForm() }}
+              className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-xs text-white">
+              Done
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
-          <button type="submit"
-            className="flex-1 px-2 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-sm text-white">
-            {editing ? `Update ${form.category}` : `Add ${form.category}`}
-          </button>
+          {drawingMode === 'place-component' && !editing ? null : (
+            <button type="submit"
+              className="flex-1 px-2 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-sm text-white">
+              {editing
+                ? `Update ${form.category}`
+                : WALL_CATEGORIES.includes(form.category)
+                  ? `Place ${form.category}`
+                  : `Add ${form.category}`}
+            </button>
+          )}
           {editing && (
             <button type="button" onClick={cancelEdit}
               className="px-2 py-1 bg-gray-600 hover:bg-gray-500 rounded text-sm text-white">
@@ -590,6 +898,7 @@ export default function SetsTab() {
           </button>
         </div>
       )}
+      </>}
 
       {/* Category filter tabs */}
       {onPlanSets.length > 0 && (
@@ -766,210 +1075,90 @@ export default function SetsTab() {
         </div>
       )}
 
-      {/* On-plan visible sets */}
-      <div className="flex flex-col gap-1 overflow-y-auto">
+      {/* Quick-select search */}
+      {onPlanSets.length > 5 && (
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Jump to set..."
+            value={searchQuery}
+            onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true) }}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => setTimeout(() => setSearchOpen(false), 200)}
+            className="w-full px-2 py-1.5 bg-gray-900 border border-gray-600 rounded text-xs text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+          />
+          {searchOpen && searchQuery.trim() && (
+            <div className="absolute z-10 w-full mt-0.5 bg-gray-800 border border-gray-600 rounded shadow-lg max-h-48 overflow-y-auto">
+              {onPlanSets
+                .filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                .slice(0, 15)
+                .map(s => (
+                  <button key={s.id}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      setSelectedSetId(s.id)
+                      setSearchQuery('')
+                      setSearchOpen(false)
+                    }}
+                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-gray-700 ${
+                      s.id === selectedSetId ? 'bg-indigo-900/40' : ''
+                    }`}>
+                    <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: s.color }} />
+                    <span className="flex-1 truncate text-white">{s.name}</span>
+                    <span className="text-[10px] text-gray-500">{s.category !== 'Set' ? s.category : ''}</span>
+                  </button>
+                ))}
+              {onPlanSets.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                <div className="px-2 py-2 text-xs text-gray-500">No matches</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* On-plan sets — grouped into Sets and Components */}
+      <div className="flex flex-col gap-2 overflow-y-auto">
         {sets.length === 0 && (
           <p className="text-gray-500 text-xs text-center py-4">No sets added yet</p>
         )}
-        {filteredOnPlan.map(s => (
-          <div key={s.id}>
-            <div
-              onClick={(e) => handleSetClick(e, s.id)}
-              title={`${s.name} — ${s.width}${unit} x ${s.height}${unit}${s.category && s.category !== 'Set' ? ` [${s.category}]` : ''}${s.wallGap > 0 ? ` Gap: ${s.wallGap}${unit}` : ''}${s.lockedToPdf ? ' [Locked]' : ''}${s.noCut ? ' [No Cut]' : ''}${s.rotation ? ` ${s.rotation}\u00B0` : ''}`}
-              className={`flex items-center gap-1 px-2 py-1.5 rounded cursor-pointer text-sm
-                ${multiSelected.has(s.id) ? 'bg-indigo-900/40 border border-indigo-500/50' : s.id === selectedSetId ? 'bg-gray-600' : 'hover:bg-gray-700'}
-                ${s.lockedToPdf && !multiSelected.has(s.id) ? 'border border-amber-600/40' : ''}`}
-            >
-              {/* Multi-select checkbox */}
-              <input
-                type="checkbox"
-                checked={multiSelected.has(s.id)}
-                onChange={(e) => toggleMultiSelect(e, s.id)}
-                onClick={(e) => e.stopPropagation()}
-                className="w-3 h-3 shrink-0 accent-indigo-500 cursor-pointer"
-              />
 
-              <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: s.color, opacity: s.opacity ?? 1 }} />
-              <span className="flex-1 truncate text-xs">{s.name}</span>
-
-              {/* Category badge */}
-              {(s.category && s.category !== 'Set') && (
-                <span className={`text-[9px] ${CATEGORY_COLORS[s.category] || 'text-gray-500'}`}>
-                  {s.category}
-                </span>
-              )}
-
-              <span className="text-[10px] text-gray-400">{s.width}x{s.height}</span>
-
-              {/* Wall height indicator */}
-              {WALL_CATEGORIES.includes(s.category) && (
-                <span className="text-[9px] text-sky-400" title={`Wall height: ${s.wallHeight || defaultWallHeight}${unit}`}>
-                  H:{s.wallHeight || defaultWallHeight}
-                </span>
-              )}
-
-              {/* Per-set wall render mode toggle (for wall categories) */}
-              {WALL_CATEGORIES.includes(s.category) && (
-                <button onClick={(e) => {
-                  e.stopPropagation()
-                  const modes = [null, 'finished', 'construction-front']
-                  const current = s.wallRenderMode || null
-                  const idx = modes.indexOf(current)
-                  const next = modes[(idx + 1) % modes.length]
-                  updateSet(s.id, { wallRenderMode: next })
-                }}
-                  className={`text-[9px] px-1 rounded ${
-                    s.wallRenderMode === 'finished' ? 'bg-emerald-700 text-emerald-200'
-                    : s.wallRenderMode === 'construction-front' ? 'bg-amber-700 text-amber-200'
-                    : 'text-gray-500 hover:text-gray-300'
-                  }`}
-                  title={`Render: ${s.wallRenderMode || 'Global'} — click to cycle`}
-                >
-                  {s.wallRenderMode === 'finished' ? 'F' : s.wallRenderMode === 'construction-front' ? 'C' : 'G'}
-                </button>
-              )}
-
-              {/* Wall gap indicator */}
-              {s.wallGap > 0 && (
-                <span className="text-[9px] text-amber-500" title={`${s.wallGap}${unit} access gap`}>
-                  {s.wallGap}{unit}
-                </span>
-              )}
-
-              {/* No-cut shield */}
-              {s.noCut && (
-                <span className="text-[10px] text-gray-500" title="No cut">&#x1F6E1;</span>
-              )}
-
-              {/* Cut indicator + restore */}
-              {s.cutouts?.length > 0 && (
-                <button onClick={(e) => { e.stopPropagation(); clearCutouts(s.id) }}
-                  className="text-[10px] text-red-400 hover:text-yellow-300" title="Restore original shape">
-                  [cut] &#x21A9;
-                </button>
-              )}
-
-              {/* Cut into another set — only if not noCut */}
-              {!s.noCut && (
-                <button onClick={(e) => { e.stopPropagation(); setCuttingSetId(cuttingSetId === s.id ? null : s.id) }}
-                  className={`text-xs ${cuttingSetId === s.id ? 'text-red-400' : 'text-gray-500 hover:text-red-300'}`}
-                  title="Cut this set into another set">
-                  &#x2702;
-                </button>
-              )}
-
-              {/* Lock to PDF button */}
-              {pdfImage && (
-                <button onClick={(e) => { e.stopPropagation(); toggleLockToPdf(s.id) }}
-                  className={`text-xs ${s.lockedToPdf ? 'text-amber-400' : 'text-gray-500 hover:text-amber-300'}`}
-                  title={s.lockedToPdf ? 'Unlock from PDF' : 'Lock to PDF position'}>
-                  {s.lockedToPdf ? '\u{1F4CC}' : '\u{1F4CD}'}
-                </button>
-              )}
-
-              {/* Rotation controls */}
-              <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { rotation: ((s.rotation || 0) - 1 + 360) % 360 }) }}
-                className="text-[10px] text-yellow-400 hover:text-yellow-300" title="-1°">&#x25C1;</button>
-              <span className="text-[9px] text-gray-500 min-w-[24px] text-center inline-block">{s.rotation || 0}°</span>
-              <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { rotation: ((s.rotation || 0) + 1) % 360 }) }}
-                className="text-[10px] text-yellow-400 hover:text-yellow-300" title="+1°">&#x25B7;</button>
-              <button onClick={(e) => handleRotate(e, s)}
-                className="text-[10px] text-yellow-400 hover:text-yellow-300" title="Rotate 90°">&#x21BB;</button>
-
-              {/* Z-order */}
-              <button onClick={(e) => { e.stopPropagation(); bringForward(s.id) }}
-                className="text-[10px] text-gray-500 hover:text-white" title="Bring forward">
-                &#x25B2;
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); sendBackward(s.id) }}
-                className="text-[10px] text-gray-500 hover:text-white" title="Send backward">
-                &#x25BC;
-              </button>
-
-              {/* Label visibility toggle */}
-              <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { labelHidden: !s.labelHidden }) }}
-                className={`text-[10px] ${s.labelHidden ? 'text-gray-600' : 'text-gray-400 hover:text-white'}`}
-                title={s.labelHidden ? 'Show label' : 'Hide label'}>
-                Aa
-              </button>
-
-              {/* Label position (only in inline mode) */}
-              {!s.labelHidden && labelMode === 'inline' && (
-                <select value={s.labelPosition || 'top-left'}
-                  onClick={e => e.stopPropagation()}
-                  onChange={e => { e.stopPropagation(); updateSet(s.id, { labelPosition: e.target.value }) }}
-                  className="text-[9px] bg-gray-700 border border-gray-600 rounded text-gray-400 px-0.5 py-0 w-8"
-                  title="Label position">
-                  <option value="top-left">TL</option>
-                  <option value="top">T</option>
-                  <option value="top-right">TR</option>
-                  <option value="left">L</option>
-                  <option value="center">C</option>
-                  <option value="right">R</option>
-                  <option value="bottom-left">BL</option>
-                  <option value="bottom">B</option>
-                  <option value="bottom-right">BR</option>
-                </select>
-              )}
-
-              {/* Duplicate */}
-              <button onClick={(e) => { e.stopPropagation(); duplicateSet(s.id) }}
-                className="text-xs text-cyan-400 hover:text-cyan-300" title="Duplicate set">
-                &#x29C9;
-              </button>
-
-              {/* Hide from plan (keep position) */}
-              <button onClick={(e) => { e.stopPropagation(); hideSet(s.id) }}
-                className="text-xs text-gray-500 hover:text-gray-300" title="Hide from plan (keep position)">
-                &#x1F441;
-              </button>
-
-              {/* Remove from plan (reset position) */}
-              <button onClick={(e) => { e.stopPropagation(); removeSetFromPlan(s.id) }}
-                className="text-xs text-orange-400 hover:text-orange-300" title="Remove from plan (keep in list)">
-                &#x2B07;
-              </button>
-
-              {/* Edit */}
-              <button onClick={(e) => { e.stopPropagation(); startEdit(s) }}
-                className="text-xs text-blue-400 hover:text-blue-300" title="Edit set">
-                &#x270E;
-              </button>
-
-              {/* Delete permanently */}
-              <button onClick={(e) => { e.stopPropagation(); deleteSet(s.id) }}
-                className="text-xs text-red-400 hover:text-red-300" title="Delete permanently">
-                &#x2715;
-              </button>
-            </div>
-
-            {/* Cut-into target picker */}
-            {cuttingSetId === s.id && (
-              <div className="ml-6 mt-1 mb-1 p-2 bg-gray-800 rounded border border-red-700/50">
-                <p className="text-[10px] text-gray-400 mb-1">Cut <span className="text-white">{s.name}</span> into:</p>
-                <div className="flex flex-col gap-0.5">
-                  {onPlanSets.filter(t => t.id !== s.id && !t.noCut).map(t => (
-                    <button key={t.id}
-                      onClick={() => handleCutInto(s.id, t.id)}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-left hover:bg-red-900/30 transition-colors"
-                    >
-                      <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: t.color }} />
-                      <span className="text-gray-300">{t.name}</span>
-                      <span className="text-[9px] text-gray-500">{t.width}x{t.height}</span>
-                    </button>
-                  ))}
-                  {onPlanSets.filter(t => t.id !== s.id && !t.noCut).length === 0 && (
-                    <p className="text-[10px] text-gray-500">No cuttable sets on plan</p>
-                  )}
-                </div>
-                <button onClick={() => setCuttingSetId(null)}
-                  className="mt-1 text-[10px] text-gray-500 hover:text-gray-300">
-                  Cancel
-                </button>
+        {/* Sets section */}
+        {filteredSets.length > 0 && (
+          <div>
+            <button onClick={() => setSetsCollapsed(!setsCollapsed)}
+              className="flex items-center justify-between w-full px-2 py-1.5 bg-gray-800 rounded text-xs text-gray-300 hover:bg-gray-700 mb-1">
+              <span className="flex items-center gap-1.5">
+                <span className="text-gray-500">{setsCollapsed ? '\u25B8' : '\u25BE'}</span>
+                <span className="font-medium">Sets</span>
+                <span className="text-[10px] text-gray-500">({filteredSets.length})</span>
+              </span>
+            </button>
+            {!setsCollapsed && (
+              <div className="flex flex-col gap-1">
+                {filteredSets.map(s => renderSetRow(s))}
               </div>
             )}
           </div>
-        ))}
+        )}
+
+        {/* Components section (Windows, Doors, Walls) */}
+        {filteredComponents.length > 0 && (
+          <div>
+            <button onClick={() => setComponentsCollapsed(!componentsCollapsed)}
+              className="flex items-center justify-between w-full px-2 py-1.5 bg-gray-800 rounded text-xs text-amber-300 hover:bg-gray-700 mb-1">
+              <span className="flex items-center gap-1.5">
+                <span className="text-gray-500">{componentsCollapsed ? '\u25B8' : '\u25BE'}</span>
+                <span className="font-medium">Components</span>
+                <span className="text-[10px] text-gray-500">({filteredComponents.length})</span>
+              </span>
+            </button>
+            {!componentsCollapsed && (
+              <div className="flex flex-col gap-1">
+                {filteredComponents.map(s => renderSetRow(s))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Hidden sets */}
@@ -988,7 +1177,7 @@ export default function SetsTab() {
               >
                 <div className="w-3 h-3 rounded-sm shrink-0 opacity-50" style={{ backgroundColor: s.color }} />
                 <span className="flex-1 truncate text-xs text-gray-400">{s.name}</span>
-                <span className="text-[10px] text-gray-500">{s.width}x{s.height}</span>
+                <span className="text-[10px] text-gray-500">{WALL_CATEGORIES.includes(s.category) ? `${formatInUnit(s.width, inputUnit)}×${formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)}×${formatInUnit(s.height, inputUnit)}` : `${formatInUnit(s.width, inputUnit)}×${formatInUnit(s.height, inputUnit)}`}</span>
 
                 {/* Show on plan */}
                 <button onClick={() => showSet(s.id)}
@@ -1023,7 +1212,7 @@ export default function SetsTab() {
               >
                 <div className="w-3 h-3 rounded-sm shrink-0 opacity-50" style={{ backgroundColor: s.color }} />
                 <span className="flex-1 truncate text-xs text-gray-400">{s.name}</span>
-                <span className="text-[10px] text-gray-500">{s.width}x{s.height}</span>
+                <span className="text-[10px] text-gray-500">{WALL_CATEGORIES.includes(s.category) ? `${formatInUnit(s.width, inputUnit)}×${formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)}×${formatInUnit(s.height, inputUnit)}` : `${formatInUnit(s.width, inputUnit)}×${formatInUnit(s.height, inputUnit)}`}</span>
 
                 {/* Add back to plan */}
                 <button onClick={() => addSetToPlan(s.id)}
@@ -1043,4 +1232,4 @@ export default function SetsTab() {
       )}
     </div>
   )
-}
+})

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import useStore from '../store.js'
 
 const CATEGORY_ICONS = {
@@ -26,7 +26,7 @@ const CATEGORY_COLORS = {
   Other: '#6B7280',
 }
 
-export default function LayersTab() {
+export default memo(function LayersTab() {
   const {
     sets, groups, annotations,
     layerVisibility, toggleLayerVisibility,
@@ -34,7 +34,11 @@ export default function LayersTab() {
     addGroup, selectedSetId, setSelectedSetId,
     updateAnnotation, deleteAnnotation, addAnnotation,
     showDimensions, setShowDimensions,
+    dimMode, setDimMode,
+    showClearance, setShowClearance,
     labelsVisible, setLabelsVisible,
+    labelFontSize, setLabelFontSize,
+    labelColor, setLabelColor,
     showOverlaps, setShowOverlaps,
     gridVisible, setGridVisible,
     showHoverTooltips, setShowHoverTooltips,
@@ -42,11 +46,18 @@ export default function LayersTab() {
     buildingWalls, buildingWallsVisible, setBuildingWallsVisible,
     showLockIndicators, setShowLockIndicators,
     hideAllSets, setHideAllSets,
+    pdfLayers, activePdfLayerId, setActivePdfLayer,
+    togglePdfLayerVisibility, setPdfLayerOpacity,
+    renamePdfLayer, removePdfLayer, updatePdfLayer,
   } = useStore()
 
   const [newGroupName, setNewGroupName] = useState('')
   const [editingAnnotation, setEditingAnnotation] = useState(null)
   const [annotationText, setAnnotationText] = useState('')
+  const [editingPdfName, setEditingPdfName] = useState(null)
+  const [pdfNameInput, setPdfNameInput] = useState('')
+  const [scalingPdfId, setScalingPdfId] = useState(null)
+  const [scaleDimInput, setScaleDimInput] = useState('')
 
   // Collect unique categories from sets
   const visibleSets = sets.filter(s => s.onPlan !== false)
@@ -79,6 +90,33 @@ export default function LayersTab() {
           <input type="checkbox" checked={labelsVisible} onChange={e => setLabelsVisible(e.target.checked)} className="accent-indigo-500" />
           <span className="text-gray-300">Labels</span>
         </label>
+        {labelsVisible && (
+          <div className="flex items-center gap-2 pl-5 py-0.5">
+            <span className="text-[10px] text-gray-500 shrink-0">Size:</span>
+            <select
+              value={labelFontSize}
+              onChange={e => setLabelFontSize(Number(e.target.value))}
+              className="text-[10px] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white"
+            >
+              <option value={0}>Auto</option>
+              <option value={8}>8px</option>
+              <option value={10}>10px</option>
+              <option value={12}>12px</option>
+              <option value={14}>14px</option>
+              <option value={16}>16px</option>
+              <option value={18}>18px</option>
+              <option value={20}>20px</option>
+              <option value={24}>24px</option>
+            </select>
+            <span className="text-[10px] text-gray-500 shrink-0">Color:</span>
+            <input
+              type="color"
+              value={labelColor}
+              onChange={e => setLabelColor(e.target.value)}
+              className="w-5 h-5 rounded border-0 cursor-pointer bg-transparent"
+            />
+          </div>
+        )}
         <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
           <input type="checkbox" checked={showOverlaps} onChange={e => setShowOverlaps(e.target.checked)} className="accent-indigo-500" />
           <span className="text-gray-300">Overlap Zones</span>
@@ -86,6 +124,23 @@ export default function LayersTab() {
         <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
           <input type="checkbox" checked={showDimensions} onChange={e => setShowDimensions(e.target.checked)} className="accent-indigo-500" />
           <span className="text-gray-300">Dimension Lines</span>
+        </label>
+        {showDimensions && (
+          <div className="flex items-center gap-1 pl-5 py-0.5">
+            <span className="text-[10px] text-gray-500 shrink-0">Mode:</span>
+            <button onClick={() => setDimMode('selected')}
+              className={`text-[10px] px-1.5 py-0.5 rounded ${dimMode === 'selected' ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>
+              Selected
+            </button>
+            <button onClick={() => setDimMode('all')}
+              className={`text-[10px] px-1.5 py-0.5 rounded ${dimMode === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>
+              All
+            </button>
+          </div>
+        )}
+        <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
+          <input type="checkbox" checked={showClearance} onChange={e => setShowClearance(e.target.checked)} className="accent-cyan-500" />
+          <span className="text-gray-300">Clearance Zones</span>
         </label>
         <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-700/50 rounded px-1 py-0.5">
           <input type="checkbox" checked={showHoverTooltips} onChange={e => setShowHoverTooltips(e.target.checked)} className="accent-indigo-500" />
@@ -101,6 +156,146 @@ export default function LayersTab() {
           <span className="text-[10px] text-gray-500">({buildingWalls.length})</span>
         </label>
       </div>
+
+      {/* PDF Layers */}
+      {pdfLayers.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">PDF Layers</span>
+          {pdfLayers.map(layer => (
+            <div
+              key={layer.id}
+              className={`bg-gray-800/50 rounded border overflow-hidden ${
+                layer.id === activePdfLayerId ? 'border-indigo-500' : 'border-gray-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 px-2 py-1.5">
+                {/* Visibility toggle */}
+                <button
+                  onClick={() => togglePdfLayerVisibility(layer.id)}
+                  className={`text-xs ${layer.visible ? 'text-green-400' : 'text-gray-600'}`}
+                  title={layer.visible ? 'Hide' : 'Show'}
+                >
+                  {layer.visible ? '\u{1F441}' : '\u{1F441}\u200D\u{1F5E8}'}
+                </button>
+
+                {/* Name — click to edit */}
+                {editingPdfName === layer.id ? (
+                  <input
+                    type="text"
+                    value={pdfNameInput}
+                    onChange={e => setPdfNameInput(e.target.value)}
+                    onBlur={() => { renamePdfLayer(layer.id, pdfNameInput); setEditingPdfName(null) }}
+                    onKeyDown={e => { if (e.key === 'Enter') { renamePdfLayer(layer.id, pdfNameInput); setEditingPdfName(null) } }}
+                    autoFocus
+                    className="flex-1 px-1 py-0.5 bg-gray-900 border border-gray-600 rounded text-xs text-white focus:outline-none focus:border-indigo-500 min-w-0"
+                  />
+                ) : (
+                  <span
+                    className="text-xs text-white flex-1 truncate cursor-pointer"
+                    onClick={() => { setEditingPdfName(layer.id); setPdfNameInput(layer.name) }}
+                    title="Click to rename"
+                  >
+                    {layer.name}
+                  </span>
+                )}
+
+                {/* Active indicator / select */}
+                <button
+                  onClick={() => setActivePdfLayer(layer.id)}
+                  className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    layer.id === activePdfLayerId
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                  title="Set as active PDF"
+                >
+                  {layer.id === activePdfLayerId ? 'Active' : 'Select'}
+                </button>
+
+                {/* Remove */}
+                <button
+                  onClick={() => { if (confirm(`Remove "${layer.name}" PDF layer?`)) removePdfLayer(layer.id) }}
+                  className="text-[10px] text-red-400 hover:text-red-300"
+                  title="Remove PDF layer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Opacity slider */}
+              <div className="flex items-center gap-2 px-2 py-1 border-t border-gray-700/50">
+                <span className="text-[10px] text-gray-500 w-10">Opacity</span>
+                <input
+                  type="range"
+                  min="0" max="1" step="0.05"
+                  value={layer.opacity}
+                  onChange={e => setPdfLayerOpacity(layer.id, parseFloat(e.target.value))}
+                  className="flex-1 h-1 accent-indigo-500"
+                />
+                <span className="text-[10px] text-gray-400 w-8 text-right">{Math.round(layer.opacity * 100)}%</span>
+              </div>
+
+              {/* Scale to dimension */}
+              <div className="flex items-center gap-1 px-2 py-1 border-t border-gray-700/50">
+                {scalingPdfId === layer.id ? (
+                  <>
+                    <input
+                      type="number"
+                      placeholder={`Width in ${unit}...`}
+                      value={scaleDimInput}
+                      onChange={e => setScaleDimInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          const realWidth = parseFloat(scaleDimInput)
+                          if (realWidth > 0 && layer.originalSize) {
+                            const newScale = (realWidth * pixelsPerUnit) / layer.originalSize.width
+                            updatePdfLayer(layer.id, { scale: newScale })
+                          }
+                          setScalingPdfId(null)
+                          setScaleDimInput('')
+                        }
+                        if (e.key === 'Escape') { setScalingPdfId(null); setScaleDimInput('') }
+                      }}
+                      autoFocus
+                      className="flex-1 px-1.5 py-0.5 bg-gray-900 border border-gray-600 rounded text-[10px] text-white focus:outline-none focus:border-indigo-500 min-w-0"
+                    />
+                    <button
+                      onClick={() => {
+                        const realWidth = parseFloat(scaleDimInput)
+                        if (realWidth > 0 && layer.originalSize) {
+                          const newScale = (realWidth * pixelsPerUnit) / layer.originalSize.width
+                          updatePdfLayer(layer.id, { scale: newScale })
+                        }
+                        setScalingPdfId(null)
+                        setScaleDimInput('')
+                      }}
+                      className="text-[10px] text-green-400 hover:text-green-300 px-1"
+                    >
+                      Apply
+                    </button>
+                    <button
+                      onClick={() => { setScalingPdfId(null); setScaleDimInput('') }}
+                      className="text-[10px] text-gray-400 hover:text-gray-300"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setScalingPdfId(layer.id)}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300"
+                  >
+                    Scale to Dimension
+                  </button>
+                )}
+                <span className="text-[10px] text-gray-600 ml-auto">
+                  {Math.round(layer.scale * 100)}%
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Category layers */}
       <div className="flex flex-col gap-0.5">
@@ -329,4 +524,4 @@ export default function LayersTab() {
       )}
     </div>
   )
-}
+})
