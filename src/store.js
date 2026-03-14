@@ -221,7 +221,8 @@ const useStore = create((set, get) => ({
     const layer = {
       id, name, image,
       rotation: 0, position: { x: 0, y: 0 },
-      scale: 1, originalSize: { width: originalWidth, height: originalHeight },
+      scale: 1, scaleX: 1, scaleY: 1,
+      originalSize: { width: originalWidth, height: originalHeight },
       visible: true, opacity: 0.6,
       lockedToSetId: null,        // null = free, or set ID to pin to
       lockedToSetOffset: null,    // { dx, dy } relative to set's x,y

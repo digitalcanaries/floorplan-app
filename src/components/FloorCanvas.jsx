@@ -532,8 +532,8 @@ export default function FloorCanvas({ onCanvasSize }) {
           angle: layer.rotation,
           flipX: !!layer.flipX,
           flipY: !!layer.flipY,
-          scaleX: layer.scale,
-          scaleY: layer.scale,
+          scaleX: layer.scaleX || layer.scale,
+          scaleY: layer.scaleY || layer.scale,
           selectable: true,
           evented: true,
           name: `pdf-bg-${layer.id}`,
@@ -543,22 +543,23 @@ export default function FloorCanvas({ onCanvasSize }) {
           borderColor: '#6366F1',
           borderDashArray: [5, 5],
           lockRotation: true,
-          lockUniScaling: true,
+          lockUniScaling: false,
           cornerColor: '#6366F1',
           cornerStyle: 'circle',
           cornerSize: 10,
           transparentCorners: false,
         })
-        // Hide mid-point resize handles — only show corners (Fabric v7)
+        // Hide rotation handle — keep mid-point handles for non-proportional scaling
         const c = fImg.controls
         if (c) {
-          delete c.mt; delete c.mb; delete c.ml; delete c.mr; delete c.mtr
+          delete c.mtr
         }
 
         const layerId = layer.id
         fImg.on('modified', function () {
           const newPos = { x: this.left, y: this.top }
-          const newScale = this.scaleX
+          const newScaleX = this.scaleX
+          const newScaleY = this.scaleY
           const currentLayer = useStore.getState().pdfLayers.find(l => l.id === layerId)
 
           if (currentLayer && currentLayer.lockedToSetId) {
@@ -567,20 +568,20 @@ export default function FloorCanvas({ onCanvasSize }) {
             if (parentSet) {
               updatePdfLayer(layerId, {
                 position: newPos,
-                scale: newScale,
+                scale: newScaleX, scaleX: newScaleX, scaleY: newScaleY,
                 lockedToSetOffset: { dx: newPos.x - parentSet.x, dy: newPos.y - parentSet.y },
               })
             } else {
-              updatePdfLayer(layerId, { position: newPos, scale: newScale })
+              updatePdfLayer(layerId, { position: newPos, scale: newScaleX, scaleX: newScaleX, scaleY: newScaleY })
             }
           } else {
             // Free-floating — only the MASTER (first) PDF moves locked walls/sets
             const masterLayerId = useStore.getState().pdfLayers[0]?.id
             if (layerId === masterLayerId) {
               setPdfPosition(newPos)
-              setPdfScale(newScale)
+              setPdfScale(newScaleX)
             }
-            updatePdfLayer(layerId, { position: newPos, scale: newScale })
+            updatePdfLayer(layerId, { position: newPos, scale: newScaleX, scaleX: newScaleX, scaleY: newScaleY })
           }
         })
 

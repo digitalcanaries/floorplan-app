@@ -776,21 +776,27 @@ export default memo(function SetsTab() {
         </div>
 
         {/* Flip controls */}
-        <div className="flex items-center gap-1">
-          <label className="text-xs text-gray-400 mr-1">Flip:</label>
-          <button type="button"
-            onClick={() => updateSet(s.id, { flipX: !s.flipX })}
-            className={`px-2 py-0.5 rounded text-[10px] ${s.flipX ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-            title="Flip horizontal">
-            ↔ H
-          </button>
-          <button type="button"
-            onClick={() => updateSet(s.id, { flipY: !s.flipY })}
-            className={`px-2 py-0.5 rounded text-[10px] ${s.flipY ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-            title="Flip vertical">
-            ↕ V
-          </button>
-        </div>
+        {editing && (() => {
+          const editSet = sets.find(st => st.id === editing)
+          if (!editSet) return null
+          return (
+            <div className="flex items-center gap-1">
+              <label className="text-xs text-gray-400 mr-1">Flip:</label>
+              <button type="button"
+                onClick={() => updateSet(editing, { flipX: !editSet.flipX })}
+                className={`px-2 py-0.5 rounded text-[10px] ${editSet.flipX ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                title="Flip horizontal">
+                ↔ H
+              </button>
+              <button type="button"
+                onClick={() => updateSet(editing, { flipY: !editSet.flipY })}
+                className={`px-2 py-0.5 rounded text-[10px] ${editSet.flipY ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+                title="Flip vertical">
+                ↕ V
+              </button>
+            </div>
+          )
+        })()}
 
         {/* Remove walls — available for all set types */}
         <div className="flex flex-col gap-1">

@@ -250,7 +250,7 @@ export default memo(function LayersTab() {
                           const realWidth = parseFloat(scaleDimInput)
                           if (realWidth > 0 && layer.originalSize) {
                             const newScale = (realWidth * pixelsPerUnit) / layer.originalSize.width
-                            updatePdfLayer(layer.id, { scale: newScale })
+                            updatePdfLayer(layer.id, { scale: newScale, scaleX: newScale, scaleY: newScale })
                           }
                           setScalingPdfId(null)
                           setScaleDimInput('')
@@ -290,7 +290,9 @@ export default memo(function LayersTab() {
                   </button>
                 )}
                 <span className="text-[10px] text-gray-600 ml-auto">
-                  {Math.round(layer.scale * 100)}%
+                  {(layer.scaleX && layer.scaleY && Math.abs(layer.scaleX - layer.scaleY) > 0.001)
+                    ? `${Math.round((layer.scaleX || layer.scale) * 100)}×${Math.round((layer.scaleY || layer.scale) * 100)}%`
+                    : `${Math.round((layer.scale || 1) * 100)}%`}
                 </span>
               </div>
 
