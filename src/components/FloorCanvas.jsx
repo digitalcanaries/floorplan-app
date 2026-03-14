@@ -589,14 +589,27 @@ export default function FloorCanvas({ onCanvasSize }) {
         pdfFabricRefs.current[layerId] = fImg
         fc.add(fImg)
 
-        // Z-order: back layers go behind everything, front layers stay above sets
-        if ((layer.zOrder || 'back') === 'back') {
-          fc.sendObjectToBack(fImg)
-        }
-        // 'front' layers are just added — they'll be above sets already
-
         loaded++
         if (loaded === layersToAdd.length) {
+          // All PDF layers loaded — now set correct z-order:
+          // Master plan (pdfLayers[0]) at the very bottom,
+          // 'back' overlays above master but below sets,
+          // 'front' overlays stay on top of everything.
+          const allLayers = useStore.getState().pdfLayers.filter(l => l.visible)
+          const masterLayerId = allLayers[0]?.id
+
+          // First: send 'back' overlays to back (above master, below sets)
+          for (const l of allLayers) {
+            if (l.id === masterLayerId) continue // skip master for now
+            if ((l.zOrder || 'back') === 'back') {
+              const obj = pdfFabricRefs.current[l.id]
+              if (obj) fc.sendObjectToBack(obj)
+            }
+          }
+          // Then: send master to the very bottom (behind all overlays)
+          const masterObj = pdfFabricRefs.current[masterLayerId]
+          if (masterObj) fc.sendObjectToBack(masterObj)
+
           fc.requestRenderAll()
         }
       }).catch((err) => {
