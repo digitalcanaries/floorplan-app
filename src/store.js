@@ -402,9 +402,20 @@ const useStore = create((set, get) => ({
     )
     set({ pdfPosition: pos, sets: updatedSets, buildingWalls: updatedBW, buildingColumns: updatedBC })
     const activeId = get().activePdfLayerId
-    if (activeId) {
-      set({ pdfLayers: get().pdfLayers.map(l => l.id === activeId ? { ...l, position: pos } : l) })
-    }
+    // Also move PDF overlay layers that are pinned to any moved set
+    const curLayers = get().pdfLayers
+    const updatedLayers = curLayers.map(l => {
+      if (!l.lockedToSetId) {
+        // Not pinned to a set — only update master layer position
+        return l.id === activeId ? { ...l, position: pos } : l
+      }
+      // Find the parent set (already moved in updatedSets)
+      const parentSet = updatedSets.find(s => s.id === l.lockedToSetId)
+      if (!parentSet) return l
+      const off = l.lockedToSetOffset || { dx: 0, dy: 0 }
+      return { ...l, position: { x: parentSet.x + off.dx, y: parentSet.y + off.dy } }
+    })
+    set({ pdfLayers: updatedLayers })
     get().autosave()
   },
   setPixelsPerUnit: (p) => {

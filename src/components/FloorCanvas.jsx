@@ -587,6 +587,16 @@ export default function FloorCanvas({ onCanvasSize }) {
             if (layerId === masterLayerId) {
               setPdfPosition(newPos)
               setPdfScale(newScaleX)
+              // Visually move overlay PDFs pinned to sets that just moved
+              const movedState = useStore.getState()
+              const pinnedLayers = movedState.pdfLayers.filter(l => l.lockedToSetId)
+              for (const pl of pinnedLayers) {
+                const fObj = pdfFabricRefs.current[pl.id]
+                if (fObj) {
+                  fObj.set({ left: pl.position.x, top: pl.position.y })
+                  fObj.setCoords()
+                }
+              }
             }
             updatePdfLayer(layerId, { position: newPos, scale: newScaleX, scaleX: newScaleX, scaleY: newScaleY })
           }
