@@ -477,7 +477,7 @@ export default function FloorCanvas({ onCanvasSize }) {
 
   // Compute a structural key: only changes when layers are added, removed, or visibility/opacity/image changes
   // Position and scale changes from dragging should NOT trigger a full rebuild
-  const pdfStructureKey = pdfLayers.map(l => `${l.id}:${l.visible}:${l.opacity}:${l.image ? 1 : 0}:${l.zOrder || 'back'}`).join('|')
+  const pdfStructureKey = pdfLayers.map(l => `${l.id}:${l.visible}:${l.opacity}:${l.image ? 1 : 0}:${l.zOrder || 'back'}:${l.flipX ? 1 : 0}:${l.flipY ? 1 : 0}`).join('|')
 
   // Draw PDF layers — only rebuilds when structure changes, not on every drag
   useEffect(() => {
@@ -530,6 +530,8 @@ export default function FloorCanvas({ onCanvasSize }) {
           left: layer.position.x,
           top: layer.position.y,
           angle: layer.rotation,
+          flipX: !!layer.flipX,
+          flipY: !!layer.flipY,
           scaleX: layer.scale,
           scaleY: layer.scale,
           selectable: true,
@@ -847,6 +849,8 @@ export default function FloorCanvas({ onCanvasSize }) {
           strokeWidth: 2,
           strokeDashArray: showLockVis ? [6, 3] : [],
           angle: s.rotation || 0,
+          flipX: !!s.flipX,
+          flipY: !!s.flipY,
           originX: 'left',
           originY: 'top',
           name: SET_PREFIX + s.id,
@@ -872,6 +876,8 @@ export default function FloorCanvas({ onCanvasSize }) {
           strokeWidth: 2,
           strokeDashArray: showLockVis ? [6, 3] : [],
           angle: s.rotation || 0,
+          flipX: !!s.flipX,
+          flipY: !!s.flipY,
           originX: 'left',
           originY: 'top',
           name: SET_PREFIX + s.id,

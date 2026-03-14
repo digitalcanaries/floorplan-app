@@ -465,6 +465,8 @@ export default memo(function SetsTab() {
           className="text-[10px] text-yellow-400 hover:text-yellow-300" title="+1°">&#x25B7;</button>
         <button onClick={(e) => handleRotate(e, s)}
           className="text-[10px] text-yellow-400 hover:text-yellow-300" title="Rotate 90°">&#x21BB;</button>
+        <button onClick={(e) => { e.stopPropagation(); updateSet(s.id, { flipX: !s.flipX }) }}
+          className={`text-[10px] ${s.flipX ? 'text-cyan-400' : 'text-gray-500'} hover:text-cyan-300`} title="Flip horizontal">↔</button>
         <button onClick={(e) => { e.stopPropagation(); bringForward(s.id) }}
           className="text-[10px] text-gray-500 hover:text-white" title="Bring forward">&#x25B2;</button>
         <button onClick={(e) => { e.stopPropagation(); sendBackward(s.id) }}
@@ -771,6 +773,23 @@ export default memo(function SetsTab() {
             className="px-1.5 py-0.5 bg-gray-700 rounded text-[10px] text-gray-300 hover:bg-gray-600" title="+5°">+5</button>
           <button type="button" onClick={() => setForm({ ...form, rotation: String(((parseFloat(form.rotation) || 0) + 90) % 360) })}
             className="px-1.5 py-0.5 bg-indigo-600 rounded text-[10px] text-white hover:bg-indigo-500" title="+90°">90</button>
+        </div>
+
+        {/* Flip controls */}
+        <div className="flex items-center gap-1">
+          <label className="text-xs text-gray-400 mr-1">Flip:</label>
+          <button type="button"
+            onClick={() => updateSet(s.id, { flipX: !s.flipX })}
+            className={`px-2 py-0.5 rounded text-[10px] ${s.flipX ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+            title="Flip horizontal">
+            ↔ H
+          </button>
+          <button type="button"
+            onClick={() => updateSet(s.id, { flipY: !s.flipY })}
+            className={`px-2 py-0.5 rounded text-[10px] ${s.flipY ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+            title="Flip vertical">
+            ↕ V
+          </button>
         </div>
 
         {/* Remove walls — available for all set types */}

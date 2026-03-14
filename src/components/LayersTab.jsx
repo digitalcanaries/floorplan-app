@@ -313,18 +313,32 @@ export default memo(function LayersTab() {
                 </select>
               </div>
 
-              {/* Z-order toggle */}
+              {/* Flip + Z-order */}
               <div className="flex items-center gap-2 px-2 py-1 border-t border-gray-700/50">
-                <span className="text-[10px] text-gray-500 w-10">Layer</span>
+                <span className="text-[10px] text-gray-500 w-10">Flip</span>
+                <button
+                  onClick={() => updatePdfLayer(layer.id, { flipX: !layer.flipX })}
+                  className={`text-[10px] px-2 py-0.5 rounded ${layer.flipX ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                  title="Flip horizontal"
+                >
+                  ↔ H
+                </button>
+                <button
+                  onClick={() => updatePdfLayer(layer.id, { flipY: !layer.flipY })}
+                  className={`text-[10px] px-2 py-0.5 rounded ${layer.flipY ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                  title="Flip vertical"
+                >
+                  ↕ V
+                </button>
                 <button
                   onClick={() => setPdfLayerZOrder(layer.id, (layer.zOrder || 'back') === 'front' ? 'back' : 'front')}
-                  className={`text-[10px] px-2 py-0.5 rounded ${
+                  className={`text-[10px] px-2 py-0.5 rounded ml-auto ${
                     (layer.zOrder || 'back') === 'front'
                       ? 'bg-amber-600 text-white'
                       : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
                   }`}
                 >
-                  {(layer.zOrder || 'back') === 'front' ? '⬆ In Front of Sets' : '⬇ Behind Sets'}
+                  {(layer.zOrder || 'back') === 'front' ? '⬆ Front' : '⬇ Back'}
                 </button>
               </div>
             </div>
