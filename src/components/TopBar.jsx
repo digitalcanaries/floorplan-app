@@ -24,6 +24,7 @@ export default function TopBar({ canvasSize }) {
     exclusionZones, layoutScore, setLayoutScore,
     annotations, sets: allSets, pixelsPerUnit: ppu,
     pdfLayers, activePdfLayerId, pdfOriginalSize, setPdfScale, unit,
+    lockAllToPdf, unlockAllFromPdf, pdfImage,
   } = useStore()
 
   const loadInputRef = useRef(null)
@@ -419,6 +420,21 @@ export default function TopBar({ canvasSize }) {
           className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">
           Scale PDF
         </button>
+      )}
+
+      {pdfImage && (
+        <>
+          <button onClick={lockAllToPdf}
+            className="px-2 py-1 bg-amber-700 hover:bg-amber-600 rounded text-xs"
+            title="Lock all sets to the master plan PDF">
+            📌 Pin All
+          </button>
+          <button onClick={unlockAllFromPdf}
+            className="px-1.5 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-400"
+            title="Unlock all sets from PDF">
+            Unpin
+          </button>
+        </>
       )}
 
       <label className="flex items-center gap-1 text-xs cursor-pointer">

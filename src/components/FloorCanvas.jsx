@@ -572,8 +572,9 @@ export default function FloorCanvas({ onCanvasSize }) {
               updatePdfLayer(layerId, { position: newPos, scale: newScale })
             }
           } else {
-            // Free-floating — call setPdfPosition for master PDF (moves locked walls/sets)
-            if (layerId === useStore.getState().activePdfLayerId) {
+            // Free-floating — only the MASTER (first) PDF moves locked walls/sets
+            const masterLayerId = useStore.getState().pdfLayers[0]?.id
+            if (layerId === masterLayerId) {
               setPdfPosition(newPos)
               setPdfScale(newScale)
             }
