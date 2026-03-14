@@ -502,11 +502,18 @@ export default function FloorCanvas({ onCanvasSize }) {
       return
     }
 
-    // Update existing layers' opacity (non-destructive)
+    // Update existing layers' properties (non-destructive)
     for (const layer of pdfLayers.filter(l => l.visible)) {
       const existing = pdfFabricRefs.current[layer.id]
       if (existing) {
-        existing.set({ opacity: layer.opacity })
+        existing.set({
+          opacity: layer.opacity,
+          flipX: !!layer.flipX,
+          flipY: !!layer.flipY,
+          scaleX: layer.scaleX || layer.scale,
+          scaleY: layer.scaleY || layer.scale,
+        })
+        existing.setCoords()
       }
     }
 
