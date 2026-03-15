@@ -4,6 +4,7 @@ import useStore from './store.js'
 import TopBar from './components/TopBar.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import FloorCanvas from './components/FloorCanvas.jsx'
+import QuickActionsBar from './components/QuickActionsBar.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import ChangePasswordModal from './components/ChangePasswordModal.jsx'
 
@@ -33,6 +34,7 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-900 text-white">
       <TopBar canvasSize={canvasSize} />
+      <QuickActionsBar />
       <div className="flex flex-1 overflow-hidden">
         {!is3D && <Sidebar />}
         {is3D ? (

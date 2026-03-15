@@ -2,19 +2,50 @@
 
 /**
  * Get axis-aligned bounding box for a set in pixel coordinates.
- * Swaps w/h for 90/270 rotation.
+ * For rotated shapes, set.x/set.y is the Fabric.js left/top (rotated corner),
+ * NOT the logical AABB top-left. This function computes the correct AABB
+ * by finding the visual center and deriving the axis-aligned bounds.
  */
 export function getAABB(set, ppu) {
   const w = set.width * ppu
   const h = set.height * ppu
-  const isRotated = (set.rotation || 0) % 180 !== 0
-  return {
-    x: set.x,
-    y: set.y,
-    w: isRotated ? h : w,
-    h: isRotated ? w : h,
-    id: set.id,
+  const rot = (set.rotation || 0) % 360
+
+  if (rot === 0) {
+    return { x: set.x, y: set.y, w, h, id: set.id }
   }
+
+  // Fabric.js with originX:'left', originY:'top' rotates around the top-left corner.
+  // The visual center = origin + rotated half-size vector.
+  const rad = rot * Math.PI / 180
+  const cosR = Math.cos(rad)
+  const sinR = Math.sin(rad)
+  const centerX = set.x + (w / 2) * cosR - (h / 2) * sinR
+  const centerY = set.y + (w / 2) * sinR + (h / 2) * cosR
+
+  // For 90/270 the AABB swaps w/h; for arbitrary angles compute full bounding box
+  if (rot === 90 || rot === 270) {
+    return { x: centerX - h / 2, y: centerY - w / 2, w: h, h: w, id: set.id }
+  }
+  if (rot === 180) {
+    return { x: centerX - w / 2, y: centerY - h / 2, w, h, id: set.id }
+  }
+
+  // Arbitrary angle: compute bounding box of all 4 rotated corners
+  const corners = [
+    { x: set.x, y: set.y }, // top-left (origin)
+    { x: set.x + w * cosR, y: set.y + w * sinR }, // top-right
+    { x: set.x + w * cosR - h * sinR, y: set.y + w * sinR + h * cosR }, // bottom-right
+    { x: set.x - h * sinR, y: set.y + h * cosR }, // bottom-left
+  ]
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const c of corners) {
+    if (c.x < minX) minX = c.x
+    if (c.y < minY) minY = c.y
+    if (c.x > maxX) maxX = c.x
+    if (c.y > maxY) maxY = c.y
+  }
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY, id: set.id }
 }
 
 /**

@@ -953,34 +953,39 @@ export default function FloorCanvas({ onCanvasSize }) {
           // Skip if being moved by group drag from another shape
           if (this._isBeingDraggedByGroup) return
 
-          let x = isPolygon ? this.left + this.pathOffset.x : this.left
-          let y = isPolygon ? this.top + this.pathOffset.y : this.top
+          // Get raw Fabric.js position (works for both rotated and unrotated)
+          const rawLeft = isPolygon ? this.left + this.pathOffset.x : this.left
+          const rawTop = isPolygon ? this.top + this.pathOffset.y : this.top
 
-          // Dead zone — don't snap until dragged 3px from start
+          // Dead zone — don't snap until dragged 3px from start (in Fabric.js space)
           if (!this._dragStartPos) {
-            this._dragStartPos = { x: s.x, y: s.y }
+            this._dragStartPos = { x: rawLeft, y: rawTop }
           }
-          const distFromStart = Math.sqrt((x - this._dragStartPos.x) ** 2 + (y - this._dragStartPos.y) ** 2)
+          const distFromStart = Math.sqrt((rawLeft - this._dragStartPos.x) ** 2 + (rawTop - this._dragStartPos.y) ** 2)
           const pastDeadZone = distFromStart > 3
+
+          // Compute logical AABB from current Fabric.js position (rotation-safe)
+          const currentAABB = getAABB({ ...s, x: rawLeft, y: rawTop }, ppu)
+          let x = currentAABB.x  // logical AABB top-left
+          let y = currentAABB.y
 
           let wasSnapped = false
 
-          // Grid snapping
+          // Grid snapping (in logical AABB space)
           if (pastDeadZone && snapToGrid) {
             x = Math.round(x / gridSize) * gridSize
             y = Math.round(y / gridSize) * gridSize
             wasSnapped = true
           }
 
-          // Edge snapping to other sets (using pre-computed AABBs)
+          // Edge snapping to other sets (using pre-computed AABBs — all in logical space)
           clearSnapLines()
           let foundSnapX = false, foundSnapY = false
           if (pastDeadZone && snapToSets && otherSnapTargets.length > 0) {
             const SNAP_THRESHOLD = 5
-            const myAABB = getAABB({ ...s, x, y }, ppu)
             const myEdges = {
-              left: myAABB.x, right: myAABB.x + myAABB.w,
-              top: myAABB.y, bottom: myAABB.y + myAABB.h,
+              left: x, right: x + currentAABB.w,
+              top: y, bottom: y + currentAABB.h,
             }
 
             let snapDx = 0, snapDy = 0
@@ -1031,9 +1036,8 @@ export default function FloorCanvas({ onCanvasSize }) {
 
           // Building wall collision — skip when snapped to prevent fighting
           if (!wasSnapped && wallCollisionBoxes.length > 0) {
-            const testAABB = getAABB({ ...s, x, y }, ppu)
-            const setL = testAABB.x, setR = testAABB.x + testAABB.w
-            const setT = testAABB.y, setB = testAABB.y + testAABB.h
+            const setL = x, setR = x + currentAABB.w
+            const setT = y, setB = y + currentAABB.h
             for (const wBB of wallCollisionBoxes) {
               if (setR > wBB.left && setL < wBB.right && setB > wBB.top && setT < wBB.bottom) {
                 const pushL = wBB.right - setL, pushR = setR - wBB.left
@@ -1047,15 +1051,21 @@ export default function FloorCanvas({ onCanvasSize }) {
             }
           }
 
+          // Convert logical displacement back to Fabric.js position (translation is rotation-invariant)
+          const snapDeltaX = x - currentAABB.x
+          const snapDeltaY = y - currentAABB.y
+          const newLeft = rawLeft + snapDeltaX
+          const newTop = rawTop + snapDeltaY
+
           if (isPolygon) {
-            this.set({ left: x - this.pathOffset.x, top: y - this.pathOffset.y })
+            this.set({ left: newLeft - this.pathOffset.x, top: newTop - this.pathOffset.y })
           } else {
-            this.set({ left: x, top: y })
+            this.set({ left: newLeft, top: newTop })
           }
 
           // Move associated labels in real-time during drag (O(1) via cached refs)
-          const labelDx = x - s.x
-          const labelDy = y - s.y
+          const labelDx = newLeft - s.x
+          const labelDy = newTop - s.y
           const cachedLabels = labelRefsMap.current[s.id]
           if (cachedLabels) {
             for (let li = 0; li < cachedLabels.length; li++) {
@@ -1071,12 +1081,12 @@ export default function FloorCanvas({ onCanvasSize }) {
             }
           }
 
-          // Move child components locked to this set in real-time
+          // Move child components locked to this set in real-time (using Fabric.js delta)
           for (const child of childComponents) {
             const childShape = shapeRefsMap.current[child.id]
             if (childShape) {
-              const newCX = x + (child.lockedToSetOffset?.dx || 0)
-              const newCY = y + (child.lockedToSetOffset?.dy || 0)
+              const newCX = newLeft + (child.lockedToSetOffset?.dx || 0)
+              const newCY = newTop + (child.lockedToSetOffset?.dy || 0)
               childShape.set({ left: newCX, top: newCY })
               // Move child labels too
               const childLabels = labelRefsMap.current[child.id]
@@ -1101,7 +1111,7 @@ export default function FloorCanvas({ onCanvasSize }) {
             const fObj = pdfFabricRefs.current[lp.id]
             if (fObj) {
               const off = lp.lockedToSetOffset || { dx: 0, dy: 0 }
-              fObj.set({ left: x + off.dx, top: y + off.dy })
+              fObj.set({ left: newLeft + off.dx, top: newTop + off.dy })
             }
           }
 
@@ -1115,8 +1125,9 @@ export default function FloorCanvas({ onCanvasSize }) {
           }
 
           if (coMovingIds.size > 0) {
-            const dx = x - s.x
-            const dy = y - s.y
+            // Use Fabric.js delta (translation-invariant, works for rotated siblings)
+            const dx = newLeft - s.x
+            const dy = newTop - s.y
 
             for (const sibId of coMovingIds) {
               const sibShape = shapeRefsMap.current[sibId]
