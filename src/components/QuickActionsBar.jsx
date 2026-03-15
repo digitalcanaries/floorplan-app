@@ -45,11 +45,34 @@ const ACTION_REGISTRY = {
       // SetsTab auto-scrolls to selectedSetId
     },
   },
-  'pin-pdf': {
-    label: '📌 Pin to PDF',
-    title: 'Toggle pin set to master PDF',
+  'pin-set-to-pdf': {
+    label: '📌 Set→PDF',
+    title: 'Pin this set to master PDF (set follows when PDF moves)',
     handler: (id, store) => store.toggleLockToPdf(id),
     getState: (set) => set.lockedToPdf,
+  },
+  'pin-pdf-to-set': {
+    label: '🔗 PDF→Set',
+    title: 'Pin active PDF layer to this set (PDF follows when set moves)',
+    handler: (id, store) => {
+      const activeLayerId = store.activePdfLayerId
+      if (!activeLayerId) return
+      const layer = store.pdfLayers.find(l => l.id === activeLayerId)
+      if (!layer) return
+      if (layer.lockedToSetId === id) {
+        // Already pinned — unpin
+        store.unlockPdfFromSet(activeLayerId)
+      } else {
+        store.lockPdfToSet(activeLayerId, id)
+      }
+    },
+    getState: (set) => {
+      const store = useStore.getState()
+      const activeLayerId = store.activePdfLayerId
+      if (!activeLayerId) return false
+      const layer = store.pdfLayers.find(l => l.id === activeLayerId)
+      return layer?.lockedToSetId === set.id
+    },
   },
   'duplicate': {
     label: '📋 Dup',
@@ -122,7 +145,7 @@ const ACTION_REGISTRY = {
 
 const DEFAULT_ACTIONS = [
   'rotate-cw-90', 'rotate-ccw-90', 'rotate-plus-1', 'rotate-minus-1',
-  'edit', 'pin-pdf', 'duplicate', 'delete',
+  'edit', 'pin-set-to-pdf', 'pin-pdf-to-set', 'duplicate', 'delete',
 ]
 
 const PREFS_KEY = 'floorplan-quick-actions'
