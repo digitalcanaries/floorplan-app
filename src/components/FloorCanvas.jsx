@@ -939,20 +939,44 @@ export default function FloorCanvas({ onCanvasSize }) {
         // Pre-compute children locked to this set (for moving with parent)
         const childComponents = visibleSets.filter(c => c.lockedToSetId === s.id)
 
+        // Pre-compute group membership for group drag
+        const curGroups = useStore.getState().groups
+        const parentGroup = curGroups.find(g => g.setIds.includes(s.id))
+        const groupSiblingIds = parentGroup ? parentGroup.setIds.filter(sid => sid !== s.id) : []
+        // Pre-compute sibling children for group drag
+        const siblingChildren = {}
+        for (const sid of groupSiblingIds) {
+          siblingChildren[sid] = visibleSets.filter(c => c.lockedToSetId === sid)
+        }
+
         shape.on('moving', function () {
+          // Skip if being moved by group drag from another shape
+          if (this._isBeingDraggedByGroup) return
+
           let x = isPolygon ? this.left + this.pathOffset.x : this.left
           let y = isPolygon ? this.top + this.pathOffset.y : this.top
 
+          // Dead zone — don't snap until dragged 3px from start
+          if (!this._dragStartPos) {
+            this._dragStartPos = { x: s.x, y: s.y }
+          }
+          const distFromStart = Math.sqrt((x - this._dragStartPos.x) ** 2 + (y - this._dragStartPos.y) ** 2)
+          const pastDeadZone = distFromStart > 3
+
+          let wasSnapped = false
+
           // Grid snapping
-          if (snapToGrid) {
+          if (pastDeadZone && snapToGrid) {
             x = Math.round(x / gridSize) * gridSize
             y = Math.round(y / gridSize) * gridSize
+            wasSnapped = true
           }
 
           // Edge snapping to other sets (using pre-computed AABBs)
           clearSnapLines()
-          if (snapToSets && otherSnapTargets.length > 0) {
-            const SNAP_THRESHOLD = 8
+          let foundSnapX = false, foundSnapY = false
+          if (pastDeadZone && snapToSets && otherSnapTargets.length > 0) {
+            const SNAP_THRESHOLD = 5
             const myAABB = getAABB({ ...s, x, y }, ppu)
             const myEdges = {
               left: myAABB.x, right: myAABB.x + myAABB.w,
@@ -960,7 +984,6 @@ export default function FloorCanvas({ onCanvasSize }) {
             }
 
             let snapDx = 0, snapDy = 0
-            let foundSnapX = false, foundSnapY = false
 
             for (const oEdges of otherSnapTargets) {
               // Snap X edges
@@ -971,6 +994,9 @@ export default function FloorCanvas({ onCanvasSize }) {
                 ]
                 for (const [myE, oE] of xPairs) {
                   if (Math.abs(myE - oE) < SNAP_THRESHOLD) {
+                    const candidateX = x + (oE - myE)
+                    // If grid snap active, only accept edge snap if it aligns with grid
+                    if (snapToGrid && Math.abs(candidateX - Math.round(candidateX / gridSize) * gridSize) > 1) continue
                     snapDx = oE - myE
                     foundSnapX = true
                     drawSnapLine(oE, Math.min(myEdges.top, oEdges.top) - 20, oE, Math.max(myEdges.bottom, oEdges.bottom) + 20)
@@ -986,6 +1012,9 @@ export default function FloorCanvas({ onCanvasSize }) {
                 ]
                 for (const [myE, oE] of yPairs) {
                   if (Math.abs(myE - oE) < SNAP_THRESHOLD) {
+                    const candidateY = y + (oE - myE)
+                    // If grid snap active, only accept edge snap if it aligns with grid
+                    if (snapToGrid && Math.abs(candidateY - Math.round(candidateY / gridSize) * gridSize) > 1) continue
                     snapDy = oE - myE
                     foundSnapY = true
                     drawSnapLine(Math.min(myEdges.left, oEdges.left) - 20, oE, Math.max(myEdges.right, oEdges.right) + 20, oE)
@@ -997,10 +1026,11 @@ export default function FloorCanvas({ onCanvasSize }) {
             }
             x += snapDx
             y += snapDy
+            if (foundSnapX || foundSnapY) wasSnapped = true
           }
 
-          // Building wall collision (using pre-computed AABBs — no trig per frame)
-          if (wallCollisionBoxes.length > 0) {
+          // Building wall collision — skip when snapped to prevent fighting
+          if (!wasSnapped && wallCollisionBoxes.length > 0) {
             const testAABB = getAABB({ ...s, x, y }, ppu)
             const setL = testAABB.x, setR = testAABB.x + testAABB.w
             const setT = testAABB.y, setB = testAABB.y + testAABB.h
@@ -1074,10 +1104,81 @@ export default function FloorCanvas({ onCanvasSize }) {
               fObj.set({ left: x + off.dx, top: y + off.dy })
             }
           }
+
+          // Move group siblings + multi-selected peers in real-time
+          const multiSel = dragState.multiSelected
+          const coMovingIds = new Set(groupSiblingIds)
+          if (multiSel.size > 1 && multiSel.has(s.id)) {
+            for (const mid of multiSel) {
+              if (mid !== s.id) coMovingIds.add(mid)
+            }
+          }
+
+          if (coMovingIds.size > 0) {
+            const dx = x - s.x
+            const dy = y - s.y
+
+            for (const sibId of coMovingIds) {
+              const sibShape = shapeRefsMap.current[sibId]
+              if (!sibShape) continue
+              const sibSet = visibleSets.find(vs => vs.id === sibId)
+              if (!sibSet) continue
+
+              sibShape._isBeingDraggedByGroup = true
+              sibShape.set({ left: sibSet.x + dx, top: sibSet.y + dy })
+
+              // Move sibling labels
+              const sibLabels = labelRefsMap.current[sibId]
+              if (sibLabels) {
+                for (const lbl of sibLabels) {
+                  if (lbl._labelOrigLeft === undefined) {
+                    lbl._labelOrigLeft = lbl.left
+                    lbl._labelOrigTop = lbl.top
+                  }
+                  lbl.set({ left: lbl._labelOrigLeft + dx, top: lbl._labelOrigTop + dy })
+                }
+              }
+
+              // Move sibling's children
+              const sibKids = siblingChildren[sibId] || visibleSets.filter(c => c.lockedToSetId === sibId)
+              for (const child of sibKids) {
+                const childShape = shapeRefsMap.current[child.id]
+                if (childShape) {
+                  const newCX = sibSet.x + dx + (child.lockedToSetOffset?.dx || 0)
+                  const newCY = sibSet.y + dy + (child.lockedToSetOffset?.dy || 0)
+                  childShape._isBeingDraggedByGroup = true
+                  childShape.set({ left: newCX, top: newCY })
+                  const childLabels = labelRefsMap.current[child.id]
+                  if (childLabels) {
+                    const cdx = newCX - child.x
+                    const cdy = newCY - child.y
+                    for (const lbl of childLabels) {
+                      if (lbl._labelOrigLeft === undefined) {
+                        lbl._labelOrigLeft = lbl.left
+                        lbl._labelOrigTop = lbl.top
+                      }
+                      lbl.set({ left: lbl._labelOrigLeft + cdx, top: lbl._labelOrigTop + cdy })
+                    }
+                  }
+                }
+              }
+
+              // Move sibling's pinned PDFs
+              const sibPdfs = dragState.pdfLayers.filter(l => l.lockedToSetId === sibId)
+              for (const lp of sibPdfs) {
+                const fObj = pdfFabricRefs.current[lp.id]
+                if (fObj) {
+                  const off = lp.lockedToSetOffset || { dx: 0, dy: 0 }
+                  fObj.set({ left: sibSet.x + dx + off.dx, top: sibSet.y + dy + off.dy })
+                }
+              }
+            }
+          }
         })
 
         shape.on('modified', function () {
           clearSnapLines()
+          this._dragStartPos = null
           const fx = isPolygon ? this.left + this.pathOffset.x : this.left
           const fy = isPolygon ? this.top + this.pathOffset.y : this.top
           // Check if shape was scaled (resized)
@@ -1116,6 +1217,63 @@ export default function FloorCanvas({ onCanvasSize }) {
             if (fObj) {
               fObj.set({ left: fx + off.dx, top: fy + off.dy })
               fObj.setCoords()
+            }
+          }
+
+          // Persist group/multi-select sibling positions
+          const modMultiSel = useStore.getState().multiSelected
+          const modCoMovingIds = new Set(groupSiblingIds)
+          if (modMultiSel.size > 1 && modMultiSel.has(s.id)) {
+            for (const mid of modMultiSel) {
+              if (mid !== s.id) modCoMovingIds.add(mid)
+            }
+          }
+
+          if (modCoMovingIds.size > 0) {
+            const dx = fx - s.x
+            const dy = fy - s.y
+            const latestSets = useStore.getState().sets
+            useStore.setState({
+              sets: latestSets.map(cs => {
+                if (modCoMovingIds.has(cs.id)) {
+                  return { ...cs, x: cs.x + dx, y: cs.y + dy }
+                }
+                // Children of co-movers
+                if (cs.lockedToSetId && modCoMovingIds.has(cs.lockedToSetId) && cs.lockedToSetOffset) {
+                  const parent = latestSets.find(p => p.id === cs.lockedToSetId)
+                  if (parent) {
+                    return { ...cs, x: parent.x + dx + cs.lockedToSetOffset.dx, y: parent.y + dy + cs.lockedToSetOffset.dy }
+                  }
+                }
+                return cs
+              }),
+            })
+            useStore.getState().autosave()
+
+            // Clear group drag flags
+            for (const sibId of modCoMovingIds) {
+              const sibShape = shapeRefsMap.current[sibId]
+              if (sibShape) sibShape._isBeingDraggedByGroup = false
+              const sibKids = siblingChildren[sibId] || []
+              for (const child of sibKids) {
+                const childShape = shapeRefsMap.current[child.id]
+                if (childShape) childShape._isBeingDraggedByGroup = false
+              }
+            }
+
+            // Sync co-mover pinned PDFs
+            const pdfState = useStore.getState()
+            for (const sibId of modCoMovingIds) {
+              const sibPdfs = pdfState.pdfLayers.filter(l => l.lockedToSetId === sibId)
+              const sibSet = pdfState.sets.find(ss => ss.id === sibId)
+              for (const lp of sibPdfs) {
+                const off = lp.lockedToSetOffset || { dx: 0, dy: 0 }
+                const fObj = pdfFabricRefs.current[lp.id]
+                if (fObj && sibSet) {
+                  fObj.set({ left: sibSet.x + off.dx, top: sibSet.y + off.dy })
+                  fObj.setCoords()
+                }
+              }
             }
           }
         })
@@ -2557,6 +2715,41 @@ export default function FloorCanvas({ onCanvasSize }) {
           e.preventDefault()
           cancelDrawing()
         }
+      } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        if (!state.selectedSetId) return
+        e.preventDefault()
+
+        // Step size: grid-aligned if snap-to-grid, otherwise 1px
+        const baseStep = state.snapToGrid ? (state.gridSize || 50) : 1
+        const step = e.shiftKey ? baseStep * 10 : baseStep
+
+        let dx = 0, dy = 0
+        if (e.key === 'ArrowUp') dy = -step
+        else if (e.key === 'ArrowDown') dy = step
+        else if (e.key === 'ArrowLeft') dx = -step
+        else if (e.key === 'ArrowRight') dx = step
+
+        // Debounced undo: push history on first press, skip for 500ms
+        if (!window._arrowNudgeTimer) {
+          state._pushHistory()
+        }
+        clearTimeout(window._arrowNudgeTimer)
+        window._arrowNudgeTimer = setTimeout(() => { window._arrowNudgeTimer = null }, 500)
+
+        // Collect all IDs to move (selected + group + multi-select)
+        const idsToMove = new Set()
+        idsToMove.add(state.selectedSetId)
+
+        const group = state.groups.find(g => g.setIds.includes(state.selectedSetId))
+        if (group) {
+          for (const gid of group.setIds) idsToMove.add(gid)
+        }
+
+        if (state.multiSelected.size > 1 && state.multiSelected.has(state.selectedSetId)) {
+          for (const mid of state.multiSelected) idsToMove.add(mid)
+        }
+
+        state.moveMultiple(idsToMove, dx, dy)
       }
     }
 

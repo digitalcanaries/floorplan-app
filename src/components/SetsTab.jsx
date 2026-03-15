@@ -59,7 +59,10 @@ export default memo(function SetsTab() {
   const [cuttingSetId, setCuttingSetId] = useState(null)
   const [lockingComponentId, setLockingComponentId] = useState(null)
   const [categoryFilter, setCategoryFilter] = useState(null)
-  const [multiSelected, setMultiSelected] = useState(new Set())
+  const multiSelected = useStore(s => s.multiSelected)
+  const setMultiSelected = useStore(s => s.setMultiSelected)
+  const clearMultiSelect = useStore(s => s.clearMultiSelect)
+  const storeToggleMultiSelect = useStore(s => s.toggleMultiSelect)
   // Unit picker
   const [inputUnit, setInputUnit] = useState('ft')
   // Grouped sections
@@ -148,7 +151,7 @@ export default memo(function SetsTab() {
 
   const startEdit = (s) => {
     setEditing(s.id)
-    setMultiSelected(new Set())
+    clearMultiSelect()
     setForm({
       name: s.name,
       width: String(formatInUnit(s.width, inputUnit)),
@@ -196,12 +199,7 @@ export default memo(function SetsTab() {
   // Multi-select handlers
   const toggleMultiSelect = (e, id) => {
     e.stopPropagation()
-    setMultiSelected(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    storeToggleMultiSelect(id)
   }
 
   const handleSetClick = (e, id) => {
@@ -212,17 +210,13 @@ export default memo(function SetsTab() {
     }
     // Normal click — clear multi-select, toggle single selection
     if (multiSelected.size > 0) {
-      setMultiSelected(new Set())
+      clearMultiSelect()
     }
     setSelectedSetId(id === selectedSetId ? null : id)
   }
 
   const selectAll = () => {
     setMultiSelected(new Set(filteredOnPlan.map(s => s.id)))
-  }
-
-  const clearMultiSelect = () => {
-    setMultiSelected(new Set())
   }
 
   // Bulk actions
@@ -252,14 +246,14 @@ export default memo(function SetsTab() {
     for (const id of multiSelected) {
       hideSet(id)
     }
-    setMultiSelected(new Set())
+    clearMultiSelect()
   }
 
   const bulkRemoveFromPlan = () => {
     for (const id of multiSelected) {
       removeSetFromPlan(id)
     }
-    setMultiSelected(new Set())
+    clearMultiSelect()
   }
 
   const bulkDelete = () => {
@@ -267,7 +261,7 @@ export default memo(function SetsTab() {
     for (const id of multiSelected) {
       deleteSet(id)
     }
-    setMultiSelected(new Set())
+    clearMultiSelect()
   }
 
   // Alignment functions
@@ -1061,7 +1055,7 @@ export default memo(function SetsTab() {
               const name = prompt('Group name:', `Group ${Date.now() % 1000}`)
               if (name && name.trim()) {
                 addGroup(name.trim(), [...multiSelected])
-                setMultiSelected(new Set())
+                clearMultiSelect()
               }
             }}
               className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-700 text-white hover:bg-indigo-600">

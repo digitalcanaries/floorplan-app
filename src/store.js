@@ -165,6 +165,9 @@ const useStore = create((set, get) => ({
   nextBuildingColumnId: saved?.nextBuildingColumnId || 1,
   buildingColumnsVisible: saved?.buildingColumnsVisible ?? true,
 
+  // Multi-select (ephemeral, not persisted or undone)
+  multiSelected: new Set(),
+
   // Drawing mode (transient, not persisted)
   drawingMode: null, // null | 'building-wall' | 'place-column' | 'place-component' | 'exclusion-zone'
   drawingWallPoints: [], // temporary points while drawing
@@ -1360,6 +1363,37 @@ const useStore = create((set, get) => ({
       return s
     })
     set({ sets: updatedSets })
+    get().autosave()
+  },
+
+  // Multi-select actions
+  setMultiSelected: (ids) => set({ multiSelected: ids instanceof Set ? ids : new Set(ids) }),
+  toggleMultiSelect: (id) => {
+    const current = new Set(get().multiSelected)
+    if (current.has(id)) current.delete(id)
+    else current.add(id)
+    set({ multiSelected: current })
+  },
+  clearMultiSelect: () => set({ multiSelected: new Set() }),
+
+  // Batch movement (sets + locked children + pinned PDFs)
+  moveMultiple: (ids, dx, dy) => {
+    const idSet = ids instanceof Set ? ids : new Set(ids)
+    const updatedSets = get().sets.map(s => {
+      if (idSet.has(s.id)) return { ...s, x: s.x + dx, y: s.y + dy }
+      if (s.lockedToSetId && idSet.has(s.lockedToSetId)) return { ...s, x: s.x + dx, y: s.y + dy }
+      return s
+    })
+    const updatedPdfs = get().pdfLayers.map(l => {
+      if (l.lockedToSetId && idSet.has(l.lockedToSetId)) {
+        const parent = updatedSets.find(s => s.id === l.lockedToSetId)
+        if (parent && l.lockedToSetOffset) {
+          return { ...l, position: { x: parent.x + l.lockedToSetOffset.dx, y: parent.y + l.lockedToSetOffset.dy } }
+        }
+      }
+      return l
+    })
+    set({ sets: updatedSets, pdfLayers: updatedPdfs })
     get().autosave()
   },
 
