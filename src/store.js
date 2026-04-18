@@ -699,12 +699,18 @@ const useStore = create((set, get) => ({
   },
   deleteSet: (id) => {
     get()._pushHistory()
+    // Scrub the deleted ID from every group and drop groups that become empty,
+    // otherwise stale IDs silently rot the group membership.
+    const cleanedGroups = get().groups
+      .map(g => ({ ...g, setIds: (g.setIds || []).filter(sid => sid !== id) }))
+      .filter(g => g.setIds.length > 0)
     set({
       sets: get().sets
         .filter(s => s.id !== id)
         .map(s => s.lockedToSetId === id ? { ...s, lockedToSetId: null, lockedToSetOffset: null } : s),
       rules: get().rules.filter(r => r.setA !== id && r.setB !== id),
       selectedSetId: get().selectedSetId === id ? null : get().selectedSetId,
+      groups: cleanedGroups,
       // Unlock any PDF layers pinned to the deleted set
       pdfLayers: get().pdfLayers.map(l =>
         l.lockedToSetId === id ? { ...l, lockedToSetId: null, lockedToSetOffset: null } : l
@@ -781,10 +787,19 @@ const useStore = create((set, get) => ({
     delete newSet.pdfOffsetX
     delete newSet.pdfOffsetY
 
+    // If the original belonged to a group, add the duplicate to the same group(s)
+    // so the group stays intact on duplicate.
+    const updatedGroups = state.groups.map(g =>
+      (g.setIds || []).includes(id)
+        ? { ...g, setIds: [...g.setIds, newId] }
+        : g
+    )
+
     set({
       sets: [...state.sets, newSet],
       nextSetId: newId + 1,
       selectedSetId: newId,
+      groups: updatedGroups,
     })
     get().autosave()
     return newId
@@ -1357,6 +1372,9 @@ const useStore = create((set, get) => ({
     if (!group) return
     const movedIds = new Set(group.setIds)
     const updatedSets = get().sets.map(s => {
+      // A set that is locked to the master PDF moves with the PDF only —
+      // a group drag must not pull it out of alignment.
+      if (s.lockedToPdf) return s
       if (movedIds.has(s.id)) return { ...s, x: s.x + dx, y: s.y + dy }
       // Also move children locked to any moved parent
       if (s.lockedToSetId && movedIds.has(s.lockedToSetId)) return { ...s, x: s.x + dx, y: s.y + dy }
@@ -1377,9 +1395,11 @@ const useStore = create((set, get) => ({
   clearMultiSelect: () => set({ multiSelected: new Set() }),
 
   // Batch movement (sets + locked children + pinned PDFs)
+  // Skips sets locked to the master PDF — those move only when the PDF moves.
   moveMultiple: (ids, dx, dy) => {
     const idSet = ids instanceof Set ? ids : new Set(ids)
     const updatedSets = get().sets.map(s => {
+      if (s.lockedToPdf) return s
       if (idSet.has(s.id)) return { ...s, x: s.x + dx, y: s.y + dy }
       if (s.lockedToSetId && idSet.has(s.lockedToSetId)) return { ...s, x: s.x + dx, y: s.y + dy }
       return s
