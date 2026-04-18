@@ -1532,7 +1532,8 @@ const useStore = create((set, get) => ({
 
   // Boot-time auto-load: fetches the user's most-recently-updated project from
   // the server and replaces in-memory state with it. Returns { id, name } on
-  // success, null if no projects exist or the fetch failed.
+  // success, null if no projects exist, or throws on hard errors so the
+  // caller can surface them to the user.
   //
   // Before overwriting, stashes the current autosave into a recovery key so a
   // user with unsaved local work can recover it from localStorage if something
@@ -1540,32 +1541,24 @@ const useStore = create((set, get) => ({
   loadLatestProject: async () => {
     const token = localStorage.getItem('floorplan-token')
     if (!token) return null
+    const { apiFetch } = await import('./api.js')
+    const list = await apiFetch('/projects')
+    if (!Array.isArray(list) || list.length === 0) return null
+    // Server orders by updated_at DESC, so list[0] is the most recent.
+    const latest = list[0]
+    const project = await apiFetch(`/projects/${latest.id}`)
+    if (!project?.data) return null
+
+    // Preserve pre-boot state for recovery
     try {
-      const headers = { 'Authorization': `Bearer ${token}` }
-      const listResp = await fetch('/api/projects', { headers })
-      if (!listResp.ok) return null
-      const list = await listResp.json()
-      if (!Array.isArray(list) || list.length === 0) return null
-      // Server orders by updated_at DESC, so list[0] is the most recent.
-      const latest = list[0]
-      const projResp = await fetch(`/api/projects/${latest.id}`, { headers })
-      if (!projResp.ok) return null
-      const project = await projResp.json()
-      if (!project?.data) return null
+      const prev = localStorage.getItem(AUTOSAVE_KEY)
+      if (prev) localStorage.setItem(AUTOSAVE_KEY + '-pre-boot', prev)
+    } catch { /* ignore quota errors */ }
 
-      // Preserve pre-boot state for recovery
-      try {
-        const prev = localStorage.getItem(AUTOSAVE_KEY)
-        if (prev) localStorage.setItem(AUTOSAVE_KEY + '-pre-boot', prev)
-      } catch { /* ignore quota errors */ }
-
-      get().importProject(project.data)
-      set({ projectName: project.name || 'Untitled Project' })
-      saveServerProjectId(latest.id)
-      return { id: latest.id, name: latest.name }
-    } catch {
-      return null
-    }
+    get().importProject(project.data)
+    set({ projectName: project.name || 'Untitled Project' })
+    saveServerProjectId(latest.id)
+    return { id: latest.id, name: latest.name, updated_at: latest.updated_at }
   },
 
   // Named project saves (stored in localStorage)
