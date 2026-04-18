@@ -15,49 +15,37 @@ function App() {
   const viewMode = useStore(s => s.viewMode)
   const loadLatestProject = useStore(s => s.loadLatestProject)
   const [canvasSize, setCanvasSize] = useState({ w: 1200, h: 800 })
-  const [bootToast, setBootToast] = useState(null)
+  const [bootStatus, setBootStatus] = useState('idle') // 'idle' | 'loading' | 'ready' | 'empty' | 'failed'
+  const [bootMessage, setBootMessage] = useState(null)
   const bootLoadRan = useRef(false)
 
-  // On login, pull the user's most-recently-updated project from the server
-  // and replace the rehydrated-from-localStorage state with it. The page is
-  // then reloaded ONCE so the Fabric canvas and all React effects initialize
-  // fresh against the newly-synced state instead of patching over whatever
-  // stale objects were created from the previous localStorage contents.
-  //
-  // A session-storage flag prevents the reload from triggering an infinite
-  // loop: after the reload, we see the flag and skip the fetch.
+  // On login, fetch the user's most-recently-updated project from the server
+  // and populate the (initially empty) Zustand store with it. The store no
+  // longer rehydrates project content from localStorage, so this fetch is
+  // the only source of truth for what gets rendered. While in flight we
+  // show a loading screen so the canvas doesn't paint stale state.
   useEffect(() => {
     if (!token || !user || bootLoadRan.current) return
     bootLoadRan.current = true
-
-    const FLAG = 'floorplan-just-autoloaded'
-    if (sessionStorage.getItem(FLAG)) {
-      sessionStorage.removeItem(FLAG)
-      console.log('ℹ️ Post-reload: using freshly-synced local state')
-      return
-    }
-
+    setBootStatus('loading')
     loadLatestProject()
       .then(result => {
         if (result) {
           console.log(`✅ Loaded latest project: ${result.name} (#${result.id}) — updated ${result.updated_at}`)
-          setBootToast({ kind: 'ok', text: `Opened latest: ${result.name} (#${result.id})` })
-          // Let the autosave debounce (500ms) flush the imported state to
-          // localStorage, then reload so the canvas mounts clean against it.
-          setTimeout(() => {
-            sessionStorage.setItem(FLAG, '1')
-            window.location.reload()
-          }, 800)
+          setBootMessage(`Opened latest: ${result.name} (#${result.id})`)
+          setBootStatus('ready')
         } else {
-          console.log('ℹ️ No server projects for this user — staying on local autosave')
-          setBootToast({ kind: 'info', text: 'No projects on server — using local autosave' })
-          setTimeout(() => setBootToast(null), 4000)
+          console.log('ℹ️ No server projects for this user — starting blank')
+          setBootMessage('No projects on server — start a new one')
+          setBootStatus('empty')
         }
+        setTimeout(() => setBootMessage(null), 4000)
       })
       .catch(err => {
         console.error('❌ Auto-load latest project failed:', err)
-        setBootToast({ kind: 'err', text: `Auto-load failed: ${err.message} — using local autosave` })
-        setTimeout(() => setBootToast(null), 8000)
+        setBootMessage(`Load failed: ${err.message}`)
+        setBootStatus('failed')
+        setTimeout(() => setBootMessage(null), 8000)
       })
   }, [token, user, loadLatestProject])
 
@@ -75,19 +63,33 @@ function App() {
     )
   }
 
+  // While the boot fetch is in flight, show a loading screen instead of
+  // mounting the canvas against an empty store (which would briefly render
+  // a blank plan and confuse the user).
+  if (bootStatus === 'idle' || bootStatus === 'loading') {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-900 text-gray-300">
+        <div className="text-center">
+          <div className="text-3xl mb-3">📐</div>
+          <div className="text-sm">Loading your latest project…</div>
+        </div>
+      </div>
+    )
+  }
+
   const is3D = viewMode === '3d'
 
   return (
     <div className="h-screen flex flex-col bg-gray-900 text-white">
-      {bootToast && (
+      {bootMessage && (
         <div
           className={`fixed top-2 right-2 z-50 px-3 py-2 rounded text-xs shadow-lg border ${
-            bootToast.kind === 'ok' ? 'bg-green-900/90 border-green-700 text-green-100'
-            : bootToast.kind === 'err' ? 'bg-red-900/90 border-red-700 text-red-100'
+            bootStatus === 'ready' ? 'bg-green-900/90 border-green-700 text-green-100'
+            : bootStatus === 'failed' ? 'bg-red-900/90 border-red-700 text-red-100'
             : 'bg-gray-800/90 border-gray-600 text-gray-100'
           }`}
         >
-          {bootToast.text}
+          {bootMessage}
         </div>
       )}
       <TopBar canvasSize={canvasSize} />

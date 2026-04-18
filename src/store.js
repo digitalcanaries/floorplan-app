@@ -8,7 +8,8 @@ const SERVER_PROJECT_KEY = 'floorplan-server-project-id'
 let _autosaveTimer = null
 let _serverSaveTimer = null
 
-// Build complete save data object from state — single source of truth for all save paths
+// Build complete save data object from state — used by server saves and the
+// explicit named-save path (saveProjectAs). Includes the full project content.
 function buildSaveData(state, extraFields = {}) {
   return {
     version: 1,
@@ -64,6 +65,45 @@ function buildSaveData(state, extraFields = {}) {
   }
 }
 
+// Lightweight save data for the localStorage autosave path. Excludes heavy
+// project content (sets, pdfLayers with base64 images, groups, walls, etc.)
+// because that frequently exceeded the ~5 MB origin quota and silently
+// failed, leaving stale data that would rehydrate on the next boot. The
+// server is now authoritative for project content; localStorage only
+// remembers UI preferences and the last project name.
+function buildLiteAutosave(state) {
+  return {
+    version: 2,
+    projectName: state.projectName,
+    lastSaved: new Date().toISOString(),
+    // UI preferences only — no project content
+    pixelsPerUnit: state.pixelsPerUnit,
+    unit: state.unit,
+    gridVisible: state.gridVisible,
+    snapToGrid: state.snapToGrid,
+    snapToSets: state.snapToSets,
+    gridSize: state.gridSize,
+    labelsVisible: state.labelsVisible,
+    labelMode: state.labelMode,
+    labelFontSize: state.labelFontSize,
+    labelColor: state.labelColor,
+    showOverlaps: state.showOverlaps,
+    viewMode: state.viewMode,
+    wallRenderMode: state.wallRenderMode,
+    showDimensions: state.showDimensions,
+    dimMode: state.dimMode,
+    showClearance: state.showClearance,
+    crawlSpace: state.crawlSpace,
+    showHoverTooltips: state.showHoverTooltips,
+    showLockIndicators: state.showLockIndicators,
+    defaultWallHeight: state.defaultWallHeight,
+    layerVisibility: state.layerVisibility,
+    buildingWallDefaults: state.buildingWallDefaults,
+    buildingWallsVisible: state.buildingWallsVisible,
+    buildingColumnsVisible: state.buildingColumnsVisible,
+  }
+}
+
 // Load persisted server project ID
 function loadServerProjectId() {
   try { return parseInt(localStorage.getItem(SERVER_PROJECT_KEY)) || null }
@@ -93,27 +133,35 @@ function loadSavedProjects() {
   return {}
 }
 
+// Read whatever is in the autosave key. May be a legacy v1 blob with heavy
+// fields, or a v2 lite blob with only UI prefs. We only ever consume the
+// lightweight fields from it — heavy fields (sets, pdfLayers, etc.) come
+// from the server on every boot via loadLatestProject.
 const saved = loadAutosave()
+// One-time cleanup: if there's a legacy v1 blob hogging localStorage quota,
+// drop it now so the first autosave doesn't have to compete for space.
+if (saved && saved.version !== 2 && (saved.sets || saved.pdfLayers)) {
+  try { localStorage.removeItem(AUTOSAVE_KEY) } catch { /* ignore */ }
+}
 
 const useStore = create((set, get) => ({
-  // PDF / Canvas state
-  // PDF layers — each PDF is an independent layer with its own position/scale/visibility
-  // Legacy single-PDF fields kept for backward compat on load, migrated to pdfLayers
-  pdfLayers: saved?.pdfLayers || (saved?.pdfImage ? [{
-    id: 1, name: 'Floor Plan', image: saved.pdfImage,
-    rotation: saved.pdfRotation || 0, position: saved.pdfPosition || { x: 0, y: 0 },
-    scale: saved.pdfScale || 1, originalSize: saved.pdfOriginalSize || null,
-    visible: true, opacity: 0.6,
-  }] : []),
-  nextPdfLayerId: saved?.nextPdfLayerId || 2,
-  activePdfLayerId: saved?.activePdfLayerId || (saved?.pdfImage ? 1 : null),
+  // Heavy project content — always starts empty. The server is the source of
+  // truth: App.jsx fires loadLatestProject on boot which calls importProject
+  // to populate these fields. Storing them in localStorage previously caused
+  // QuotaExceededError (3.5 MB project + 5 MB origin quota) which silently
+  // dropped saves and rehydrated stale data on the next boot.
+  pdfLayers: [],
+  nextPdfLayerId: 1,
+  activePdfLayerId: null,
 
-  // Legacy fields — kept for backward compat reads, but pdfLayers is the source of truth
-  pdfImage: saved?.pdfImage || null,
-  pdfRotation: saved?.pdfRotation || 0,
-  pdfPosition: saved?.pdfPosition || { x: 0, y: 0 },
-  pdfScale: saved?.pdfScale || 1,
-  pdfOriginalSize: saved?.pdfOriginalSize || null,
+  // Legacy single-PDF fields — populated by importProject when loading a project
+  pdfImage: null,
+  pdfRotation: 0,
+  pdfPosition: { x: 0, y: 0 },
+  pdfScale: 1,
+  pdfOriginalSize: null,
+
+  // UI preferences — these are tiny and DO persist via the lite autosave
   pixelsPerUnit: saved?.pixelsPerUnit || 1,
   unit: saved?.unit || 'ft',
   gridVisible: saved?.gridVisible ?? true,
@@ -134,35 +182,26 @@ const useStore = create((set, get) => ({
   _maxHistory: 50,
   _recording: true,
 
-  // Project info
+  // Project info — name persists in lite autosave so the title bar isn't
+  // briefly blank during the boot fetch
   projectName: saved?.projectName || 'Untitled Project',
   lastSaved: saved?.lastSaved || null,
 
-  // Sets
-  sets: saved?.sets || [],
-  nextSetId: saved?.nextSetId || 1,
-
-  // Rules
-  rules: saved?.rules || [],
-  nextRuleId: saved?.nextRuleId || 1,
-
-  // Annotations (text labels on canvas)
-  annotations: saved?.annotations || [],
-  nextAnnotationId: saved?.nextAnnotationId || 1,
-
-  // Groups
-  groups: saved?.groups || [],
-  nextGroupId: saved?.nextGroupId || 1,
-
-  // Building Walls (structural walls drawn on PDF)
-  buildingWalls: saved?.buildingWalls || [],
-  nextBuildingWallId: saved?.nextBuildingWallId || 1,
+  // Heavy fields — populated by importProject after server fetch
+  sets: [],
+  nextSetId: 1,
+  rules: [],
+  nextRuleId: 1,
+  annotations: [],
+  nextAnnotationId: 1,
+  groups: [],
+  nextGroupId: 1,
+  buildingWalls: [],
+  nextBuildingWallId: 1,
   buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },
   buildingWallsVisible: saved?.buildingWallsVisible ?? true,
-
-  // Building Columns (structural columns locked to PDF)
-  buildingColumns: saved?.buildingColumns || [],
-  nextBuildingColumnId: saved?.nextBuildingColumnId || 1,
+  buildingColumns: [],
+  nextBuildingColumnId: 1,
   buildingColumnsVisible: saved?.buildingColumnsVisible ?? true,
 
   // Multi-select (ephemeral, not persisted or undone)
@@ -186,9 +225,9 @@ const useStore = create((set, get) => ({
   // Clearance zone visibility
   showClearance: saved?.showClearance ?? false,
 
-  // Exclusion zones (layout no-go areas)
-  exclusionZones: saved?.exclusionZones ?? [],
-  nextExclusionZoneId: saved?.nextExclusionZoneId || 1,
+  // Exclusion zones (layout no-go areas) — heavy-ish, populated from server
+  exclusionZones: [],
+  nextExclusionZoneId: 1,
 
   // Crawl space — minimum gap between sets (in feet)
   crawlSpace: saved?.crawlSpace ?? 2, // 1.5 (18"), 2 (2'), 3 (3'), 0 (off)
@@ -1463,36 +1502,28 @@ const useStore = create((set, get) => ({
 
   // Save/Load
   autosave: () => {
-    // Debounce: coalesce rapid changes into a single localStorage write
+    // Debounce: coalesce rapid changes into a single localStorage write.
+    // The localStorage write is ONLY UI prefs + projectName (lite payload),
+    // never the full project content. Project content lives on the server
+    // and is fetched on every boot.
     if (_autosaveTimer) clearTimeout(_autosaveTimer)
     _autosaveTimer = setTimeout(() => {
       _autosaveTimer = null
       const state = get()
 
-      // SAFETY: Never overwrite autosave with empty/default state
-      // This prevents hot-reload from wiping real work
-      if (!state.pdfImage && state.pdfLayers.length === 0 && state.sets.length === 0 &&
-          state.buildingWalls.length === 0 && state.buildingColumns.length === 0 &&
-          state.annotations.length === 0) {
-        return // nothing to save — don't wipe existing autosave
-      }
-
-      // Rotate backups: keep previous 2 autosaves
-      try {
-        const prev = localStorage.getItem(AUTOSAVE_KEY)
-        if (prev) {
-          const backup1 = localStorage.getItem(AUTOSAVE_KEY + '-backup-1')
-          if (backup1) localStorage.setItem(AUTOSAVE_KEY + '-backup-2', backup1)
-          localStorage.setItem(AUTOSAVE_KEY + '-backup-1', prev)
-        }
-      } catch (e) { /* ignore quota errors on backups */ }
-
       const now = new Date().toISOString()
       set({ lastSaved: now })
-      const data = buildSaveData(state, { lastSaved: now })
+      const lite = buildLiteAutosave(state)
+      lite.lastSaved = now
       try {
-        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data))
-      } catch (e) { /* ignore quota errors */ }
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(lite))
+      } catch (e) {
+        // Lite payload is ~1 KB; if this fails, localStorage is wedged.
+        // Surface to the console instead of silently dropping.
+        console.warn('[autosave] localStorage write failed:', e?.message || e)
+      }
+      // Backup rotation removed — the lite payload has no project content
+      // to back up; the server is the source of truth.
 
       // Periodic server autosave — every 2 minutes if linked to a server project
       const srvId = loadServerProjectId()
@@ -1531,13 +1562,10 @@ const useStore = create((set, get) => ({
   setServerProjectId: (id) => saveServerProjectId(id),
 
   // Boot-time auto-load: fetches the user's most-recently-updated project from
-  // the server and replaces in-memory state with it. Returns { id, name } on
-  // success, null if no projects exist, or throws on hard errors so the
-  // caller can surface them to the user.
-  //
-  // Before overwriting, stashes the current autosave into a recovery key so a
-  // user with unsaved local work can recover it from localStorage if something
-  // goes wrong (key: `floorplan-app-autosave-pre-boot`).
+  // the server and populates in-memory state with it. The server is the source
+  // of truth; the boot store starts empty and this fills it. Returns
+  // { id, name, updated_at } on success, null if no projects exist, throws on
+  // hard errors.
   loadLatestProject: async () => {
     const token = localStorage.getItem('floorplan-token')
     if (!token) return null
@@ -1548,13 +1576,6 @@ const useStore = create((set, get) => ({
     const latest = list[0]
     const project = await apiFetch(`/projects/${latest.id}`)
     if (!project?.data) return null
-
-    // Preserve pre-boot state for recovery
-    try {
-      const prev = localStorage.getItem(AUTOSAVE_KEY)
-      if (prev) localStorage.setItem(AUTOSAVE_KEY + '-pre-boot', prev)
-    } catch { /* ignore quota errors */ }
-
     get().importProject(project.data)
     set({ projectName: project.name || 'Untitled Project' })
     saveServerProjectId(latest.id)
