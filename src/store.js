@@ -140,9 +140,15 @@ function loadSavedProjects() {
 const saved = loadAutosave()
 // One-time cleanup: if there's a legacy v1 blob hogging localStorage quota,
 // drop it now so the first autosave doesn't have to compete for space.
+// Also drop the rotated backup keys from the old multi-MB-per-save format —
+// the new lite payload doesn't need backups (the server is the backup).
 if (saved && saved.version !== 2 && (saved.sets || saved.pdfLayers)) {
   try { localStorage.removeItem(AUTOSAVE_KEY) } catch { /* ignore */ }
 }
+try {
+  localStorage.removeItem(AUTOSAVE_KEY + '-backup-1')
+  localStorage.removeItem(AUTOSAVE_KEY + '-backup-2')
+} catch { /* ignore */ }
 
 const useStore = create((set, get) => ({
   // Heavy project content — always starts empty. The server is the source of
