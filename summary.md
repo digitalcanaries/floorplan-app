@@ -1,407 +1,430 @@
-# Floor Plan Layout Tool — Project Summary
+# Film Set Floor Plan Layout App — Handoff Summary
 
-## Overview
-A web-based film/TV set floor plan layout tool for designing stage layouts, placing architectural components, and planning set construction. Built for production designers and set decorators working on film, television, and stage productions.
+Upload this file to a new Claude Code chat to continue development.
 
-**Live URL:** http://16.54.34.31:3080
-**Repository:** digitalcanaries/floorplan-app
-**Last Updated:** February 2026
+_Last regenerated against HEAD `f135466` on 2026-04-18._
+
+---
+
+## Project Overview
+
+A web app for planning film/TV set construction. Users upload PDF blueprints, calibrate scale, drag rooms/walls/doors/windows onto a 2D canvas, then view the layout in 3D walk-through mode with construction-frame rendering.
+
+- **GitHub**: `digitalcanaries/floorplan-app`
+- **Live Server**: `http://16.54.34.31:3080` (AWS Lightsail Ubuntu 24.04)
+- **SSH**: `ssh -i C:\Users\Simons Laptop\keypairs\devkey.pem ubuntu@16.54.34.31`
+- **App directory on server**: `/opt/apps/floorplan-app/`
+- **Local dev path**: `C:\Projects\floorplan-app`
+
+---
 
 ## Tech Stack
-- **Frontend:** React 19 + Vite 7, Fabric.js v7.1 (canvas), Zustand (state), Tailwind CSS v4
-- **Backend:** Express.js v5, better-sqlite3, JWT authentication
-- **Deployment:** Docker multi-stage build on AWS Lightsail (Ubuntu 24.04)
-- **PDF:** pdfjs-dist for PDF rendering + Tesseract.js for OCR dimension extraction
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19, Vite 7, plain JSX (no TypeScript) |
+| 2D Canvas | Fabric.js v7.1.0 |
+| 3D Rendering | Three.js 0.182 + @react-three/fiber 9.5 + @react-three/drei 10.7 (lazy-loaded) |
+| State | Zustand 5.0 (single store: `src/store.js`) |
+| Styling | Tailwind CSS v4 |
+| Backend | Express.js v5, better-sqlite3, JWT auth (bcryptjs + jsonwebtoken) |
+| PDF / OCR | pdfjs-dist 5.4 + Tesseract.js 7 |
+| Deploy | Docker multi-stage build, `docker-compose.yml` |
 
 ---
 
-## Phase 1 — Feature Status (COMPLETE)
-
-### Core Canvas
-| Feature | Status |
-|---------|--------|
-| Upload PDF floor plans as background | DONE |
-| Calibrate scale (two-point click) | DONE |
-| Rotate PDFs 90 degrees | DONE |
-| Scroll to zoom, Ctrl+drag to pan | DONE |
-| Grid overlay with snap-to-grid | DONE |
-| Edge snapping with visual guide lines | DONE |
-
-### Sets
-| Feature | Status |
-|---------|--------|
-| Add individual sets (name, dimensions, colour, category) | DONE |
-| Bulk import via paste list ("Set Name - 23x27") | DONE |
-| OCR: Read measurements from PDF text/image layers | DONE |
-| Categories: Set, Wall, Window, Door, Furniture, Bathroom, Stair, Column, Other | DONE |
-| Opacity control per set (10%-100%) | DONE |
-| Z-order layering (bring forward/send backward) | DONE |
-| Duplicate sets with auto-incrementing names | DONE |
-| Lock sets to PDF position (move with PDF) | DONE |
-| Hide/show sets, remove from plan, restore | DONE |
-| Cut-into feature (L-shapes, notched polygons) | DONE |
-| Wall access gap zones with presets (1ft, 2ft, 4ft, 6ft) | DONE |
-| No-cut flag for walls/windows/doors | DONE |
-| Door frame depth in inches (presets: 4, 4.5, 5, 6") | DONE |
-| Window depth in inches (presets: 3, 4, 6, 12, 18, 24, 36") | DONE |
-
-### Build Tab & Component Library
-| Feature | Status |
-|---------|--------|
-| Server-side SQLite database (~40+ default components) | DONE |
-| Hollywood Flats, Double Flats, Braced Access Walls | DONE |
-| Windows (single/multi-pane/picture) | DONE |
-| Doors (single, double, arch) with both-swing support | DONE |
-| Custom Flat Builder with material estimates | DONE |
-| Custom Window Builder (1-4 panes, visual preview) | DONE |
-| Custom Door Builder (swing direction) | DONE |
-| Suggest Flats (auto-calculate flat layout for set walls) | DONE |
-| Architectural plan-view icons on canvas | DONE |
-
-### Labels, Callouts & Visibility
-| Feature | Status |
-|---------|--------|
-| Global labels toggle (name, dims, category, rotation) | DONE |
-| Three display modes: On Sets, Right Side, Left Side callout | DONE |
-| Callout leader lines with colour-coded arrowheads | DONE |
-| Per-set label position (9 positions: TL, T, TR, L, C, R, BL, B, BR) | DONE |
-| Per-set label toggle (show/hide individual labels) | DONE |
-| Bulk label position change via multi-select | DONE |
-| Dimension lines (per-set width/height + inter-set distances) | DONE |
-| Hover tooltips with toggle on/off | DONE |
-| Overlap zone detection (red dashed rectangles) | DONE |
-
-### Layers Panel
-| Feature | Status |
-|---------|--------|
-| Layers tab in sidebar | DONE |
-| Display options toggles (grid, labels, overlaps, dims, tooltips) | DONE |
-| Category layer visibility (show/hide by category) | DONE |
-| Area calculation summary (per-category + bounding box) | DONE |
-
-### Groups
-| Feature | Status |
-|---------|--------|
-| Create groups from multi-select or Layers tab | DONE |
-| Collapse/expand groups | DONE |
-| Delete groups (sets remain) | DONE |
-| Group button in bulk actions bar | DONE |
-
-### Annotations
-| Feature | Status |
-|---------|--------|
-| Add text annotations to canvas | DONE |
-| Draggable annotation positioning | DONE |
-| Double-click to edit annotation text | DONE |
-| Font size, colour control per annotation | DONE |
-| Delete annotations | DONE |
-| Annotations included in undo/redo history | DONE |
-
-### Copy, Paste & Keyboard Shortcuts
-| Feature | Status |
-|---------|--------|
-| Ctrl+C: Copy selected set | DONE |
-| Ctrl+V: Paste at offset | DONE |
-| Ctrl+D: Duplicate selected set | DONE |
-| Delete/Backspace: Delete selected set | DONE |
-| Ctrl+Z: Undo (50-step history) | DONE |
-| Ctrl+Shift+Z / Ctrl+Y: Redo | DONE |
-
-### Multi-Select & Alignment
-| Feature | Status |
-|---------|--------|
-| Checkbox multi-select + Shift+click | DONE |
-| Bulk actions: category, colour, no-cut, hide, remove, delete, group | DONE |
-| Alignment tools: left, right, top, bottom, centre H/V | DONE |
-| Distribution: horizontal/vertical with equal spacing | DONE |
-
-### Rules & Auto Layout
-| Feature | Status |
-|---------|--------|
-| Relationship rules: NEAR, CONNECT, SEPARATE, FIXED | DONE |
-| Auto layout (bin-packing + simulated annealing) | DONE |
-| Try Alternate / Clear Layout | DONE |
-
-### Save/Load & Export
-| Feature | Status |
-|---------|--------|
-| Autosave to browser localStorage | DONE |
-| Save/load to server (SQLite) | DONE |
-| Save to browser with named saves | DONE |
-| Export/import as JSON files | DONE |
-| Export canvas as PNG screenshot | DONE |
-| Share projects with other users | DONE |
-| Print/PDF export (title block, scale bar, legend, area table) | DONE |
-| Templates (883 Islington Ave warehouse pre-loaded) | DONE |
-| Load from file (JSON import) | DONE |
-
-### PDF Floor Plan Extraction
-| Feature | Status |
-|---------|--------|
-| 883 Islington Ave floor plan extracted and recreated | DONE |
-| Warehouse zones (Option 1/2/3 with sq footage) | DONE |
-| Office rooms, washrooms, utility rooms, corridors | DONE |
-| Loading docks (6 T.L. + 1 G.L.), stairwells, columns | DONE |
-| Ceiling height annotations throughout | DONE |
-| Groups organized by building section | DONE |
-
-### User Management
-| Feature | Status |
-|---------|--------|
-| JWT-based authentication | DONE |
-| Admin panel for user CRUD | DONE |
-| Password change with first-login forced change | DONE |
-| Project sharing between users | DONE |
-
-### Help & Documentation
-| Feature | Status |
-|---------|--------|
-| Searchable help guide (16 sections) | DONE |
-| Resizable sidebar with width persistence | DONE |
-
----
-
-## Architecture
-
-```
-floorplan-app/
-  server/
-    index.js          — Express server, static file serving, SPA fallback
-    db.js             — SQLite database (users, projects, component_types tables)
-    auth.js           — JWT middleware
-    routes/
-      auth.js         — Login endpoint
-      projects.js     — Project CRUD + sharing
-      admin.js        — User management (admin only)
-      components.js   — Component library CRUD
-  src/
-    api.js            — API fetch helper with auth headers
-    authStore.js      — Zustand auth state
-    store.js          — Main Zustand store (~800 lines: sets, rules, annotations,
-                        groups, layers, clipboard, canvas state, save/load, undo/redo)
-    engine/
-      geometry.js     — AABB, overlap detection, cut polygons, label positioning
-      componentIcons.js — Fabric.js icon rendering (windows, doors, flats, etc.)
-      autoLayout.js   — Bin-packing + simulated annealing
-    components/
-      FloorCanvas.jsx — Main fabric.js canvas (~1100 lines: rendering, interaction,
-                        snapping, dimensions, annotations, keyboard shortcuts)
-      Sidebar.jsx     — Resizable sidebar with Sets/Build/Rules/Layers tabs
-      SetsTab.jsx     — Set list, add/edit forms, multi-select, alignment
-      BuildTab.jsx    — Component library browser, suggest flats
-      FlatBuilder.jsx — Custom flat/window/door creation modals
-      RulesTab.jsx    — Rule management
-      LayersTab.jsx   — Layer visibility, groups, annotations, area calculation
-      Scene3D.jsx     — Three.js 3D rendering engine (~700 lines: wall extrusion,
-                        door/window openings, flat construction frame, orbit/walkthrough,
-                        lighting, sky, floor, labels)
-      TopBar.jsx      — Toolbar (~580 lines: grid, snap, labels, dims, save/load,
-                        layout, print/PDF, templates, 3D view toggle)
-      HelpGuide.jsx   — Searchable help guide (16 sections)
-      UserMenu.jsx    — User dropdown (help, password, admin, logout)
-  public/
-    883-islington-floorplan.json — Template floor plan
-    pdf.worker.min.mjs           — PDF.js web worker
-```
-
-## Data Model
-
-### Set Properties
-| Field | Type | Description |
-|-------|------|-------------|
-| id | number | Unique ID |
-| name | string | Display name |
-| width, height | number | Dimensions in project units |
-| color | string | Hex colour |
-| x, y | number | Canvas position (pixels) |
-| rotation | number | 0, 90, 180, or 270 |
-| category | string | Set/Wall/Window/Door/Furniture/Bathroom/Stair/Column/Other |
-| noCut | boolean | Cannot be cut into |
-| opacity | number | 0.1 to 1.0 |
-| zIndex | number | Rendering order |
-| lockedToPdf | boolean | Moves with PDF background |
-| onPlan | boolean | Visible on canvas |
-| hidden | boolean | Temporarily hidden |
-| labelHidden | boolean | Per-set label visibility |
-| labelPosition | string | Label anchor position |
-| wallGap | number | Access gap distance (units) |
-| cutouts | array | Cut polygon definitions |
-| iconType | string | Component icon type (rect/flat/window/door/etc.) |
-| thickness | number | Physical thickness for 3D |
-| componentTypeId | number | Reference to component_types table |
-| componentProperties | object | Panes, swing direction, depthFt, etc. |
-
-### Annotation Properties
-| Field | Type | Description |
-|-------|------|-------------|
-| id | number | Unique ID |
-| text | string | Display text |
-| x, y | number | Canvas position |
-| fontSize | number | Font size in pixels |
-| color | string | Text colour |
-
-### Group Properties
-| Field | Type | Description |
-|-------|------|-------------|
-| id | number | Unique ID |
-| name | string | Group name |
-| setIds | number[] | Array of set IDs in group |
-| collapsed | boolean | UI collapse state |
-
-### Component Types Table (SQLite)
-| Field | Type | Description |
-|-------|------|-------------|
-| id | INTEGER | Primary key |
-| category | TEXT | Wall/Window/Door/Other |
-| subcategory | TEXT | Hollywood Flat, Multi Pane, etc. |
-| name | TEXT | Display name |
-| width, height | REAL | Dimensions in feet |
-| thickness | REAL | Physical depth (feet) |
-| icon_type | TEXT | Icon rendering type |
-| properties | TEXT (JSON) | Panes, style, swing, etc. |
-| is_default | INTEGER | 1 for seed data, 0 for user-created |
-| created_by | INTEGER | User ID (custom components) |
-
----
-
-## Development Roadmap — Path to 3D Set Walkthroughs
-
-### Phase 2A — 3D Foundation (DONE)
-_Goal: Get basic 3D extrusion of the 2D floor plan so you can see walls standing up._
-
-| Step | Task | Status |
-|------|------|--------|
-| 2A-1 | **Add Three.js / React Three Fiber** — `@react-three/fiber` + `@react-three/drei` + `three`. Scene3D.jsx component lazy-loaded. "3D Walk-Through" option in view mode dropdown. | DONE |
-| 2A-2 | **Extrude walls from 2D plan** — Walls/flats extruded to 3D boxes. `wallHeight` field (default 12ft). Construction view shows 1×3 timber framing with rails, stiles, toggles, luan skin. Toggle: Finished / Construction Front / Construction Rear. | DONE |
-| 2A-3 | **Floor plane** — Dynamic floor mesh computed from set bounding box with 20ft padding. Concrete grey material. Grid helper overlay. | DONE |
-| 2A-4 | **Camera controls** — OrbitControls (rotate/pan/zoom). First-person walkthrough (WASD + pointer lock mouse look). Eye-height at 5'6". Space/Shift for vertical movement. | DONE |
-| 2A-5 | **Door & window openings** — Doors cut floor-to-head (7ft) openings in walls. Windows cut sill-to-head (3ft-7ft) openings with glass pane. Doors rendered as 3D frames with open passage. Windows rendered with frame and glass. | DONE |
-| 2A-6 | **Lighting** — Ambient + directional (with shadow maps 2048px) + hemisphere sky/ground. Sky dome. | DONE |
-| 2A-7 | **Per-wall access gap control** — Individual wall sides can have gap/no-gap. Zero gap option for back-to-back walls. Global + per-wall height settings. | DONE |
-| 2A-8 | **Standard architectural icons** — Plan-view door symbols with swing arcs (single/double/arch). Window symbols with frame lines and glass. Proper wall section fills. | DONE |
-
-**Deliverable:** Toggle between 2D plan view and 3D walkthrough. Navigate through sets in first-person. Toggle wall construction view to see framing.
-
-### Phase 2B — Materials, Textures & Polish
-_Goal: Make the 3D look realistic enough for client presentations._
-
-| Step | Task | Details | Effort |
-|------|------|---------|--------|
-| 2B-1 | **Wall materials/textures** | Material selector per set: painted drywall, exposed brick, wood panelling, concrete, green screen. Store as `materialTexture` field on each set. | Medium |
-| 2B-2 | **Floor materials** | Concrete, hardwood, carpet, tile, epoxy. Per-room floor material based on set category. | Small |
-| 2B-3 | **Ceiling types** | Open joist (warehouse), drop ceiling (office), exposed deck. Use ceiling height annotations to set per-room heights. | Medium |
-| 2B-4 | **Set piece rendering** | Furniture/bathroom/kitchen category sets rendered as basic 3D shapes (tables, chairs, toilets, sinks) instead of flat planes. | Medium |
-| 2B-5 | **Shadows & ambient occlusion** | Shadow maps from directional light. SSAO for realistic depth. | Small |
-| 2B-6 | **Screenshot / video capture** | "Capture 3D View" button exports a high-res PNG from the 3D scene. Optional screen recording for video walkthroughs. | Small |
-
-**Deliverable:** Photo-quality 3D renders of set designs for director/producer approval.
-
-### Phase 2C — Prop Inventory Integration (FUTURE — inventory not yet built)
-_Goal: Connect to prop inventory system and place real props in 3D scenes._
-_**Blocked by:** Prop inventory system needs to be built first as a separate project. This phase will be revisited once the inventory app exists with an API._
-
-| Step | Task | Details | Effort |
-|------|------|---------|--------|
-| 2C-0 | **Build prop inventory app** | Separate project: prop database with photos, dimensions, categories, availability tracking. REST API for integration. | Large (separate project) |
-| 2C-1 | **Prop inventory API connection** | Connect floor plan app to prop inventory API. Browse props by category, search by name. | Medium |
-| 2C-2 | **Prop images on 2D plan** | Drag props from inventory onto the 2D floor plan. Display prop photo as the set icon instead of a plain rectangle. | Medium |
-| 2C-3 | **3D prop models** | For props with photos: generate basic 3D models from images (billboards/sprites for photos, or proper .glb models if available). Place in 3D scene at floor-plan coordinates. | Large |
-| 2C-4 | **AI 3D model generation** | Use AI image-to-3D (e.g., TripoSR, Meshy, Luma) to convert prop photos into 3D meshes. Cache generated models for reuse. | Large |
-| 2C-5 | **Prop catalogue in Build tab** | New "Props" section in the Build tab showing inventory items with thumbnails, dimensions, and "Place on Plan" button. | Medium |
-| 2C-6 | **Prop data sync** | Two-way sync: props placed on plan update inventory (assigned to production/set). Check-in/check-out status visible on plan. | Medium |
-
-**Deliverable:** Browse real props from inventory, drag them onto the floor plan, see them in the 3D walkthrough with actual photos/models.
-
-### Phase 2D — AI Photorealistic Rendering
-_Goal: Generate photorealistic images and video of set designs for pre-visualization._
-
-| Step | Task | Details | Effort |
-|------|------|---------|--------|
-| 2D-1 | **Scene data export** | Export full scene (geometry, materials, lighting, camera) as a structured format (glTF / USD / custom JSON) for AI rendering. | Medium |
-| 2D-2 | **AI image generation integration** | Send scene description + camera angle to an AI image model (Stable Diffusion / DALL-E / Midjourney API). Generate photorealistic stills from chosen viewpoints. | Large |
-| 2D-3 | **Style reference matching** | Upload reference photos (real locations, mood boards) and use style-transfer to match the render aesthetic. | Medium |
-| 2D-4 | **Video walkthrough generation** | Define camera path through the 3D scene. Generate frame-by-frame AI renders stitched into a video. | Large |
-| 2D-5 | **Before/after comparison** | Side-by-side view: 3D wireframe vs. AI photorealistic render vs. reference photo. | Small |
-
-**Deliverable:** From a 2D floor plan, generate photorealistic video walkthroughs of the dressed set for stakeholder review.
-
-### Phase 3 — Production Tools
-_Goal: Full production pipeline integration._
-
-| Step | Task | Details | Effort |
-|------|------|---------|--------|
-| 3-1 | **Construction drawings export** | Generate elevation views, section cuts, and cut lists from the 3D model. Export as PDF or DXF for the construction crew. | Large |
-| 3-2 | **Cable/power run planning** | Plan cable routes through braced access walls. Show power distribution in both 2D and 3D views. | Medium |
-| 3-3 | **Cost estimation** | Calculate material costs based on component library (lumber, luan, hardware). Connect to vendor pricing. | Medium |
-| 3-4 | **Schedule integration** | Timeline view showing set build/strike dates. Gantt chart linked to floor plan elements. | Large |
-| 3-5 | **Multi-floor / multi-stage** | Support multiple floors (mezzanine, second story) and multiple stages/locations in one project. | Medium |
-| 3-6 | **Collaboration** | Real-time multi-user editing (WebSocket). Cursor positions and live changes visible to all connected users. | Large |
-
----
-
-## Phase 2A/2B Data Model Extensions (for 3D)
-| Field | Type | Phase | Purpose |
-|-------|------|-------|---------|
-| wallHeight | number | 2A | Visual wall height for 3D extrusion (default 10ft) |
-| elevation | number | 2A | Height off floor for 3D placement |
-| materialTexture | string | 2B | Surface texture/material reference |
-| connectionPoints | array | 2B | 3D joining endpoints for flat-to-flat connections |
-
-### Future Data Model Extensions (Phase 2C — when prop inventory exists)
-| Field | Type | Purpose |
-|-------|------|---------|
-| propInventoryId | string | Link to prop inventory system |
-| propImageUrl | string | Photo URL for prop rendering |
-| prop3dModelUrl | string | .glb model URL for 3D scene |
-
----
-
-## What's Next — Recommended Priority
-
-### Immediate (can start now)
-1. **Phase 2A-1 through 2A-4** — Get basic 3D working with wall extrusion and first-person walkthrough. This is the minimum viable 3D feature that transforms the tool from a 2D planner into a spatial design tool.
-
-2. **Phase 2A-5 & 2A-6** — Add door/window openings and lighting to make the walkthrough feel real.
-
-3. **Phase 2B** — Add materials and textures to make the 3D presentable for client meetings.
-
-### After 3D is solid
-4. **Phase 2D** — AI photorealistic renders (the endgame for pre-viz). Can be built on top of the 3D scene without needing the prop inventory.
-
-### When prop inventory is built (separate project)
-5. **Phase 2C** — Prop inventory integration. Blocked until the prop inventory app exists with an API. Once available, props can be placed on 2D plans and rendered in the 3D walkthrough.
-
----
-
-## Deployment
+## Deployment Process
 
 ```bash
-# Build and deploy
+# From local machine (C:\Projects\floorplan-app)
+# 1. Build locally to verify
+npm run build
+
+# 2. Commit and push
+git add <files>
+git commit -m "message"   # Do NOT include Co-Authored-By
 git push origin main
-scp -i ~/.claude/projects/keypairs/devkey.pem -r src server public package.json vite.config.js Dockerfile docker-compose.yml ubuntu@16.54.34.31:/opt/apps/floorplan-app/
-ssh -i ~/.claude/projects/keypairs/devkey.pem ubuntu@16.54.34.31 "cd /opt/apps/floorplan-app && docker compose down && docker compose up -d --build"
+
+# 3. SCP files to server
+scp -i "C:\Users\Simons Laptop\keypairs\devkey.pem" -r \
+  src server public package.json package-lock.json vite.config.js Dockerfile docker-compose.yml \
+  ubuntu@16.54.34.31:/opt/apps/floorplan-app/
+
+# 4. Rebuild Docker on server
+ssh -i "C:\Users\Simons Laptop\keypairs\devkey.pem" ubuntu@16.54.34.31 \
+  "cd /opt/apps/floorplan-app && docker compose down && docker compose up -d --build"
+
+# If Docker cache error, add --no-cache:
+# docker compose up -d --build --no-cache
 
 # If seed data changed, delete DB first:
-ssh -i ~/.claude/projects/keypairs/devkey.pem ubuntu@16.54.34.31 "rm -f /opt/apps/floorplan-app/data/floorplan.db"
+# ssh ... "rm -f /opt/apps/floorplan-app/data/floorplan.db"
 ```
 
-## Film/TV Set Construction Reference
+**Important**: Do NOT include `Co-Authored-By` lines in commits.
 
-### Hollywood (Hard) Flats
-- Frame: 1x3 lumber (3/4" x 2-1/2" actual) set on edge
-- Covering: 1/8" or 1/4" luan plywood
-- Standard widths: 1', 2', 3', 4' (4' most common)
-- Standard heights: 8', 10', 12'
-- Thickness: ~3.5" (frame depth on edge)
-- Toggles (horizontal braces): every 2' to 2'6"
+---
 
-### Broadway (Soft) Flats
-- Frame: 1x3 lumber laid flat
-- Covering: Muslin or canvas, stapled every 6-8"
-- Corner blocks: 1/4" plywood, 10"x10" triangles
-- Keystones: 3-1/2" x 7" x 2-1/2" plywood connectors
+## File Structure & Line Counts
 
-### Standard Set Wall Types
-- Single-sided flat: ~3.5" thick
-- Double-sided flat: ~4" thick (luan both sides)
-- Braced access wall: two single-sided flats with 2' gap for power/cable runs
+```
+src/
+  store.js                    (1092 lines) — Zustand store, all state + actions
+  App.jsx                     (57 lines)   — Main app layout
+  api.js                      (51 lines)   — API fetch helper with JWT
+  authStore.js                (55 lines)   — Auth state
+  components/
+    FloorCanvas.jsx           (1615 lines) — Main 2D Fabric.js canvas
+    Scene3D.jsx               (1552 lines) — 3D rendering engine
+    SetsTab.jsx               (1046 lines) — Set list panel with editing
+    FlatBuilder.jsx           (854 lines)  — Custom flat/window/door creation modal
+    BuildTab.jsx              (623 lines)  — Component library tab
+    TopBar.jsx                (604 lines)  — Top toolbar (save/load/undo/redo/export)
+    HelpGuide.jsx             (499 lines)  — User guide modal
+    BulkImport.jsx            (335 lines)  — Bulk CSV import
+    LayersTab.jsx             (332 lines)  — Layer visibility controls
+    UserMenu.jsx              (233 lines)  — User account menu
+    Sidebar.jsx               (109 lines)  — Tab container
+    PdfUploader.jsx           (108 lines)  — PDF upload/parsing
+    ChangePasswordModal.jsx   (103 lines)
+    RulesTab.jsx              (91 lines)   — Adjacency rules
+    LoginScreen.jsx           (57 lines)   — Login form
+  engine/
+    componentIcons.js         (1658 lines) — All 2D plan-view icon drawing functions
+    geometry.js               (283 lines)  — Overlap detection, area calculations
+    autoLayout.js             (113 lines)  — Auto-placement algorithm
+    scoring.js                (80 lines)   — Layout scoring
+server/
+  index.js                    (48 lines)   — Express server, serves dist/
+  db.js                       (201 lines)  — SQLite schema + seed data
+  auth.js                     (38 lines)   — JWT middleware
+  routes/
+    projects.js               (98 lines)   — Project save/load/share
+    components.js             (76 lines)   — Component library CRUD
+    admin.js                  (74 lines)   — User management
+    auth.js                   (72 lines)   — Login/register
+```
+
+Total: ~12.2k LOC.
+
+---
+
+## Critical Data Model
+
+### Set Object (stored in `store.sets[]`)
+
+```javascript
+{
+  id: 1,
+  name: "Courtroom",
+  x: 150.5,             // PIXELS — top-left corner position on 2D canvas
+  y: 230.7,             // PIXELS
+  width: 38,            // FEET — always feet, never pixels
+  height: 50,           // FEET — always feet
+  rotation: 0,          // degrees clockwise (free rotation supported in 2D + 3D)
+  category: 'Set',      // 'Set', 'Wall', 'Door', 'Window', 'Other', or undefined
+  color: '#FF6B6B',
+  wallHeight: 10,       // elevation height in feet (3D wall height, default 10)
+  thickness: 0.292,     // wall thickness in feet
+  iconType: 'rect',     // 'rect', 'flat', 'flat-double', 'flat-braced',
+                        //   'door', 'door-double', 'door-arch', 'window', 'window-bay',
+                        //   'column', 'stair', 'sink', 'stove', 'toilet', 'bed', etc.
+  componentProperties: {
+    elevationHeight: 10,  // actual 3D height for doors/windows/flats
+    style: 'hollywood',   // flat style
+    swing: 'left',        // door swing direction: 'left', 'right', 'both'
+    panes: 2,             // window pane count
+  },
+  onPlan: true,
+  hidden: false,
+  lockedToPdf: false,
+  opacity: 1,
+  zIndex: 1,
+  elevation: 0,         // height off floor for 3D placement
+  wallGap: 0,           // access gap distance
+  gapSides: null,       // { top: true, right: true, bottom: true, left: true }
+  noCut: false,
+  labelHidden: false,
+  labelPosition: 'top-left',
+  materialTexture: null, // 'brick', 'concrete', 'greenscreen', 'wood'
+  componentTypeId: null,
+
+  // Per-wall controls (added post 3c94e75 / 4fd2426)
+  wallRenderMode: 'finished', // per-set override: 'finished' / 'construction-front' / 'construction-rear'
+  wallsRemoved: {},           // { top: true, ... } — remove specific walls in 3D
+  wallsHidden: {},            // { top: true, ... } — hide specific walls without removing
+  wallsLocked: {},            // per-wall lock state for resize
+  wallExtensions: {},         // per-side extension distances
+}
+```
+
+### Coordinate System — THE MOST IMPORTANT THING TO UNDERSTAND
+
+- **2D Canvas**: `set.x`, `set.y` = PIXEL position (top-left corner of bounding box)
+- **2D Canvas**: `set.width`, `set.height` = FEET (dimensions are always in feet)
+- **pixelsPerUnit (ppu)**: Conversion factor set at calibration time.
+- **Pixel footprint on canvas**: `width_px = set.width * ppu`, `height_px = set.height * ppu`
+- **3D World**: X = right, Y = up, Z = into screen (Z maps to 2D Y axis)
+- **3D Conversion** via `get3DPosition(set, ppu)` in `Scene3D.jsx:66` — handles arbitrary rotation angles via general trig (not just 0/90/180/270).
+
+### Category Routing in 3D (`SceneContent`, Scene3D.jsx ~line 1196)
+
+| Category | 3D Component | How it renders |
+|----------|-------------|----------------|
+| `'Set'` or `undefined` | `SetRoomWalls` | 4 walls + floor per room, with door/window openings cut and shared edges deduped |
+| `'Wall'` or `iconType='flat'/'flat-double'/'braced-wall'` | `WallMesh` | Individual wall flats with door/window openings (`WallWithOpenings`) |
+| `'Door'` | `DoorMesh3D` | Door frame + posts + header + threshold |
+| `'Window'` | `WindowMesh3D` | Glass pane + frame + sill wall |
+| `'Furniture'`/`'Other'`/`'Column'`/`'Stair'`/`'Bathroom'`/`'Kitchen'` | `SpecialSetMesh` | Solid boxes, cylinders, stepped blocks |
+
+### 3D Room Wall Rendering — Current State
+
+The previously-flagged "Active Bug" (rooms rendering as solid/clipping walls with no door/window cutouts) has been addressed across several commits:
+
+- `b765a61` — Rewrote `SetRoomWalls` to cut door/window openings and dedup shared edges
+- `f135466` — Added construction flat rendering for room walls in 3D
+- `3c94e75` — Per-set `wallRenderMode` + per-wall remove/hide controls (`wallsRemoved`, `wallsHidden`) give the user a manual escape hatch when auto-dedup gets it wrong
+- `6d61b60` — Wall removal for intersecting rooms in 2D and 3D
+- `64e88fd` / `d13d2d8` — General-trig positioning so arbitrary rotation angles work, not just cardinals
+
+Current `SetRoomWalls` (Scene3D.jsx:744) uses:
+- `EDGE_TOL = 0.5 ft` for shared-edge dedup
+- `OPEN_TOL = 1.0 ft` for door/window proximity to a wall edge
+- Axis-aligned bounding boxes via `getAABB()` for dedup/overlap on cardinal rotations
+- `subtractIntervals()` to cut opening ranges out of wall segments
+
+If rendering bugs resurface, start there and at `SceneContent` (Scene3D.jsx:1196) where routing happens.
+
+---
+
+## Scene3D.jsx Component Map (1552 lines)
+
+| Lines | Component | Purpose |
+|-------|-----------|---------|
+| 1-65 | Constants + imports | Magic numbers, THREE imports |
+| 66-91 | `get3DPosition()` | Coordinate conversion (general trig, arbitrary rotation) |
+| 92-187 | `FlatConstructionFrame` | Visible timber framing for construction view |
+| 188-226 | `DoorMesh3D` | 3D door frame rendering |
+| 227-281 | `WindowMesh3D` | 3D window with glass, frame, sill |
+| 282-375 | `WallMesh` | Individual Wall category items, legacy height detection |
+| 376-492 | `WallWithOpenings` | Splits wall into segments around door/window openings |
+| 493-743 | `SpecialSetMesh` | Columns, stairs, furniture, kitchen, bathroom |
+| 744-1038 | `SetRoomWalls` | Hollow room rendering with opening cuts + edge dedup |
+| 1039-1073 | `FloorPlane` | Ground plane computed from set bounds |
+| 1074-1169 | `FirstPersonControls` | WASD + pointer-lock FPS controls |
+| 1170-1195 | `SetLabel3D` | Floating text labels above sets |
+| 1196-1354 | `SceneContent` | Main component: filters sets, routes to renderers, drag-to-position |
+| 1355-1552 | `Scene3D` (exported) | Canvas wrapper with control bar, mode switcher |
+
+---
+
+## Store Key State (store.js, 1092 lines)
+
+```javascript
+{
+  // Canvas
+  sets: [],
+  pixelsPerUnit: 1,
+  unit: 'ft',
+  pdfImage: null,
+  pdfRotation: 0,
+  pdfPosition: { x: 0, y: 0 },
+
+  // 3D
+  defaultWallHeight: 10,         // feet (global default for set walls)
+  viewMode: 'plan',              // 'plan', 'elevation', '3d'
+  wallRenderMode: 'finished',    // global default: 'finished', 'construction-front', 'construction-rear'
+
+  // Undo/Redo (50-level)
+  _past: [], _future: [],
+  undo(), redo(),
+
+  // UI
+  gridVisible: true,
+  snapToGrid: true,
+  snapToSets: true,
+  labelsVisible: true,
+  showOverlaps: true,
+  showDimensions: false,
+  hideAllSets: false,            // clean-PDF tracing toggle (405f431)
+  hideLockIndicators: false,     // (ea20228)
+  layerVisibility: {},
+
+  // Actions
+  addSet, updateSet, deleteSet, setSets, duplicateSet,
+
+  // Building walls (dcf66dd)
+  buildingWalls: [],             // separate from sets[]; drawn as chained line segments
+
+  // Project
+  projectName: 'Untitled Project',
+  exportProject(), importProject(), saveProjectAs(),
+  autosave(),
+}
+```
+
+---
+
+## Seed Data (server/db.js)
+
+The `component_types` table is seeded with ~60+ default components:
+
+### Wall Flats (category: 'Wall')
+- Hollywood Flats: 1'/2'/3'/4' × 8'/10'/12' — `icon_type: 'flat'`
+- **LEGACY BUG**: `height` field stores elevation height (8, 10, 12ft) not plan-view depth. `WallMesh` detects this via `isLegacyHeight = set.height > thickness * 3` and swaps.
+- Double Flats: 4' × 8'/10'/12' — `icon_type: 'flat-double'`
+- Braced Access: 4' × 8'/10'/12' — `icon_type: 'flat-braced'`, thickness 2.583ft
+
+### Windows (category: 'Window')
+- `height` = plan-view depth (0.5ft). `properties.elevationHeight` = face height.
+- Standard (single/multi-pane), picture, bay windows
+
+### Doors (category: 'Door')
+- `height` = plan-view depth (0.333ft). `properties.elevationHeight` = face height.
+- Single, double, arch doors with swing direction (including "Both")
+
+### Other (category: 'Other')
+- Columns, stairs, fireplaces, kitchen (sinks, stoves, fridges, counters, islands)
+- Bathroom (bathtubs, toilets, showers, vanities)
+- Furniture (tables, desks, sofas, beds, wardrobes, bookshelves)
+
+---
+
+## Docker / Infrastructure
+
+```yaml
+# docker-compose.yml
+services:
+  floorplan:
+    build: .
+    ports: ["3080:3080"]
+    volumes: [floorplan-data:/app/data]
+    restart: unless-stopped
+    container_name: floorplan-app
+    environment:
+      - JWT_SECRET=floorplan-secret-key-change-me
+      - ADMIN_PASSWORD=admin
+volumes:
+  floorplan-data:
+```
+
+```dockerfile
+# Dockerfile (multi-stage)
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=build /app/dist ./dist
+COPY server/ ./server/
+COPY package*.json ./
+RUN npm ci --omit=dev
+EXPOSE 3080
+CMD ["node", "server/index.js"]
+```
+
+---
+
+## Completed Features
+
+### Phase 1 — 2D Floor Plan (COMPLETE)
+- PDF upload, scale calibration (two-point), rotate PDF, drag PDF
+- Drag/drop room placement with labels, categories, colors
+- Overlap detection, adjacency rules (NEAR/CONNECT/SEPARATE/FIXED)
+- Auto-layout with bin-packing + simulated annealing
+- Component library (60+ items: walls, doors, windows, furniture, bathroom, kitchen)
+- Custom Flat Builder (Hollywood/Broadway/Braced with material estimates)
+- Custom Window Builder (standard, multi-pane, bay with visual preview)
+- Custom Door Builder (single, double, arch with swing direction including "Both")
+- Bulk CSV import + OCR measurement reading
+- Plan-view architectural icons for all component types
+- Grid/snap with edge snapping and visual guide lines
+- Labels (inline, callout left/right) with per-set positioning
+- Dimension lines, hover tooltips, overlap zones
+- Layers panel with category visibility
+- Groups (create, collapse, delete)
+- Annotations (text labels on canvas, draggable, editable)
+- Copy/paste (Ctrl+C/V), duplicate (Ctrl+D), delete
+- Undo/Redo (Ctrl+Z/Y, 50-level history)
+- Multi-select with bulk category/color/noCut/hide/delete
+- Alignment tools for multi-selected sets
+- Lock-to-PDF, duplicate, remove-from-plan
+- Hide All Sets toggle for clean PDF tracing
+- Hide lock indicator toggle
+- Building walls drawing system (chained segments, H/V snap, chain break)
+- Wall removal for intersecting rooms (2D + 3D)
+- Per-wall lock/unlock, per-wall rotation controls
+- Precision rotation (1° nudge buttons)
+- Save/load to server + browser + file export/import
+- PNG/PDF export with title block, scale bar, legend
+- User auth (JWT), project sharing between users
+- Searchable help guide (16 sections)
+
+### Phase 2A — 3D View (FUNCTIONAL)
+- 3D walk-through view (orbit + first-person WASD + pointer lock)
+- Wall flat construction rendering (visible timber frame + luan skin)
+- Door/window 3D meshes with proper elevation heights
+- Special set rendering (columns as cylinders, stairs as steps, furniture as boxes)
+- Floor plane, sky dome, lighting (ambient + directional + hemisphere), shadows
+- Wall height display in set list (H:xx indicator)
+- Legacy wall data height detection
+- **Room wall rendering** — 4 walls per room with opening cuts + shared-edge dedup (b765a61, f135466)
+- Free rotation in 3D with arbitrary angles (c036307)
+- General-trig 3D positioning for rotated sets (64e88fd, d13d2d8)
+- Interactive 3D drag-to-position system (e7f0d2c)
+- 3-mode drag: move / elevate / rotate in 3D (20dfb7e)
+- Per-set wall render mode + per-wall remove/hide/extend/lock (3c94e75, 4fd2426)
+- Debug position overlay for 3D diagnostics (41a57bc)
+
+---
+
+## Git History (latest first, 65 total commits)
+
+```
+f135466 Add construction flat rendering for room set walls in 3D
+64e88fd Fix 3D positioning for arbitrary rotation angles using general trig
+d13d2d8 Fix 3D wall side mapping for rotated sets in SetRoomWalls
+a8f38fb Fix WallMesh 3D position sync — add rotation-aware bbox offset
+3c94e75 Add per-set wall render mode, per-wall remove/hide controls, wall extensions, and 2D/3D resize
+2d98d3c Change defaults: building walls 13ft tall, set walls 10ft tall
+4fd2426 Add per-wall lock/unlock, rotation controls, update defaults to 14ft/12"
+711b8aa Add H/V snap toggle and chain break for building wall drawing
+405f431 Add Hide All Sets toggle for clean PDF tracing
+ea20228 Add toggle to hide lock indicator dashed lines
+dcf66dd Add building walls drawing system
+6223b8f Fix lock outline mismatch for rotated sets in plan view
+41f461a Add precision rotation controls with 1-degree nudge buttons
+9390388 Revert broken trig-based rotation math back to working version
+c036307 Enable free rotation for sets in 3D view with arbitrary angles
+6d61b60 Add wall removal for intersecting rooms in 2D and 3D views
+20dfb7e Add 3-mode drag system: move, elevate, and rotate sets in 3D
+f8d2012 Fix rotated set positions: correct pivot-to-bbox conversion
+41a57bc Add debug position overlay to 3D view for diagnostics
+330e04f Revert rotation math, remove grid to fix flicker
+e54fe46 Fix 3D position mismatch for rotated sets + add lock toggle
+e7f0d2c Add interactive 3D drag-to-position system
+b765a61 Rewrite SetRoomWalls: cut door/window openings, dedup shared edges
+94ad0e0 Simplify 3D room walls: 4 walls per room using get3DPosition
+7399a63 Fix 3D walls: render all 4 walls per room, only cut door/window openings
+... (40 earlier commits, starting at 000ee02 Initial commit)
+```
+
+---
+
+## Roadmap (Future Phases)
+
+### Phase 2B — Materials, Textures & Polish
+Wall materials/textures, floor materials, ceiling types, set piece rendering, shadows/AO, screenshot capture
+
+### Phase 2C — Prop Inventory Integration (BLOCKED — needs separate inventory app)
+Connect to prop inventory API, prop images on 2D plan, 3D prop models, AI 3D generation
+
+### Phase 2D — AI Photorealistic Rendering
+Scene data export, AI image generation, style reference matching, video walkthrough generation
+
+### Phase 3 — Production Tools
+Construction drawings export, cable/power planning, cost estimation, schedule integration, multi-floor, real-time collaboration

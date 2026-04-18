@@ -1,16 +1,36 @@
-# React + Vite
+# Film Set Floor Plan Layout App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Web application for planning film/TV set construction. Upload a PDF blueprint, calibrate scale, drag rooms/walls/doors/windows onto a 2D canvas, then tour the layout in 3D walk-through mode.
 
-Currently, two official plugins are available:
+- **Live**: http://16.54.34.31:3080
+- **Repo**: `digitalcanaries/floorplan-app`
+- **Local dev path**: `C:\Projects\floorplan-app`
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Stack
 
-## React Compiler
+React 19 + Vite 7 (plain JSX), Fabric.js 7 (2D canvas), Three.js + @react-three/fiber (3D), Zustand 5 (state), Tailwind 4, Express 5 + better-sqlite3 (backend), JWT auth, Docker on AWS Lightsail.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Commands
 
-## Expanding the ESLint configuration
+```bash
+npm install
+npm run dev        # Vite dev server
+npm run build      # Production build into dist/
+npm start          # Express server (serves dist/ + API)
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Deploy
+
+```bash
+npm run build
+git add <files> && git commit -m "..." && git push origin main
+scp -i ~/keypairs/devkey.pem -r src server public package.json package-lock.json vite.config.js Dockerfile docker-compose.yml ubuntu@16.54.34.31:/opt/apps/floorplan-app/
+ssh -i ~/keypairs/devkey.pem ubuntu@16.54.34.31 "cd /opt/apps/floorplan-app && docker compose down && docker compose up -d --build"
+```
+
+Do NOT include `Co-Authored-By` in commit messages.
+
+## Docs
+
+- [CLAUDE.md](CLAUDE.md) — project brief for Claude Code
+- [summary.md](summary.md) — detailed handoff (data model, 3D rendering, feature inventory)
