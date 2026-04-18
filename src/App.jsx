@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import useAuthStore from './authStore.js'
 import useStore from './store.js'
 import TopBar from './components/TopBar.jsx'
@@ -13,7 +13,20 @@ const Scene3D = lazy(() => import('./components/Scene3D.jsx'))
 function App() {
   const { user, token } = useAuthStore()
   const viewMode = useStore(s => s.viewMode)
+  const loadLatestProject = useStore(s => s.loadLatestProject)
   const [canvasSize, setCanvasSize] = useState({ w: 1200, h: 800 })
+  const bootLoadRan = useRef(false)
+
+  // On login, pull the user's most-recently-updated project from the server
+  // and replace the rehydrated-from-localStorage state with it. This fires
+  // once per browser session so a refresh always lands on the latest save.
+  useEffect(() => {
+    if (!token || !user || bootLoadRan.current) return
+    bootLoadRan.current = true
+    loadLatestProject().then(result => {
+      if (result) console.log(`✅ Loaded latest project: ${result.name} (#${result.id})`)
+    })
+  }, [token, user, loadLatestProject])
 
   // Not logged in — show login
   if (!token || !user) {
