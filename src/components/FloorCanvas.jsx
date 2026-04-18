@@ -35,6 +35,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     gridVisible, snapToGrid, snapToSets, gridSize,
     labelsVisible, labelMode, showOverlaps,
     sets, updateSet, selectedSetId, setSelectedSetId, deleteSet,
+    groups, moveGroup,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
     unit, viewMode,
@@ -658,7 +659,14 @@ export default function FloorCanvas({ onCanvasSize }) {
             this.set({ scaleX: 1, scaleY: 1, width: newW * ppu, height: newH * ppu })
             updateSet(s.id, { x: fx, y: fy, width: newW, height: newH })
           } else {
-            updateSet(s.id, { x: fx, y: fy })
+            // If this set belongs to a group with siblings, drag the whole group
+            // by the same delta so grouping actually holds.
+            const group = groups.find(g => g.setIds.includes(s.id) && g.setIds.length > 1)
+            if (group) {
+              moveGroup(group.id, fx - s.x, fy - s.y)
+            } else {
+              updateSet(s.id, { x: fx, y: fy })
+            }
           }
         })
 

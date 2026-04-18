@@ -106,17 +106,31 @@ const useStore = create((set, get) => ({
   setPdfImage: (img) => set({ pdfImage: img }),
   setPdfRotation: (r) => set({ pdfRotation: r }),
   setPdfPosition: (pos) => {
+    // Idempotent sync: compute position from stored pdfOffset rather than
+    // accumulating deltas, so locked sets can't drift if their x/y ever got
+    // out of sync with the PDF. Fall back to delta math for legacy sets
+    // that were locked before pdfOffsetX/Y was stored.
     const oldPos = get().pdfPosition
     const dx = pos.x - oldPos.x
     const dy = pos.y - oldPos.y
-    // Move all locked-to-PDF sets with the PDF
-    const updatedSets = get().sets.map(s =>
-      s.lockedToPdf ? { ...s, x: s.x + dx, y: s.y + dy } : s
-    )
-    // Move all locked-to-PDF building walls with the PDF
-    const updatedBW = get().buildingWalls.map(w =>
-      w.lockedToPdf ? { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy } : w
-    )
+    const updatedSets = get().sets.map(s => {
+      if (!s.lockedToPdf) return s
+      if (s.pdfOffsetX != null && s.pdfOffsetY != null) {
+        return { ...s, x: pos.x + s.pdfOffsetX, y: pos.y + s.pdfOffsetY }
+      }
+      return { ...s, x: s.x + dx, y: s.y + dy }
+    })
+    const updatedBW = get().buildingWalls.map(w => {
+      if (!w.lockedToPdf) return w
+      if (w.pdfOffsetX1 != null && w.pdfOffsetY1 != null && w.pdfOffsetX2 != null && w.pdfOffsetY2 != null) {
+        return {
+          ...w,
+          x1: pos.x + w.pdfOffsetX1, y1: pos.y + w.pdfOffsetY1,
+          x2: pos.x + w.pdfOffsetX2, y2: pos.y + w.pdfOffsetY2,
+        }
+      }
+      return { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy }
+    })
     set({ pdfPosition: pos, sets: updatedSets, buildingWalls: updatedBW })
     get().autosave()
   },
@@ -328,8 +342,25 @@ const useStore = create((set, get) => ({
   },
   updateSet: (id, updates) => {
     get()._pushHistory()
-    set({ sets: get().sets.map(s => s.id === id ? { ...s, ...updates } : s) })
+    set({ sets: get().sets.map(s => {
+      if (s.id !== id) return s
+      // A set locked to the PDF must not be repositioned except by PDF movement
+      // (setPdfPosition) or by unlocking (toggleLockToPdf). Silently drop any
+      // x/y/width/height changes that come in through other paths (alignment,
+      // 3D drag, bulk ops, etc.) so the pin actually holds.
+      if (s.lockedToPdf) {
+        const { x: _x, y: _y, width: _w, height: _h, ...rest } = updates
+        return { ...s, ...rest }
+      }
+      return { ...s, ...updates }
+    }) })
     get().autosave()
+  },
+
+  // Find the group a given set belongs to (or null).
+  getGroupForSet: (id) => {
+    const groups = get().groups
+    return groups.find(g => g.setIds.includes(id)) || null
   },
   deleteSet: (id) => {
     get()._pushHistory()
