@@ -19,21 +19,40 @@ function App() {
   const bootLoadRan = useRef(false)
 
   // On login, pull the user's most-recently-updated project from the server
-  // and replace the rehydrated-from-localStorage state with it. This fires
-  // once per browser session so a refresh always lands on the latest save.
+  // and replace the rehydrated-from-localStorage state with it. The page is
+  // then reloaded ONCE so the Fabric canvas and all React effects initialize
+  // fresh against the newly-synced state instead of patching over whatever
+  // stale objects were created from the previous localStorage contents.
+  //
+  // A session-storage flag prevents the reload from triggering an infinite
+  // loop: after the reload, we see the flag and skip the fetch.
   useEffect(() => {
     if (!token || !user || bootLoadRan.current) return
     bootLoadRan.current = true
+
+    const FLAG = 'floorplan-just-autoloaded'
+    if (sessionStorage.getItem(FLAG)) {
+      sessionStorage.removeItem(FLAG)
+      console.log('ℹ️ Post-reload: using freshly-synced local state')
+      return
+    }
+
     loadLatestProject()
       .then(result => {
         if (result) {
           console.log(`✅ Loaded latest project: ${result.name} (#${result.id}) — updated ${result.updated_at}`)
           setBootToast({ kind: 'ok', text: `Opened latest: ${result.name} (#${result.id})` })
+          // Let the autosave debounce (500ms) flush the imported state to
+          // localStorage, then reload so the canvas mounts clean against it.
+          setTimeout(() => {
+            sessionStorage.setItem(FLAG, '1')
+            window.location.reload()
+          }, 800)
         } else {
           console.log('ℹ️ No server projects for this user — staying on local autosave')
           setBootToast({ kind: 'info', text: 'No projects on server — using local autosave' })
+          setTimeout(() => setBootToast(null), 4000)
         }
-        setTimeout(() => setBootToast(null), 4000)
       })
       .catch(err => {
         console.error('❌ Auto-load latest project failed:', err)
