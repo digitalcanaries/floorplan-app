@@ -440,17 +440,18 @@ export default function FloorCanvas({ onCanvasSize }) {
         const pt = fc.getScenePoint ? fc.getScenePoint(e) : fc.getPointer(e)
         const candidates = fc.getObjects().filter(o => o.name?.startsWith(SET_PREFIX))
         let found = null
+        const sample = []
         for (let i = candidates.length - 1; i >= 0; i--) {
           const o = candidates[i]
-          // Use absolute (scene-space) bounding rect so it matches getScenePoint's
-          // coordinate system. Without `true`, Fabric returns viewport-transformed
-          // coords which won't compare against the scene-space pointer.
-          const br = o.getBoundingRect ? o.getBoundingRect(true) : null
-          if (br && pt.x >= br.left && pt.x <= br.left + br.width && pt.y >= br.top && pt.y <= br.top + br.height) {
+          const brAbs = o.getBoundingRect ? o.getBoundingRect(true) : null
+          const brDef = o.getBoundingRect ? o.getBoundingRect() : null
+          if (sample.length < 3) sample.push({ name: o.name, brAbs, brDef, left: o.left, top: o.top, width: o.width, height: o.height })
+          if (brAbs && pt.x >= brAbs.left && pt.x <= brAbs.left + brAbs.width && pt.y >= brAbs.top && pt.y <= brAbs.top + brAbs.height) {
             found = o
             break
           }
         }
+        console.log('[pierce] pt=', JSON.stringify({ x: pt.x, y: pt.y }), 'found=', found?.name || 'none', 'sample=', JSON.stringify(sample))
         if (found) target = found
       }
 
