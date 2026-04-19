@@ -130,6 +130,40 @@ export default function FloorCanvas({ onCanvasSize }) {
     fc.requestRenderAll()
   }, [])
 
+  // Pan the viewport so the centroid of all content sits at the screen
+  // center, without changing the current zoom level. Useful when the user
+  // has scrolled away and just wants to "find their work" again.
+  const centerView = useCallback(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    const state = useStore.getState()
+    const allSets = state.sets.filter(s => s.onPlan !== false && !s.hidden)
+    const ppu = state.pixelsPerUnit
+    const bwalls = state.buildingWalls || []
+    if (allSets.length === 0 && bwalls.length === 0) return
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const s of allSets) {
+      const w = s.width * ppu, h = s.height * ppu
+      const isRotated = (s.rotation || 0) % 180 !== 0
+      const sw = isRotated ? h : w
+      const sh = isRotated ? w : h
+      minX = Math.min(minX, s.x); minY = Math.min(minY, s.y)
+      maxX = Math.max(maxX, s.x + sw); maxY = Math.max(maxY, s.y + sh)
+    }
+    for (const bw of bwalls) {
+      minX = Math.min(minX, bw.x1, bw.x2); minY = Math.min(minY, bw.y1, bw.y2)
+      maxX = Math.max(maxX, bw.x1, bw.x2); maxY = Math.max(maxY, bw.y1, bw.y2)
+    }
+    if (!isFinite(minX)) return
+
+    const centerX = (minX + maxX) / 2
+    const centerY = (minY + maxY) / 2
+    const zoom = fc.getZoom()
+    fc.setViewportTransform([zoom, 0, 0, zoom, fc.getWidth() / 2 - centerX * zoom, fc.getHeight() / 2 - centerY * zoom])
+    fc.requestRenderAll()
+  }, [])
+
   const fitAll = useCallback(() => {
     const fc = fabricRef.current
     if (!fc) return
@@ -2825,6 +2859,18 @@ export default function FloorCanvas({ onCanvasSize }) {
           </button>
         </div>
       )}
+
+      {/* Center View — bottom-left floating button. Pans the viewport so all
+          content sits centered on screen, keeping the current zoom level. */}
+      <div className="absolute bottom-3 left-3 z-20">
+        <button
+          onClick={centerView}
+          title="Center the artboard in the working screen (keeps zoom)"
+          className="px-3 py-1.5 text-[11px] font-medium text-gray-200 bg-gray-800/90 backdrop-blur-sm hover:bg-gray-700 hover:text-white rounded-lg shadow-lg border border-gray-700/50 transition-colors"
+        >
+          ⊕ Center View
+        </button>
+      </div>
 
       {/* Zoom controls — bottom-right floating bar */}
       <div className="absolute bottom-3 right-3 flex items-center gap-1 bg-gray-800/90 backdrop-blur-sm rounded-lg shadow-lg border border-gray-700/50 px-1 py-1 z-20">
