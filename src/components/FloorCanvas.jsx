@@ -392,6 +392,40 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
   }, [])
 
+  // Shift / Ctrl / Cmd + click on a set shape → toggle multi-select.
+  // Handled at the canvas level so it works even when the target shape has
+  // selectable:false (as locked-to-PDF sets do — they wouldn't reliably
+  // fire per-shape mousedown on all Fabric versions).
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    const onDown = (opt) => {
+      const e = opt?.e
+      if (!e) return
+      const target = opt.target
+      if (!target || !target.name || !target.name.startsWith(SET_PREFIX)) return
+      const id = parseInt(target.name.slice(SET_PREFIX.length))
+      if (!id) return
+      const mod = e.shiftKey || e.ctrlKey || e.metaKey
+      const state = useStore.getState()
+      if (mod) {
+        const current = new Set(state.multiSelected)
+        // Roll the currently-focused single selection into the multi-select
+        // so plain-click A → mod-click B becomes {A, B}.
+        if (state.selectedSetId != null) current.add(state.selectedSetId)
+        if (current.has(id)) current.delete(id)
+        else current.add(id)
+        state.setMultiSelected(current)
+        state.setSelectedSetId(id)
+      } else if (state.multiSelected?.size > 0) {
+        // Plain click with an existing multi-select → collapse back to single.
+        state.clearMultiSelect()
+      }
+    }
+    fc.on('mouse:down', onDown)
+    return () => fc.off('mouse:down', onDown)
+  }, [])
+
   // Hover tooltip
   useEffect(() => {
     const fc = fabricRef.current
@@ -1331,25 +1365,8 @@ export default function FloorCanvas({ onCanvasSize }) {
         })
       }
 
-      shape.on('mousedown', function (opt) {
-        const e = opt?.e
-        const mod = e && (e.shiftKey || e.ctrlKey || e.metaKey)
-        if (mod) {
-          // Shift / Ctrl / Cmd + click: toggle this set in the multi-select.
-          // Also add the previously-focused single selection so plain-click
-          // → then mod-click on a second set becomes a 2-item multi-select
-          // (standard pattern in design tools).
-          const state = useStore.getState()
-          const current = new Set(state.multiSelected)
-          if (state.selectedSetId != null) current.add(state.selectedSetId)
-          if (current.has(s.id)) current.delete(s.id)
-          else current.add(s.id)
-          useStore.getState().setMultiSelected(current)
-          setSelectedSetId(s.id)
-        } else {
-          useStore.getState().clearMultiSelect()
-          setSelectedSetId(s.id)
-        }
+      shape.on('mousedown', function () {
+        setSelectedSetId(s.id)
       })
 
       fc.add(shape)
