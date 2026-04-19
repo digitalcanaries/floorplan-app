@@ -293,7 +293,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     })
 
     fabricRef.current = fc
-    // TEMP diagnostic — expose Fabric canvas + Zustand store for debug probes
+    // TEMP diagnostic — expose for post-deploy verification via Chrome MCP
     if (typeof window !== 'undefined') {
       window.__fc = fc
       window.__store = useStore
@@ -402,10 +402,11 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
   }, [])
 
-  // Shift / Ctrl / Cmd + click on a set shape → toggle multi-select.
-  // Handled at the canvas level so it works even when the target shape has
-  // selectable:false (as locked-to-PDF sets do — they wouldn't reliably
-  // fire per-shape mousedown on all Fabric versions).
+  // Canvas-level selection handler — handles both plain click (single
+  // selection) and Shift/Ctrl/Cmd+click (multi-select toggle). Centralised
+  // here so the "roll the previously-focused set into the multi-select"
+  // logic reads selectedSetId BEFORE it gets overwritten by this click.
+  // Per-shape mousedown was removed to eliminate the race.
   useEffect(() => {
     const fc = fabricRef.current
     if (!fc) return
@@ -413,32 +414,23 @@ export default function FloorCanvas({ onCanvasSize }) {
       const e = opt?.e
       if (!e) return
       const target = opt.target
-      const mod = e.shiftKey || e.ctrlKey || e.metaKey
-      // TEMP diagnostic — remove once multi-select is confirmed working
-      console.log('[multiselect] canvas mouse:down', {
-        targetName: target?.name,
-        targetType: target?.type,
-        shiftKey: e.shiftKey,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-      })
       if (!target || !target.name || !target.name.startsWith(SET_PREFIX)) return
       const id = parseInt(target.name.slice(SET_PREFIX.length))
       if (!id) return
       const state = useStore.getState()
+      const mod = e.shiftKey || e.ctrlKey || e.metaKey
       if (mod) {
         const current = new Set(state.multiSelected)
         // Roll the currently-focused single selection into the multi-select
         // so plain-click A → mod-click B becomes {A, B}.
-        if (state.selectedSetId != null) current.add(state.selectedSetId)
+        if (state.selectedSetId != null && state.selectedSetId !== id) current.add(state.selectedSetId)
         if (current.has(id)) current.delete(id)
         else current.add(id)
         state.setMultiSelected(current)
         state.setSelectedSetId(id)
-        console.log('[multiselect] toggled', { id, newSize: current.size, items: [...current] })
-      } else if (state.multiSelected?.size > 0) {
-        state.clearMultiSelect()
-        console.log('[multiselect] cleared (plain click)')
+      } else {
+        if (state.multiSelected?.size > 0) state.clearMultiSelect()
+        state.setSelectedSetId(id)
       }
     }
     fc.on('mouse:down', onDown)
@@ -1384,9 +1376,10 @@ export default function FloorCanvas({ onCanvasSize }) {
         })
       }
 
-      shape.on('mousedown', function () {
-        setSelectedSetId(s.id)
-      })
+      // Selection is handled at the canvas level (the useEffect above) so
+      // shift/ctrl/cmd + click multi-select can use the *previous*
+      // selectedSetId. A per-shape mousedown here would race and update
+      // selectedSetId first, breaking the multi-select toggle.
 
       fc.add(shape)
 
