@@ -303,12 +303,15 @@ const useStore = create((set, get) => ({
       ? (layers.length > 0 ? layers[0].id : null)
       : get().activePdfLayerId
     const active = layers.find(l => l.id === activeId)
+    // pdfPosition tracks the MASTER layer (layers[0]) — locked sets are
+    // anchored to it. Do not pick up the active overlay's position here.
+    const master = layers[0]
     set({
       pdfLayers: layers,
       activePdfLayerId: activeId,
       pdfImage: active?.image || null,
       pdfRotation: active?.rotation || 0,
-      pdfPosition: active?.position || { x: 0, y: 0 },
+      pdfPosition: master?.position || { x: 0, y: 0 },
       pdfScale: active?.scale || 1,
       pdfOriginalSize: active?.originalSize || null,
     })
@@ -318,11 +321,12 @@ const useStore = create((set, get) => ({
   setActivePdfLayer: (id) => {
     const layer = get().pdfLayers.find(l => l.id === id)
     if (!layer) return
+    // pdfPosition tracks the MASTER layer (anchor for locked sets) — do NOT
+    // overwrite it just because the user selected a different overlay layer.
     set({
       activePdfLayerId: id,
       pdfImage: layer.image,
       pdfRotation: layer.rotation,
-      pdfPosition: layer.position,
       pdfScale: layer.scale,
       pdfOriginalSize: layer.originalSize,
     })
@@ -433,9 +437,16 @@ const useStore = create((set, get) => ({
   },
   setPdfPosition: (pos) => {
     get()._pushHistory()
-    const oldPos = get().pdfPosition
-    const dx = pos.x - oldPos.x
-    const dy = pos.y - oldPos.y
+    const state = get()
+    // Locked sets are anchored to the MASTER PDF (pdfLayers[0]), not the
+    // currently-active overlay. The legacy `pdfPosition` field gets
+    // overwritten with the active layer's position by setActivePdfLayer /
+    // importProject, so using it here would compute a bogus delta when the
+    // user moves the master while a different overlay is selected. Read
+    // the previous position straight from the master layer instead.
+    const masterPrev = state.pdfLayers[0]?.position || state.pdfPosition || { x: 0, y: 0 }
+    const dx = pos.x - masterPrev.x
+    const dy = pos.y - masterPrev.y
     // Move all locked-to-PDF sets with the PDF
     const updatedSets = get().sets.map(s =>
       s.lockedToPdf ? { ...s, x: s.x + dx, y: s.y + dy } : s
@@ -1636,6 +1647,11 @@ const useStore = create((set, get) => ({
     }] : [])
     const activePdfLayerId = data.activePdfLayerId || (pdfLayers.length > 0 ? pdfLayers[0].id : null)
     const activeLayer = pdfLayers.find(l => l.id === activePdfLayerId)
+    // The MASTER pdf (pdfLayers[0]) is what locked sets are anchored to.
+    // Initialize the legacy `pdfPosition` field from it, not from the active
+    // layer — otherwise on boot pdfPosition can point at an overlay and the
+    // first master-PDF drag computes a bogus delta for locked sets.
+    const masterLayer = pdfLayers[0]
 
     // Migrate legacy group schema: older saves used `members: [{type, id}]`
     // but current code expects `setIds: [id, id, ...]`. Anything without
@@ -1656,7 +1672,7 @@ const useStore = create((set, get) => ({
       activePdfLayerId,
       pdfImage: activeLayer?.image || data.pdfImage || null,
       pdfRotation: activeLayer?.rotation || data.pdfRotation || 0,
-      pdfPosition: activeLayer?.position || data.pdfPosition || { x: 0, y: 0 },
+      pdfPosition: masterLayer?.position || data.pdfPosition || { x: 0, y: 0 },
       pdfScale: activeLayer?.scale || data.pdfScale || 1,
       pdfOriginalSize: activeLayer?.originalSize || data.pdfOriginalSize || null,
       pixelsPerUnit: data.pixelsPerUnit || 1,
