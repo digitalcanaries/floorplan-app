@@ -408,10 +408,18 @@ export default function FloorCanvas({ onCanvasSize }) {
       const e = opt?.e
       if (!e) return
       const target = opt.target
+      const mod = e.shiftKey || e.ctrlKey || e.metaKey
+      // TEMP diagnostic — remove once multi-select is confirmed working
+      console.log('[multiselect] canvas mouse:down', {
+        targetName: target?.name,
+        targetType: target?.type,
+        shiftKey: e.shiftKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+      })
       if (!target || !target.name || !target.name.startsWith(SET_PREFIX)) return
       const id = parseInt(target.name.slice(SET_PREFIX.length))
       if (!id) return
-      const mod = e.shiftKey || e.ctrlKey || e.metaKey
       const state = useStore.getState()
       if (mod) {
         const current = new Set(state.multiSelected)
@@ -422,9 +430,10 @@ export default function FloorCanvas({ onCanvasSize }) {
         else current.add(id)
         state.setMultiSelected(current)
         state.setSelectedSetId(id)
+        console.log('[multiselect] toggled', { id, newSize: current.size, items: [...current] })
       } else if (state.multiSelected?.size > 0) {
-        // Plain click with an existing multi-select → collapse back to single.
         state.clearMultiSelect()
+        console.log('[multiselect] cleared (plain click)')
       }
     }
     fc.on('mouse:down', onDown)
