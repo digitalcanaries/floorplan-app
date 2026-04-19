@@ -192,6 +192,7 @@ const useStore = create((set, get) => ({
   // briefly blank during the boot fetch
   projectName: saved?.projectName || 'Untitled Project',
   lastSaved: saved?.lastSaved || null,
+  lastSaveKind: null, // 'auto' | 'manual' — set by autosave / saveToServer
 
   // Heavy fields — populated by importProject after server fetch
   sets: [],
@@ -1529,7 +1530,7 @@ const useStore = create((set, get) => ({
       const state = get()
 
       const now = new Date().toISOString()
-      set({ lastSaved: now })
+      set({ lastSaved: now, lastSaveKind: 'auto' })
       const lite = buildLiteAutosave(state)
       lite.lastSaved = now
       try {
@@ -1547,14 +1548,16 @@ const useStore = create((set, get) => ({
       if (srvId && !_serverSaveTimer) {
         _serverSaveTimer = setTimeout(() => {
           _serverSaveTimer = null
-          get().saveToServer(srvId).catch(() => {})
+          get().saveToServer(srvId, { source: 'auto' }).catch(() => {})
         }, 120000) // 2 minutes
       }
     }, 500)
   },
 
-  // Save to server by project ID (called by autosave and UI)
-  saveToServer: async (projectId) => {
+  // Save to server by project ID. `source` distinguishes user-initiated
+  // saves ('manual', from a Save button click) from the periodic 2-minute
+  // background sync ('auto') so the TopBar indicator can show "AS" vs "Saved".
+  saveToServer: async (projectId, { source = 'manual' } = {}) => {
     const state = get()
     const data = buildSaveData(state)
     const token = localStorage.getItem('floorplan-token')
@@ -1571,6 +1574,7 @@ const useStore = create((set, get) => ({
     if (!projectId && result.id) {
       saveServerProjectId(result.id)
     }
+    set({ lastSaved: new Date().toISOString(), lastSaveKind: source })
     return result
   },
 

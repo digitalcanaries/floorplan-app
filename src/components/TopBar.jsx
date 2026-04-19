@@ -14,7 +14,7 @@ export default function TopBar({ canvasSize }) {
     labelsVisible, setLabelsVisible, labelMode, setLabelMode, showOverlaps, setShowOverlaps,
     exportProject, importProject, importSetsOnly, clearAll, restoreBackup, getBackupInfo,
     calibrating, setCalibrating,
-    projectName, setProjectName, lastSaved,
+    projectName, setProjectName, lastSaved, lastSaveKind,
     saveProjectAs, getSavedProjects, loadSavedProject, deleteSavedProject,
     undo, redo, _past, _future,
     viewMode, setViewMode,
@@ -387,9 +387,15 @@ export default function TopBar({ canvasSize }) {
         </button>
       )}
 
-      {/* Autosave indicator */}
-      <span className={`text-xs transition-opacity duration-500 ${saveFlash ? 'text-green-400 opacity-100' : 'text-gray-500 opacity-60'}`}>
-        {lastSaved ? `Saved ${formatTime(lastSaved)}` : ''}
+      {/* Save indicator — prefix with "AS" on autosaves (debounced local or
+          2-minute server sync), "Saved" on user-initiated Save clicks. */}
+      <span
+        className={`text-xs transition-opacity duration-500 ${saveFlash ? 'text-green-400 opacity-100' : 'text-gray-500 opacity-60'}`}
+        title={lastSaved ? `Last ${lastSaveKind === 'auto' ? 'autosave' : 'save'} at ${new Date(lastSaved).toLocaleTimeString()}` : ''}
+      >
+        {lastSaved
+          ? `${lastSaveKind === 'auto' ? 'AS' : 'Saved'} ${formatTime(lastSaved)}`
+          : ''}
       </span>
 
       <div className="h-5 w-px bg-gray-600" />
