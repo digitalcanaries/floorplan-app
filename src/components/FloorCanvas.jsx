@@ -293,6 +293,11 @@ export default function FloorCanvas({ onCanvasSize }) {
     })
 
     fabricRef.current = fc
+    // TEMP diagnostic — expose Fabric canvas + Zustand store for debug probes
+    if (typeof window !== 'undefined') {
+      window.__fc = fc
+      window.__store = useStore
+    }
     onCanvasSize?.({ w, h })
 
     // Auto-fit on first load (deferred so syncSets runs first)
