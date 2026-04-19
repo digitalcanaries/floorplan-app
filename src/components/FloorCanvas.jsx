@@ -293,23 +293,6 @@ export default function FloorCanvas({ onCanvasSize }) {
     })
 
     fabricRef.current = fc
-    // TEMP: expose for diagnosis + log every mouse:down to verify handler order
-    if (typeof window !== 'undefined') {
-      window.__fc = fc
-      window.__store = useStore
-      window.__mouseLog = []
-      fc.on('mouse:down', (opt) => {
-        window.__mouseLog.push({
-          at: Date.now(),
-          target: opt.target?.name,
-          selectable: opt.target?.selectable,
-          shift: opt.e?.shiftKey,
-          ctrl: opt.e?.ctrlKey,
-          stateSelBefore: useStore.getState().selectedSetId,
-          stateMsSizeBefore: useStore.getState().multiSelected?.size,
-        })
-      })
-    }
     onCanvasSize?.({ w, h })
 
     // Auto-fit on first load (deferred so syncSets runs first)
