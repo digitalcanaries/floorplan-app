@@ -442,13 +442,15 @@ export default function FloorCanvas({ onCanvasSize }) {
         let found = null
         for (let i = candidates.length - 1; i >= 0; i--) {
           const o = candidates[i]
-          const br = o.getBoundingRect ? o.getBoundingRect() : null
+          // Use absolute (scene-space) bounding rect so it matches getScenePoint's
+          // coordinate system. Without `true`, Fabric returns viewport-transformed
+          // coords which won't compare against the scene-space pointer.
+          const br = o.getBoundingRect ? o.getBoundingRect(true) : null
           if (br && pt.x >= br.left && pt.x <= br.left + br.width && pt.y >= br.top && pt.y <= br.top + br.height) {
             found = o
             break
           }
         }
-        console.log('[pierce]', { origTarget: opt.target?.name, pt, candidates: candidates.length, found: found?.name || 'none' })
         if (found) target = found
       }
 
