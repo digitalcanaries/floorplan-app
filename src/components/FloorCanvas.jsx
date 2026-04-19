@@ -1331,8 +1331,25 @@ export default function FloorCanvas({ onCanvasSize }) {
         })
       }
 
-      shape.on('mousedown', function () {
-        setSelectedSetId(s.id)
+      shape.on('mousedown', function (opt) {
+        const e = opt?.e
+        const mod = e && (e.shiftKey || e.ctrlKey || e.metaKey)
+        if (mod) {
+          // Shift / Ctrl / Cmd + click: toggle this set in the multi-select.
+          // Also add the previously-focused single selection so plain-click
+          // → then mod-click on a second set becomes a 2-item multi-select
+          // (standard pattern in design tools).
+          const state = useStore.getState()
+          const current = new Set(state.multiSelected)
+          if (state.selectedSetId != null) current.add(state.selectedSetId)
+          if (current.has(s.id)) current.delete(s.id)
+          else current.add(s.id)
+          useStore.getState().setMultiSelected(current)
+          setSelectedSetId(s.id)
+        } else {
+          useStore.getState().clearMultiSelect()
+          setSelectedSetId(s.id)
+        }
       })
 
       fc.add(shape)
@@ -2750,6 +2767,17 @@ export default function FloorCanvas({ onCanvasSize }) {
         if (state.selectedSetId) {
           e.preventDefault()
           duplicateSet(state.selectedSetId)
+        }
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
+        // Group current multi-selection
+        const ids = [...state.multiSelected]
+        if (state.selectedSetId != null && !ids.includes(state.selectedSetId)) ids.push(state.selectedSetId)
+        if (ids.length >= 2) {
+          e.preventDefault()
+          const name = prompt('Group name:', `Group ${Date.now() % 1000}`)
+          if (name?.trim()) {
+            state.addGroup(name.trim(), ids)
+          }
         }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         // Delete selected set
