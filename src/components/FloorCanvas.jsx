@@ -435,15 +435,17 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       // If the hit-test picked a non-set (e.g. a PDF overlay), and the
       // user is holding a modifier, look for a set shape under the
-      // pointer instead.
+      // pointer instead. Uses getBoundingRect (axis-aligned, handles
+      // rotation correctly) rather than containsPoint which had
+      // coord-space issues in Fabric v7.
       if (mod && (!target || !target.name || !target.name.startsWith(SET_PREFIX))) {
         const pt = fc.getScenePoint ? fc.getScenePoint(e) : fc.getPointer(e)
-        // Topmost set shape (highest render order) whose bounding box
-        // contains the pointer
         const candidates = fc.getObjects().filter(o => o.name?.startsWith(SET_PREFIX))
+        // Iterate topmost-first (last in render order wins visually)
         for (let i = candidates.length - 1; i >= 0; i--) {
           const o = candidates[i]
-          if (o.containsPoint?.(pt) || (typeof o.containsPoint !== 'function' && pointInBounds(pt, o))) {
+          const br = o.getBoundingRect ? o.getBoundingRect() : null
+          if (br && pt.x >= br.left && pt.x <= br.left + br.width && pt.y >= br.top && pt.y <= br.top + br.height) {
             target = o
             break
           }
