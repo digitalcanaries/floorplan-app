@@ -448,34 +448,45 @@ const useStore = create((set, get) => ({
     const masterPrev = state.pdfLayers[0]?.position || state.pdfPosition || { x: 0, y: 0 }
     const dx = pos.x - masterPrev.x
     const dy = pos.y - masterPrev.y
-    // Move all locked-to-PDF sets with the PDF
-    const updatedSets = get().sets.map(s =>
-      s.lockedToPdf ? { ...s, x: s.x + dx, y: s.y + dy } : s
-    )
-    // Move all locked-to-PDF building walls with the PDF
-    const updatedBW = get().buildingWalls.map(w =>
+
+    // All sets with lockedToPdf move with the master. Plus: any set that is
+    // pinned to one of those moved sets (lockedToSetId → parent) has to
+    // move by the same delta, otherwise a pin-to-PDF parent drifts away
+    // from its pin-to-set children (doors, windows, columns attached to
+    // a room, etc.). That's the "only some things follow" bug.
+    const pdfMovedIds = new Set(state.sets.filter(s => s.lockedToPdf).map(s => s.id))
+    const updatedSets = state.sets.map(s => {
+      if (s.lockedToPdf) return { ...s, x: s.x + dx, y: s.y + dy }
+      if (s.lockedToSetId && pdfMovedIds.has(s.lockedToSetId)) return { ...s, x: s.x + dx, y: s.y + dy }
+      return s
+    })
+
+    const updatedBW = state.buildingWalls.map(w =>
       w.lockedToPdf ? { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy } : w
     )
-    // Move all locked-to-PDF building columns with the PDF
-    const updatedBC = get().buildingColumns.map(c =>
+    const updatedBC = state.buildingColumns.map(c =>
       c.lockedToPdf ? { ...c, x: c.x + dx, y: c.y + dy } : c
     )
-    set({ pdfPosition: pos, sets: updatedSets, buildingWalls: updatedBW, buildingColumns: updatedBC })
-    const activeId = get().activePdfLayerId
-    // Also move PDF overlay layers that are pinned to any moved set
-    const curLayers = get().pdfLayers
-    const updatedLayers = curLayers.map(l => {
-      if (!l.lockedToSetId) {
-        // Not pinned to a set — only update master layer position
-        return l.id === activeId ? { ...l, position: pos } : l
-      }
-      // Find the parent set (already moved in updatedSets)
+
+    // PDF overlay layers: move the master to its new pos, and re-anchor
+    // any overlay that was pinned to a set that just moved.
+    const masterId = state.pdfLayers[0]?.id
+    const updatedLayers = state.pdfLayers.map(l => {
+      if (l.id === masterId) return { ...l, position: pos }
+      if (!l.lockedToSetId) return l
       const parentSet = updatedSets.find(s => s.id === l.lockedToSetId)
       if (!parentSet) return l
       const off = l.lockedToSetOffset || { dx: 0, dy: 0 }
       return { ...l, position: { x: parentSet.x + off.dx, y: parentSet.y + off.dy } }
     })
-    set({ pdfLayers: updatedLayers })
+
+    set({
+      pdfPosition: pos,
+      sets: updatedSets,
+      buildingWalls: updatedBW,
+      buildingColumns: updatedBC,
+      pdfLayers: updatedLayers,
+    })
     get().autosave()
   },
   setPixelsPerUnit: (p) => {
