@@ -363,6 +363,11 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     const onDown = (opt) => {
       if (opt.e.ctrlKey || opt.e.metaKey) {
+        // Ctrl/Cmd + click on a set is multi-select, not pan. Only pan when
+        // the click lands on empty canvas or on the PDF background.
+        const tgt = opt.target
+        const isSet = tgt && tgt.name && tgt.name.startsWith(SET_PREFIX)
+        if (isSet) return
         isPanning.current = true
         lastPan.current = { x: opt.e.clientX, y: opt.e.clientY }
         fc.selection = false
@@ -2786,15 +2791,18 @@ export default function FloorCanvas({ onCanvasSize }) {
           duplicateSet(state.selectedSetId)
         }
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
-        // Group current multi-selection
+        // Group current multi-selection. Always preventDefault so browser
+        // Find-Next (Ctrl+G) doesn't steal the shortcut.
+        e.preventDefault()
         const ids = [...state.multiSelected]
         if (state.selectedSetId != null && !ids.includes(state.selectedSetId)) ids.push(state.selectedSetId)
         if (ids.length >= 2) {
-          e.preventDefault()
-          const name = prompt('Group name:', `Group ${Date.now() % 1000}`)
+          const name = prompt(`Group these ${ids.length} sets. Name:`, `Group ${Date.now() % 1000}`)
           if (name?.trim()) {
             state.addGroup(name.trim(), ids)
           }
+        } else {
+          alert('Select 2+ sets first. Click one set, then Shift+click others to add to the selection.')
         }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         // Delete selected set
