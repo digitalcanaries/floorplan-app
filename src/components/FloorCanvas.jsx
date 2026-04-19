@@ -435,21 +435,21 @@ export default function FloorCanvas({ onCanvasSize }) {
 
       // If the hit-test picked a non-set (e.g. a PDF overlay), and the
       // user is holding a modifier, look for a set shape under the
-      // pointer instead. Uses getBoundingRect (axis-aligned, handles
-      // rotation correctly) rather than containsPoint which had
-      // coord-space issues in Fabric v7.
+      // pointer instead.
       if (mod && (!target || !target.name || !target.name.startsWith(SET_PREFIX))) {
         const pt = fc.getScenePoint ? fc.getScenePoint(e) : fc.getPointer(e)
         const candidates = fc.getObjects().filter(o => o.name?.startsWith(SET_PREFIX))
-        // Iterate topmost-first (last in render order wins visually)
+        let found = null
         for (let i = candidates.length - 1; i >= 0; i--) {
           const o = candidates[i]
           const br = o.getBoundingRect ? o.getBoundingRect() : null
           if (br && pt.x >= br.left && pt.x <= br.left + br.width && pt.y >= br.top && pt.y <= br.top + br.height) {
-            target = o
+            found = o
             break
           }
         }
+        console.log('[pierce]', { origTarget: opt.target?.name, pt, candidates: candidates.length, found: found?.name || 'none' })
+        if (found) target = found
       }
 
       if (!target || !target.name || !target.name.startsWith(SET_PREFIX)) return
