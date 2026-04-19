@@ -414,27 +414,48 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
   }, [])
 
-  // Canvas-level selection handler — handles both plain click (single
-  // selection) and Shift/Ctrl/Cmd+click (multi-select toggle). Centralised
-  // here so the "roll the previously-focused set into the multi-select"
-  // logic reads selectedSetId BEFORE it gets overwritten by this click.
-  // Per-shape mousedown was removed to eliminate the race.
+  // Canvas-level selection handler — plain click = single select,
+  // Shift/Ctrl/Cmd+click = toggle multi-select. Centralised here so the
+  // "roll the previously-focused set into the multi-select" logic reads
+  // selectedSetId BEFORE it gets overwritten. Per-shape mousedown was
+  // removed to eliminate a race.
+  //
+  // When a modifier is held, PDF overlays that sit on top of sets are
+  // transparent to the hit test: we re-scan the set shapes under the
+  // pointer and pick the topmost one. This is what lets the user
+  // multi-select rooms that have a reference PDF pinned over them.
   useEffect(() => {
     const fc = fabricRef.current
     if (!fc) return
     const onDown = (opt) => {
       const e = opt?.e
       if (!e) return
-      const target = opt.target
+      let target = opt.target
+      const mod = e.shiftKey || e.ctrlKey || e.metaKey
+
+      // If the hit-test picked a non-set (e.g. a PDF overlay), and the
+      // user is holding a modifier, look for a set shape under the
+      // pointer instead.
+      if (mod && (!target || !target.name || !target.name.startsWith(SET_PREFIX))) {
+        const pt = fc.getScenePoint ? fc.getScenePoint(e) : fc.getPointer(e)
+        // Topmost set shape (highest render order) whose bounding box
+        // contains the pointer
+        const candidates = fc.getObjects().filter(o => o.name?.startsWith(SET_PREFIX))
+        for (let i = candidates.length - 1; i >= 0; i--) {
+          const o = candidates[i]
+          if (o.containsPoint?.(pt) || (typeof o.containsPoint !== 'function' && pointInBounds(pt, o))) {
+            target = o
+            break
+          }
+        }
+      }
+
       if (!target || !target.name || !target.name.startsWith(SET_PREFIX)) return
       const id = parseInt(target.name.slice(SET_PREFIX.length))
       if (!id) return
       const state = useStore.getState()
-      const mod = e.shiftKey || e.ctrlKey || e.metaKey
       if (mod) {
         const current = new Set(state.multiSelected)
-        // Roll the currently-focused single selection into the multi-select
-        // so plain-click A → mod-click B becomes {A, B}.
         if (state.selectedSetId != null && state.selectedSetId !== id) current.add(state.selectedSetId)
         if (current.has(id)) current.delete(id)
         else current.add(id)
@@ -444,6 +465,14 @@ export default function FloorCanvas({ onCanvasSize }) {
         if (state.multiSelected?.size > 0) state.clearMultiSelect()
         state.setSelectedSetId(id)
       }
+    }
+    // AABB fallback when a shape has no containsPoint (polygons after cutouts)
+    function pointInBounds(pt, obj) {
+      const left = obj.left || 0
+      const top = obj.top || 0
+      const right = left + (obj.width || 0) * (obj.scaleX || 1)
+      const bottom = top + (obj.height || 0) * (obj.scaleY || 1)
+      return pt.x >= left && pt.x <= right && pt.y >= top && pt.y <= bottom
     }
     fc.on('mouse:down', onDown)
     return () => fc.off('mouse:down', onDown)
