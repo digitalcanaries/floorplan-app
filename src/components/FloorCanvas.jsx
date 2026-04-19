@@ -943,8 +943,8 @@ export default function FloorCanvas({ onCanvasSize }) {
 
         // Pre-compute group membership for group drag
         const curGroups = useStore.getState().groups
-        const parentGroup = curGroups.find(g => g.setIds.includes(s.id))
-        const groupSiblingIds = parentGroup ? parentGroup.setIds.filter(sid => sid !== s.id) : []
+        const parentGroup = curGroups.find(g => (g.setIds || []).includes(s.id))
+        const groupSiblingIds = parentGroup ? (parentGroup.setIds || []).filter(sid => sid !== s.id) : []
         // Pre-compute sibling children for group drag
         const siblingChildren = {}
         for (const sid of groupSiblingIds) {
@@ -2753,9 +2753,9 @@ export default function FloorCanvas({ onCanvasSize }) {
         const idsToMove = new Set()
         idsToMove.add(state.selectedSetId)
 
-        const group = state.groups.find(g => g.setIds.includes(state.selectedSetId))
+        const group = state.groups.find(g => (g.setIds || []).includes(state.selectedSetId))
         if (group) {
-          for (const gid of group.setIds) idsToMove.add(gid)
+          for (const gid of (group.setIds || [])) idsToMove.add(gid)
         }
 
         if (state.multiSelected.size > 1 && state.multiSelected.has(state.selectedSetId)) {

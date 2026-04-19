@@ -1637,6 +1637,18 @@ const useStore = create((set, get) => ({
     const activePdfLayerId = data.activePdfLayerId || (pdfLayers.length > 0 ? pdfLayers[0].id : null)
     const activeLayer = pdfLayers.find(l => l.id === activePdfLayerId)
 
+    // Migrate legacy group schema: older saves used `members: [{type, id}]`
+    // but current code expects `setIds: [id, id, ...]`. Anything without
+    // setIds would crash LayersTab/FloorCanvas on access. Normalize here
+    // so every place that reads groups sees a consistent shape.
+    const migratedGroups = (data.groups || []).map(g => {
+      if (Array.isArray(g.setIds)) return g
+      const fromMembers = Array.isArray(g.members)
+        ? g.members.filter(m => m?.type === 'set' || m?.type == null).map(m => m.id).filter(id => id != null)
+        : []
+      return { ...g, setIds: fromMembers, collapsed: g.collapsed ?? false }
+    }).filter(g => Array.isArray(g.setIds))
+
     set({
       projectName: data.projectName || 'Untitled Project',
       pdfLayers,
@@ -1676,8 +1688,8 @@ const useStore = create((set, get) => ({
       nextRuleId: data.nextRuleId || 1,
       annotations: data.annotations || [],
       nextAnnotationId: data.nextAnnotationId || 1,
-      groups: data.groups || [],
-      nextGroupId: data.nextGroupId || 1,
+      groups: migratedGroups,
+      nextGroupId: data.nextGroupId || (migratedGroups.length > 0 ? Math.max(...migratedGroups.map(g => g.id || 0)) + 1 : 1),
       buildingWalls: data.buildingWalls || [],
       nextBuildingWallId: data.nextBuildingWallId || 1,
       buildingWallDefaults: data.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },

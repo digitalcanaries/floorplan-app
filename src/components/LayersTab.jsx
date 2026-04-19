@@ -67,9 +67,9 @@ export default memo(function LayersTab() {
   const getCategoryCounts = (cat) => visibleSets.filter(s => (s.category || 'Set') === cat).length
   const isVisible = (cat) => layerVisibility[cat] !== false
 
-  // Group display
+  // Group display — defensive guard in case a legacy group slips through without setIds
   const ungroupedSets = visibleSets.filter(s =>
-    !groups.some(g => g.setIds.includes(s.id))
+    !groups.some(g => (g.setIds || []).includes(s.id))
   )
 
   return (
@@ -385,7 +385,7 @@ export default memo(function LayersTab() {
       <div className="flex flex-col gap-1">
         <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Groups</span>
         {groups.map(g => {
-          const memberSets = sets.filter(s => g.setIds.includes(s.id))
+          const memberSets = sets.filter(s => (g.setIds || []).includes(s.id))
           return (
             <div key={g.id} className="bg-gray-800/50 rounded border border-gray-700 overflow-hidden">
               <div className="flex items-center gap-2 px-2 py-1.5">
