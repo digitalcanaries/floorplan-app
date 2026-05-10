@@ -100,23 +100,23 @@ function App() {
         </div>
       )}
       <TopBar canvasSize={canvasSize} />
-      {/* Thin status strip — version + build date + active project. Sits as
-          its own row directly under the main toolbar so the version info
-          never crams the TopBar height (which on iPad was forcing an
-          extra wrapped row). */}
-      <div className="flex items-center gap-3 px-4 py-0.5 bg-gray-850 bg-gray-900 text-[10px] text-gray-500 border-b border-gray-800 shrink-0 leading-none">
-        <span className="text-gray-400">
+      {/* Status strip — version + build date + active project. Its own row
+          directly under TopBar so the metadata doesn't cram the toolbar
+          height. Bumped to py-1 + gray-800 with an indigo version pill so
+          it's actually visible on iPad. */}
+      <div className="flex items-center gap-2 px-3 py-1 bg-gray-800 text-[11px] text-gray-300 border-b border-gray-700 shrink-0 leading-none">
+        <span className="px-1.5 py-0.5 rounded bg-indigo-700 text-white font-medium tracking-wide">
           v{APP_VERSION}
         </span>
-        <span>· Build {APP_BUILD_DATE}</span>
-        {user?.username && <span>· @{user.username}</span>}
+        <span className="text-gray-400">Build {APP_BUILD_DATE}</span>
+        {user?.username && <span className="text-gray-400">· @{user.username}</span>}
         {projectName && (
-          <span className="truncate max-w-[40ch]" title={projectName}>
+          <span className="truncate max-w-[40ch] text-gray-200" title={projectName}>
             · 📐 {projectName}
           </span>
         )}
         {lastSaved && (
-          <span className="ml-auto text-gray-600" title={`Last save ${new Date(lastSaved).toLocaleString()}`}>
+          <span className="ml-auto text-gray-500" title={`Last save ${new Date(lastSaved).toLocaleString()}`}>
             saved {new Date(lastSaved).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}

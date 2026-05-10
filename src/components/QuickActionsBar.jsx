@@ -166,9 +166,14 @@ function savePreferences(actions) {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(actions)) } catch {}
 }
 
+// Walls render their thickness as floor footprint, which is uninformative.
+// Match the WALL_CATEGORIES list used in SetsTab so we can swap the metric.
+const WALL_CATEGORIES_LOCAL = ['Wall', 'Window', 'Door']
+
 export default function QuickActionsBar() {
   const selectedSetId = useStore(s => s.selectedSetId)
   const sets = useStore(s => s.sets)
+  const defaultWallHeight = useStore(s => s.defaultWallHeight)
   const selectedSet = sets.find(s => s.id === selectedSetId)
 
   const [actions, setActions] = useState(() => loadPreferences())
@@ -206,16 +211,37 @@ export default function QuickActionsBar() {
 
   return (
     <div className="flex items-center gap-0.5 px-3 py-1 bg-gray-800/90 border-b border-gray-700 text-xs select-none">
-      {/* Set name + rotation indicator */}
-      <div className="flex items-center gap-1.5 mr-2 min-w-0">
-        <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: selectedSet.color }} />
-        <span className="text-gray-300 truncate max-w-[120px] font-medium" title={selectedSet.name}>
-          {selectedSet.name}
-        </span>
-        {rot !== 0 && (
-          <span className="text-gray-500 text-[10px]">{rot}°</span>
-        )}
-      </div>
+      {/* Set name + dimensions + floor area + rotation indicator.
+          Dimensions are W × D and floor area is W × D — same convention
+          as the SetsTab list rows. Vertical height stays in the tooltip. */}
+      {(() => {
+        const w = selectedSet.width
+        const d = selectedSet.height
+        const h = selectedSet.wallHeight || defaultWallHeight
+        const floorArea = w * d
+        const sqft = floorArea.toFixed(floorArea >= 10 ? 0 : 1)
+        const isWall = WALL_CATEGORIES_LOCAL.includes(selectedSet.category)
+        const tip = isWall
+          ? `${selectedSet.name} — W:${w}ft × D:${d}ft × H:${h}ft · floor ${sqft} ft² · face ${(w * h).toFixed(0)} ft²`
+          : `${selectedSet.name} — W:${w}ft × D:${d}ft × H:${h}ft · floor area ${sqft} ft²`
+        return (
+          <div className="flex items-center gap-1.5 mr-2 min-w-0" title={tip}>
+            <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: selectedSet.color }} />
+            <span className="text-gray-300 truncate max-w-[120px] font-medium">
+              {selectedSet.name}
+            </span>
+            <span className="text-[10px] text-gray-400 whitespace-nowrap shrink-0">
+              {w}×{d}
+            </span>
+            <span className="text-[10px] text-gray-500 whitespace-nowrap shrink-0">
+              {sqft}&nbsp;ft²
+            </span>
+            {rot !== 0 && (
+              <span className="text-gray-500 text-[10px]">{rot}°</span>
+            )}
+          </div>
+        )
+      })()}
 
       <div className="h-4 w-px bg-gray-600 mx-1" />
 
