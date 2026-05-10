@@ -26,8 +26,9 @@ router.post('/users', (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 4 characters' })
   }
 
-  // Check if username already exists
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username)
+  // Check if username already exists (case-insensitive — login matches that way too,
+  // so 'Simon' and 'simon' must not both be allowed to register).
+  const existing = db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username)
   if (existing) return res.status(409).json({ error: 'Username already exists' })
 
   const hash = bcrypt.hashSync(password, 10)

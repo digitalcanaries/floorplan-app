@@ -12,7 +12,9 @@ router.post('/login', (req, res) => {
     return res.status(400).json({ error: 'Username and password required' })
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username)
+  // Case-insensitive — iOS auto-capitalizes the first letter of input fields
+  // so 'Simon' from the keyboard must match a stored 'simon' row.
+  const user = db.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').get(username)
   if (!user || !bcrypt.compareSync(password, user.password)) {
     return res.status(401).json({ error: 'Invalid username or password' })
   }

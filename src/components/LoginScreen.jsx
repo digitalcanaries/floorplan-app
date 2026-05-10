@@ -9,7 +9,9 @@ export default function LoginScreen() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
-      await login(username, password)
+      // Trim username — autofill / paste sometimes brings whitespace
+      // along, and the backend match is exact (case-insensitive only).
+      await login(username.trim(), password)
     } catch {
       // error is set in store
     }
@@ -34,6 +36,11 @@ export default function LoginScreen() {
           onChange={(e) => setUsername(e.target.value)}
           className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none mb-4"
           autoFocus
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          autoComplete="username"
+          name="username"
         />
 
         <label className="block text-gray-300 text-sm mb-1">Password</label>
@@ -42,6 +49,11 @@ export default function LoginScreen() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none mb-6"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          autoComplete="current-password"
+          name="password"
         />
 
         <button

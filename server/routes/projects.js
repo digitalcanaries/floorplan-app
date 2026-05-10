@@ -157,7 +157,7 @@ router.post('/:id/share', (req, res) => {
   if (!project) return res.status(404).json({ error: 'Project not found' })
 
   // Find the target user
-  const targetUser = db.prepare('SELECT id FROM users WHERE username = ?').get(username)
+  const targetUser = db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').get(username)
   if (!targetUser) return res.status(404).json({ error: 'User not found' })
   if (targetUser.id === req.user.id) return res.status(400).json({ error: 'Cannot share with yourself' })
 
