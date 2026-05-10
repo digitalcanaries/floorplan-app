@@ -276,6 +276,7 @@ const useStore = create((set, get) => ({
       lockedToSetId: null,        // null = free, or set ID to pin to
       lockedToSetOffset: null,    // { dx, dy } relative to set's x,y
       zOrder: 'back',             // 'back' (behind sets) or 'front' (above sets)
+      positionLocked: true,       // locked by default — taps pass through to sets, no accidental drag
     }
     // Only set as active (master) if no active layer exists yet
     // This prevents overlay PDFs from hijacking the master plan's lock behaviour

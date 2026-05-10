@@ -343,6 +343,30 @@ export default memo(function LayersTab() {
                   {(layer.zOrder || 'back') === 'front' ? '⬆ Front' : '⬇ Back'}
                 </button>
               </div>
+
+              {/* Position lock — when locked, taps pass through to sets and the
+                  PDF can't be dragged. Unlock to reposition or scale the PDF. */}
+              <div className="flex items-center gap-2 px-2 py-1 border-t border-gray-700/50">
+                <span className="text-[10px] text-gray-500 w-10">Position</span>
+                <button
+                  onClick={() => updatePdfLayer(layer.id, { positionLocked: !(layer.positionLocked !== false) })}
+                  className={`text-[10px] px-2 py-0.5 rounded ${
+                    layer.positionLocked !== false
+                      ? 'bg-amber-600 text-white'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                  title={layer.positionLocked !== false
+                    ? 'Locked — tap to unlock and reposition/scale the PDF'
+                    : 'Unlocked — tap to lock so the PDF stays put'}
+                >
+                  {layer.positionLocked !== false ? '🔒 Locked' : '🔓 Unlocked'}
+                </button>
+                {layer.positionLocked === false && (
+                  <span className="text-[10px] text-amber-400/80 ml-1">
+                    Taps will move the PDF
+                  </span>
+                )}
+              </div>
             </div>
           ))}
         </div>

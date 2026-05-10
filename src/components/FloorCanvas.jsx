@@ -596,7 +596,7 @@ export default function FloorCanvas({ onCanvasSize }) {
 
   // Compute a structural key: only changes when layers are added, removed, or visibility/opacity/image changes
   // Position and scale changes from dragging should NOT trigger a full rebuild
-  const pdfStructureKey = pdfLayers.map(l => `${l.id}:${l.visible}:${l.opacity}:${l.image ? 1 : 0}:${l.zOrder || 'back'}:${l.flipX ? 1 : 0}:${l.flipY ? 1 : 0}`).join('|')
+  const pdfStructureKey = pdfLayers.map(l => `${l.id}:${l.visible}:${l.opacity}:${l.image ? 1 : 0}:${l.zOrder || 'back'}:${l.flipX ? 1 : 0}:${l.flipY ? 1 : 0}:${l.positionLocked === false ? 0 : 1}`).join('|')
 
   // Draw PDF layers — only rebuilds when structure changes, not on every drag
   useEffect(() => {
@@ -652,6 +652,10 @@ export default function FloorCanvas({ onCanvasSize }) {
           fc.remove(pdfFabricRefs.current[layer.id])
         }
 
+        // Default state: PDF position is locked. Taps pass through to sets,
+        // and the user can't drag the PDF by accident. Unlock via the
+        // Layers tab when intentionally repositioning/scaling the PDF.
+        const isLocked = layer.positionLocked !== false
         fImg.set({
           left: layer.position.x,
           top: layer.position.y,
@@ -660,15 +664,17 @@ export default function FloorCanvas({ onCanvasSize }) {
           flipY: !!layer.flipY,
           scaleX: layer.scaleX || layer.scale,
           scaleY: layer.scaleY || layer.scale,
-          selectable: true,
-          evented: true,
+          selectable: !isLocked,
+          evented: !isLocked,
           name: `pdf-bg-${layer.id}`,
           opacity: layer.opacity,
-          hasControls: true,
-          hasBorders: true,
+          hasControls: !isLocked,
+          hasBorders: !isLocked,
           borderColor: '#6366F1',
           borderDashArray: [5, 5],
           lockRotation: true,
+          lockMovementX: isLocked,
+          lockMovementY: isLocked,
           lockUniScaling: false,
           cornerColor: '#6366F1',
           cornerStyle: 'circle',
