@@ -7,6 +7,9 @@ const SERVER_PROJECT_KEY = 'floorplan-server-project-id'
 // Debounced autosave — coalesces rapid changes into a single write
 let _autosaveTimer = null
 let _serverSaveTimer = null
+// Auto-version trigger — debounce annotation edits into a snapshot every 30s
+let _versionTimer = null
+const AUTO_VERSION_DEBOUNCE_MS = 30000
 
 // Build complete save data object from state — used by server saves and the
 // explicit named-save path (saveProjectAs). Includes the full project content.
@@ -1197,6 +1200,9 @@ const useStore = create((set, get) => ({
   },
 
   // === Freehand stroke (Apple Pencil annotation) actions ===
+  // Each annotation edit also schedules a debounced version snapshot so the
+  // user can roll back to any prior state of their notes via the Versions
+  // dropdown (see saveVersion / restoreVersion below).
   addFreehandStroke: (stroke) => {
     get()._pushHistory()
     const id = get().nextStrokeId
@@ -1206,18 +1212,21 @@ const useStore = create((set, get) => ({
       nextStrokeId: id + 1,
     })
     get().autosave()
+    get()._scheduleVersionSave()
     return id
   },
   deleteFreehandStroke: (id) => {
     get()._pushHistory()
     set({ freehandStrokes: get().freehandStrokes.filter(s => s.id !== id) })
     get().autosave()
+    get()._scheduleVersionSave()
   },
   clearFreehandStrokes: () => {
     if (get().freehandStrokes.length === 0) return
     get()._pushHistory()
     set({ freehandStrokes: [] })
     get().autosave()
+    get()._scheduleVersionSave()
   },
   setFreehandDrawMode: (on) => set({ freehandDrawMode: !!on, freehandEraseMode: false }),
   setFreehandEraseMode: (on) => set({ freehandEraseMode: !!on }),
@@ -1643,6 +1652,91 @@ const useStore = create((set, get) => ({
   // Get/set the linked server project ID
   getServerProjectId: () => loadServerProjectId(),
   setServerProjectId: (id) => saveServerProjectId(id),
+
+  // === Version history ===
+  // saveVersion — POST a snapshot of the current project state. `kind`
+  // distinguishes auto-versions (triggered by annotation edits) from
+  // manual ones the user clicks Save Version for.
+  saveVersion: async ({ label = null, kind = 'manual' } = {}) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) return null
+    const state = get()
+    // Persist the current working state to the project first so a restore
+    // never reverts changes the user made between snapshots.
+    try { await get().saveToServer(projectId, { source: 'auto' }) } catch {}
+    const data = buildSaveData(state)
+    const resp = await fetch(`/api/projects/${projectId}/versions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        label,
+        data,
+        stroke_count: state.freehandStrokes.length,
+        trigger_kind: kind,
+      }),
+    })
+    if (!resp.ok) throw new Error('Version save failed: ' + resp.status)
+    return await resp.json()
+  },
+
+  listVersions: async () => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) return []
+    const resp = await fetch(`/api/projects/${projectId}/versions`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (!resp.ok) return []
+    return await resp.json()
+  },
+
+  restoreVersion: async (versionId) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) return false
+    const resp = await fetch(`/api/projects/${projectId}/versions/${versionId}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (!resp.ok) return false
+    const version = await resp.json()
+    if (!version?.data) return false
+    get().importProject(version.data)
+    // Push the restored state back to the project so it sticks beyond
+    // this session (otherwise the next autosave would overwrite the
+    // snapshot's contents with whatever was open before).
+    try { await get().saveToServer(projectId, { source: 'manual' }) } catch {}
+    return true
+  },
+
+  deleteVersion: async (versionId) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) return false
+    const resp = await fetch(`/api/projects/${projectId}/versions/${versionId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    return resp.ok
+  },
+
+  // Internal — debounced auto-version. Called from annotation edit actions.
+  // Fires once 30 s after the last annotation change so a flurry of strokes
+  // becomes a single snapshot rather than dozens.
+  _scheduleVersionSave: () => {
+    if (_versionTimer) clearTimeout(_versionTimer)
+    _versionTimer = setTimeout(() => {
+      _versionTimer = null
+      const state = get()
+      if (!loadServerProjectId()) return
+      const count = state.freehandStrokes.length
+      const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const label = `Auto · ${ts} · ${count} stroke${count === 1 ? '' : 's'}`
+      get().saveVersion({ label, kind: 'auto-annotation' }).catch(e => {
+        console.warn('[auto-version] save failed:', e?.message || e)
+      })
+    }, AUTO_VERSION_DEBOUNCE_MS)
+  },
 
   // Boot-time auto-load: fetches the user's most-recently-updated project from
   // the server and populates in-memory state with it. The server is the source

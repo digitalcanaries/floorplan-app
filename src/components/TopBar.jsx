@@ -30,6 +30,7 @@ export default function TopBar({ canvasSize }) {
     freehandColor, setFreehandColor,
     freehandWidth, setFreehandWidth,
     freehandStrokes, clearFreehandStrokes,
+    saveVersion, listVersions, restoreVersion, deleteVersion,
   } = useStore()
 
   const loadInputRef = useRef(null)
@@ -49,6 +50,69 @@ export default function TopBar({ canvasSize }) {
   const [showHelp, setShowHelp] = useState(false)
   const [showPngMenu, setShowPngMenu] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showVersionsMenu, setShowVersionsMenu] = useState(false)
+  const [versionsList, setVersionsList] = useState([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+
+  const openVersionsMenu = async () => {
+    const next = !showVersionsMenu
+    setShowVersionsMenu(next)
+    setShowSaveMenu(false)
+    setShowLoadMenu(false)
+    if (!next) return
+    setVersionsLoading(true)
+    try {
+      const list = await listVersions()
+      setVersionsList(Array.isArray(list) ? list : [])
+    } catch (e) {
+      console.warn('listVersions failed', e?.message || e)
+      setVersionsList([])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }
+
+  const handleSaveVersionNow = async () => {
+    if (!serverProjectId) {
+      alert('Save the project to the server first — versions need a project to attach to.')
+      return
+    }
+    try {
+      const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const label = window.prompt('Version label (optional):', `Manual · ${ts}`) ?? `Manual · ${ts}`
+      await saveVersion({ label, kind: 'manual' })
+      // Refresh the list if the menu is open
+      if (showVersionsMenu) {
+        const list = await listVersions()
+        setVersionsList(Array.isArray(list) ? list : [])
+      }
+    } catch (e) {
+      alert('Could not save version: ' + (e?.message || e))
+    }
+  }
+
+  const handleRestoreVersion = async (vid) => {
+    if (!window.confirm('Restore this version? Your current state will be replaced (a new auto-version will be created so this is reversible).')) return
+    try {
+      // Snapshot current state first so the restore is reversible
+      await saveVersion({ label: `Pre-restore · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, kind: 'pre-restore' }).catch(() => {})
+      const ok = await restoreVersion(vid)
+      if (!ok) alert('Restore failed')
+      else {
+        setShowVersionsMenu(false)
+        setVersionsList([])
+      }
+    } catch (e) {
+      alert('Restore failed: ' + (e?.message || e))
+    }
+  }
+
+  const handleDeleteVersion = async (vid, e) => {
+    e?.stopPropagation()
+    if (!window.confirm('Delete this version permanently?')) return
+    const ok = await deleteVersion(vid)
+    if (ok) setVersionsList(versionsList.filter(v => v.id !== vid))
+  }
 
   // Track fullscreen state so the toggle button label/icon stays accurate
   useEffect(() => {
@@ -623,15 +687,20 @@ export default function TopBar({ canvasSize }) {
           return to normal selection / drag. */}
       <button
         onClick={() => setFreehandDrawMode(!freehandDrawMode)}
-        title={freehandDrawMode ? 'Exit draw mode' : 'Draw freehand annotations (Apple Pencil supported)'}
+        title={freehandDrawMode ? 'Exit annotate mode' : 'Annotate — draw notes on the page (Apple Pencil supported, versions auto-saved)'}
         className={`px-2 py-1 rounded text-xs ${
           freehandDrawMode
             ? 'bg-rose-600 hover:bg-rose-500 text-white'
             : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
         }`}
       >
-        ✎ {freehandDrawMode ? 'Drawing' : 'Draw'}
+        ✎ {freehandDrawMode ? 'Annotating' : 'Annotate'}
       </button>
+      {freehandDrawMode && (
+        <span className="text-[10px] text-gray-400 ml-1" title="Versions auto-save 30 s after each edit">
+          • auto-versioning
+        </span>
+      )}
       {freehandDrawMode && (
         <>
           <button
@@ -908,6 +977,75 @@ export default function TopBar({ canvasSize }) {
               className="w-full text-left px-3 py-2 text-xs hover:bg-gray-700 flex items-center gap-2 border-t border-gray-700">
               <span>☁️</span> Save to Google Drive
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* Versions dropdown — auto-saved snapshots from Annotate mode plus
+          on-demand manual saves. Pick one to roll back to it. */}
+      <div className="relative">
+        <button
+          onClick={openVersionsMenu}
+          className="px-2 py-1 bg-indigo-700 hover:bg-indigo-600 rounded text-xs"
+          title="View and restore prior versions of the project"
+        >
+          📋 Versions
+        </button>
+        {showVersionsMenu && (
+          <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-600 rounded shadow-lg z-50 min-w-72 max-h-[70vh] overflow-y-auto"
+            onMouseLeave={() => setShowVersionsMenu(false)}>
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-600">
+              <span className="text-[10px] text-gray-400 uppercase tracking-wide">Versions</span>
+              <button
+                onClick={handleSaveVersionNow}
+                className="text-[10px] text-indigo-300 hover:text-indigo-200"
+                title="Save the current state as a named version"
+              >
+                + Save Version
+              </button>
+            </div>
+            {versionsLoading ? (
+              <div className="px-3 py-2 text-xs text-gray-500">Loading…</div>
+            ) : versionsList.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-gray-500">
+                No versions yet. Annotate the page or click Save Version to create one.
+              </div>
+            ) : (
+              versionsList.map(v => {
+                const when = v.created_at
+                  ? new Date(v.created_at.endsWith('Z') ? v.created_at : v.created_at + 'Z').toLocaleString()
+                  : ''
+                const kindBadge =
+                  v.trigger_kind === 'auto-annotation' ? '✎ auto'
+                  : v.trigger_kind === 'pre-restore' ? '↩ pre-restore'
+                  : v.trigger_kind === 'manual' ? '★ manual'
+                  : v.trigger_kind || ''
+                return (
+                  <div key={v.id} className="px-3 py-1.5 hover:bg-gray-700 group flex items-start gap-2">
+                    <button
+                      onClick={() => handleRestoreVersion(v.id)}
+                      className="flex-1 text-left"
+                      title="Restore this version"
+                    >
+                      <div className="text-xs text-white truncate">
+                        {v.label || `Version ${v.id}`}
+                      </div>
+                      <div className="text-[10px] text-gray-400">
+                        {kindBadge} · {when}
+                        {v.stroke_count > 0 && ` · ${v.stroke_count} stroke${v.stroke_count === 1 ? '' : 's'}`}
+                      </div>
+                    </button>
+                    <button
+                      onClick={(e) => handleDeleteVersion(v.id, e)}
+                      className="text-red-400 hover:text-red-300 text-[10px] opacity-0 group-hover:opacity-100"
+                      title="Delete this version"
+                    >
+                      &#x2715;
+                    </button>
+                  </div>
+                )
+              })
+            )}
           </div>
         )}
       </div>
