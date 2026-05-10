@@ -21,6 +21,7 @@ const DIM_PREFIX = 'dim-line-'
 const ANNO_PREFIX = 'annotation-'
 const BWALL_PREFIX = 'building-wall-'
 const BCOL_PREFIX = 'building-col-'
+const STROKE_PREFIX = 'freehand-stroke-'
 const DRAWING_PREVIEW_NAME = 'drawing-preview'
 const DRAWING_POINT_NAME = 'drawing-point'
 const EXCL_PREFIX = 'exclusion-zone-'
@@ -263,6 +264,8 @@ export default function FloorCanvas({ onCanvasSize }) {
     drawingMode, drawingWallPoints, addDrawingPoint, cancelDrawing,
     breakDrawingChain, drawingWallSnap,
     pendingFitAll,
+    freehandStrokes, freehandDrawMode, freehandColor, freehandWidth,
+    addFreehandStroke,
   } = useStore()
 
   // Auto-fit after project import
@@ -570,6 +573,73 @@ export default function FloorCanvas({ onCanvasSize }) {
       container.style.touchAction = prevTouchAction
     }
   }, [])
+
+  // === Freehand draw mode — Apple Pencil / mouse / finger annotation ===
+  // Toggles fabric's isDrawingMode. When the user finishes a stroke,
+  // capture its data and persist to the store, then drop the auto-added
+  // fabric path so the dedicated render effect below owns the visuals.
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    if (!freehandDrawMode) {
+      fc.isDrawingMode = false
+      fc.defaultCursor = 'default'
+      return
+    }
+    fc.isDrawingMode = true
+    const brush = new fabric.PencilBrush(fc)
+    brush.color = freehandColor
+    brush.width = freehandWidth
+    fc.freeDrawingBrush = brush
+
+    const onPathCreated = (opt) => {
+      const path = opt?.path
+      if (!path) return
+      addFreehandStroke({
+        path: structuredClone(path.path),
+        left: path.left,
+        top: path.top,
+        color: freehandColor,
+        width: freehandWidth,
+      })
+      // The brush placed an unmanaged Path on the canvas; remove it so
+      // the render effect can re-add it as a tagged STROKE_PREFIX object.
+      fc.remove(path)
+      fc.requestRenderAll()
+    }
+    fc.on('path:created', onPathCreated)
+    return () => {
+      fc.off('path:created', onPathCreated)
+      fc.isDrawingMode = false
+    }
+  }, [freehandDrawMode, freehandColor, freehandWidth, addFreehandStroke])
+
+  // Render freehand strokes — rebuild from store so undo/redo, load, and
+  // import all flow through one path. Strokes sit above sets but are not
+  // selectable; user edits them via the Layers tab (delete / clear all).
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    fc.getObjects().filter(o => o.name?.startsWith(STROKE_PREFIX)).forEach(o => fc.remove(o))
+    for (const s of freehandStrokes) {
+      if (!s.path) continue
+      const p = new fabric.Path(s.path, {
+        left: s.left,
+        top: s.top,
+        stroke: s.color || '#ef4444',
+        strokeWidth: s.width || 3,
+        fill: null,
+        strokeLineCap: 'round',
+        strokeLineJoin: 'round',
+        selectable: false,
+        evented: false,
+        name: `${STROKE_PREFIX}${s.id}`,
+        objectCaching: true,
+      })
+      fc.add(p)
+    }
+    fc.requestRenderAll()
+  }, [freehandStrokes])
 
   // Canvas-level selection handler — plain click = single select,
   // Shift/Ctrl/Cmd+click = toggle multi-select. Centralised here so the

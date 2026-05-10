@@ -61,6 +61,10 @@ function buildSaveData(state, extraFields = {}) {
     buildingColumns: state.buildingColumns,
     nextBuildingColumnId: state.nextBuildingColumnId,
     buildingColumnsVisible: state.buildingColumnsVisible,
+    freehandStrokes: state.freehandStrokes,
+    nextStrokeId: state.nextStrokeId,
+    freehandColor: state.freehandColor,
+    freehandWidth: state.freehandWidth,
     ...extraFields,
   }
 }
@@ -210,6 +214,15 @@ const useStore = create((set, get) => ({
   buildingColumns: [],
   nextBuildingColumnId: 1,
   buildingColumnsVisible: saved?.buildingColumnsVisible ?? true,
+
+  // Freehand annotation strokes (Apple Pencil / mouse drawn). Each stroke is
+  // { id, path: <SVG command array>, left, top, color, width } captured from
+  // a fabric.PencilBrush path:created event, then re-rendered by FloorCanvas.
+  freehandStrokes: [],
+  nextStrokeId: 1,
+  freehandDrawMode: false,                              // transient UI state
+  freehandColor: saved?.freehandColor || '#ef4444',     // red default — high contrast on plans
+  freehandWidth: saved?.freehandWidth || 3,
 
   // Multi-select (ephemeral, not persisted or undone)
   multiSelected: new Set(),
@@ -572,6 +585,7 @@ const useStore = create((set, get) => ({
       groups: structuredClone(state.groups),
       buildingWalls: structuredClone(state.buildingWalls),
       buildingColumns: structuredClone(state.buildingColumns),
+      freehandStrokes: structuredClone(state.freehandStrokes),
       // PDF state — needed so undo restores PDF + overlay positions together
       pdfLayers: structuredClone(state.pdfLayers),
       pdfPosition: structuredClone(state.pdfPosition),
@@ -583,6 +597,7 @@ const useStore = create((set, get) => ({
       nextGroupId: state.nextGroupId,
       nextBuildingWallId: state.nextBuildingWallId,
       nextBuildingColumnId: state.nextBuildingColumnId,
+      nextStrokeId: state.nextStrokeId,
     }
     const past = [...state._past, snapshot]
     if (past.length > state._maxHistory) past.shift()
@@ -591,7 +606,7 @@ const useStore = create((set, get) => ({
 
   undo: () => {
     const state = get()
-    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, pdfLayers, pdfPosition, pdfScale, pdfRotation, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = state
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, freehandStrokes, pdfLayers, pdfPosition, pdfScale, pdfRotation, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId, nextStrokeId } = state
     if (_past.length === 0) return
     const currentSnapshot = {
       sets: structuredClone(sets),
@@ -600,10 +615,11 @@ const useStore = create((set, get) => ({
       groups: structuredClone(groups),
       buildingWalls: structuredClone(buildingWalls),
       buildingColumns: structuredClone(buildingColumns),
+      freehandStrokes: structuredClone(freehandStrokes),
       pdfLayers: structuredClone(pdfLayers),
       pdfPosition: structuredClone(pdfPosition),
       pdfScale, pdfRotation,
-      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId,
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId, nextStrokeId,
     }
     const previous = _past[_past.length - 1]
     const restoreUpdate = {
@@ -614,12 +630,14 @@ const useStore = create((set, get) => ({
       groups: structuredClone(previous.groups || []),
       buildingWalls: structuredClone(previous.buildingWalls || []),
       buildingColumns: structuredClone(previous.buildingColumns || []),
+      freehandStrokes: structuredClone(previous.freehandStrokes || []),
       nextSetId: previous.nextSetId,
       nextRuleId: previous.nextRuleId,
       nextAnnotationId: previous.nextAnnotationId || state.nextAnnotationId,
       nextGroupId: previous.nextGroupId || state.nextGroupId,
       nextBuildingWallId: previous.nextBuildingWallId || state.nextBuildingWallId,
       nextBuildingColumnId: previous.nextBuildingColumnId || state.nextBuildingColumnId,
+      nextStrokeId: previous.nextStrokeId || state.nextStrokeId,
       _past: _past.slice(0, -1),
       _future: [currentSnapshot, ..._future],
       selectedSetId: null,
@@ -636,7 +654,7 @@ const useStore = create((set, get) => ({
 
   redo: () => {
     const state = get()
-    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, pdfLayers, pdfPosition, pdfScale, pdfRotation, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId } = state
+    const { _past, _future, sets, rules, annotations, groups, buildingWalls, buildingColumns, freehandStrokes, pdfLayers, pdfPosition, pdfScale, pdfRotation, nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId, nextStrokeId } = state
     if (_future.length === 0) return
     const currentSnapshot = {
       sets: structuredClone(sets),
@@ -645,10 +663,11 @@ const useStore = create((set, get) => ({
       groups: structuredClone(groups),
       buildingWalls: structuredClone(buildingWalls),
       buildingColumns: structuredClone(buildingColumns),
+      freehandStrokes: structuredClone(freehandStrokes),
       pdfLayers: structuredClone(pdfLayers),
       pdfPosition: structuredClone(pdfPosition),
       pdfScale, pdfRotation,
-      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId,
+      nextSetId, nextRuleId, nextAnnotationId, nextGroupId, nextBuildingWallId, nextBuildingColumnId, nextStrokeId,
     }
     const next = _future[0]
     const restoreUpdate = {
@@ -659,12 +678,14 @@ const useStore = create((set, get) => ({
       groups: structuredClone(next.groups || []),
       buildingWalls: structuredClone(next.buildingWalls || []),
       buildingColumns: structuredClone(next.buildingColumns || []),
+      freehandStrokes: structuredClone(next.freehandStrokes || []),
       nextSetId: next.nextSetId,
       nextRuleId: next.nextRuleId,
       nextAnnotationId: next.nextAnnotationId || state.nextAnnotationId,
       nextGroupId: next.nextGroupId || state.nextGroupId,
       nextBuildingWallId: next.nextBuildingWallId || state.nextBuildingWallId,
       nextBuildingColumnId: next.nextBuildingColumnId || state.nextBuildingColumnId,
+      nextStrokeId: next.nextStrokeId || state.nextStrokeId,
       _past: [..._past, currentSnapshot],
       _future: _future.slice(1),
       selectedSetId: null,
@@ -1173,6 +1194,33 @@ const useStore = create((set, get) => ({
     set({ annotations: get().annotations.filter(a => a.id !== id) })
     get().autosave()
   },
+
+  // === Freehand stroke (Apple Pencil annotation) actions ===
+  addFreehandStroke: (stroke) => {
+    get()._pushHistory()
+    const id = get().nextStrokeId
+    const newStroke = { id, ...stroke }
+    set({
+      freehandStrokes: [...get().freehandStrokes, newStroke],
+      nextStrokeId: id + 1,
+    })
+    get().autosave()
+    return id
+  },
+  deleteFreehandStroke: (id) => {
+    get()._pushHistory()
+    set({ freehandStrokes: get().freehandStrokes.filter(s => s.id !== id) })
+    get().autosave()
+  },
+  clearFreehandStrokes: () => {
+    if (get().freehandStrokes.length === 0) return
+    get()._pushHistory()
+    set({ freehandStrokes: [] })
+    get().autosave()
+  },
+  setFreehandDrawMode: (on) => set({ freehandDrawMode: !!on }),
+  setFreehandColor: (color) => { set({ freehandColor: color }); get().autosave() },
+  setFreehandWidth: (width) => { set({ freehandWidth: width }); get().autosave() },
 
   // Building Wall CRUD
   addBuildingWall: (wall) => {
@@ -1729,6 +1777,10 @@ const useStore = create((set, get) => ({
       buildingColumns: data.buildingColumns || [],
       nextBuildingColumnId: data.nextBuildingColumnId || 1,
       buildingColumnsVisible: data.buildingColumnsVisible ?? true,
+      freehandStrokes: data.freehandStrokes || [],
+      nextStrokeId: data.nextStrokeId || (data.freehandStrokes?.length > 0 ? Math.max(...data.freehandStrokes.map(s => s.id)) + 1 : 1),
+      freehandColor: data.freehandColor || '#ef4444',
+      freehandWidth: data.freehandWidth || 3,
       selectedSetId: null,
       _past: [], _future: [],
       pendingFitAll: true,
@@ -1826,6 +1878,9 @@ const useStore = create((set, get) => ({
       buildingColumns: [],
       nextBuildingColumnId: 1,
       buildingColumnsVisible: true,
+      freehandStrokes: [],
+      nextStrokeId: 1,
+      freehandDrawMode: false,
       drawingMode: null,
       drawingWallPoints: [],
       layerVisibility: {},

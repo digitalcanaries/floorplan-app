@@ -25,6 +25,10 @@ export default function TopBar({ canvasSize }) {
     annotations, sets: allSets, pixelsPerUnit: ppu,
     pdfLayers, activePdfLayerId, pdfOriginalSize, setPdfScale, unit,
     lockAllToPdf, unlockAllFromPdf, pdfImage,
+    freehandDrawMode, setFreehandDrawMode,
+    freehandColor, setFreehandColor,
+    freehandWidth, setFreehandWidth,
+    freehandStrokes, clearFreehandStrokes,
   } = useStore()
 
   const loadInputRef = useRef(null)
@@ -586,6 +590,64 @@ export default function TopBar({ canvasSize }) {
         <span className="text-[10px] text-gray-400" title="Layout quality score (lower = better)">
           Score: {layoutScore}
         </span>
+      )}
+
+      <div className="h-5 w-px bg-gray-600" />
+
+      {/* Freehand draw — Apple Pencil / mouse annotation. While active,
+          fabric's drawing brush takes over the canvas; toggle off to
+          return to normal selection / drag. */}
+      <button
+        onClick={() => setFreehandDrawMode(!freehandDrawMode)}
+        title={freehandDrawMode ? 'Exit draw mode' : 'Draw freehand annotations (Apple Pencil supported)'}
+        className={`px-2 py-1 rounded text-xs ${
+          freehandDrawMode
+            ? 'bg-rose-600 hover:bg-rose-500 text-white'
+            : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+        }`}
+      >
+        ✎ {freehandDrawMode ? 'Drawing' : 'Draw'}
+      </button>
+      {freehandDrawMode && (
+        <>
+          {['#ef4444', '#facc15', '#3b82f6', '#22c55e', '#000000', '#ffffff'].map(c => (
+            <button
+              key={c}
+              onClick={() => setFreehandColor(c)}
+              title={`Stroke color ${c}`}
+              className={`w-5 h-5 rounded-full border-2 ${
+                freehandColor === c ? 'border-white scale-110' : 'border-gray-600'
+              }`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+          <select
+            value={freehandWidth}
+            onChange={e => setFreehandWidth(parseInt(e.target.value))}
+            className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
+            title="Stroke width"
+          >
+            <option value={1}>1 px</option>
+            <option value={2}>2 px</option>
+            <option value={3}>3 px</option>
+            <option value={5}>5 px</option>
+            <option value={8}>8 px</option>
+            <option value={12}>12 px</option>
+          </select>
+        </>
+      )}
+      {freehandStrokes.length > 0 && (
+        <button
+          onClick={() => {
+            if (window.confirm(`Erase all ${freehandStrokes.length} freehand stroke${freehandStrokes.length === 1 ? '' : 's'}?`)) {
+              clearFreehandStrokes()
+            }
+          }}
+          title="Erase all freehand strokes"
+          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-300"
+        >
+          Erase All
+        </button>
       )}
 
       <div className="flex-1" />
