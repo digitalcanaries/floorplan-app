@@ -366,7 +366,7 @@ export default function TopBar({ canvasSize }) {
   }
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white text-sm border-b border-gray-700 shrink-0 relative">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 bg-gray-800 text-white text-sm border-b border-gray-700 shrink-0 relative">
       {/* Project name — click to edit */}
       {editingName ? (
         <input

@@ -140,7 +140,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     const allSets = state.sets.filter(s => s.onPlan !== false && !s.hidden)
     const ppu = state.pixelsPerUnit
     const bwalls = state.buildingWalls || []
-    if (allSets.length === 0 && bwalls.length === 0) return
+    const pdfObjs = fc.getObjects().filter(o => o.name && o.name.startsWith('pdf-bg-'))
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     for (const s of allSets) {
@@ -155,7 +155,18 @@ export default function FloorCanvas({ onCanvasSize }) {
       minX = Math.min(minX, bw.x1, bw.x2); minY = Math.min(minY, bw.y1, bw.y2)
       maxX = Math.max(maxX, bw.x1, bw.x2); maxY = Math.max(maxY, bw.y1, bw.y2)
     }
-    if (!isFinite(minX)) return
+    for (const o of pdfObjs) {
+      const r = o.getBoundingRect()
+      minX = Math.min(minX, r.left); minY = Math.min(minY, r.top)
+      maxX = Math.max(maxX, r.left + r.width); maxY = Math.max(maxY, r.top + r.height)
+    }
+    if (!isFinite(minX)) {
+      // Nothing to center on — reset to identity transform
+      fc.setViewportTransform([1, 0, 0, 1, 0, 0])
+      setZoomLevel(100)
+      fc.requestRenderAll()
+      return
+    }
 
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
