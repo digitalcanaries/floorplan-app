@@ -394,18 +394,26 @@ export default memo(function SetsTab() {
         {(s.category && s.category !== 'Set') && (
           <span className={`text-[9px] ${CATEGORY_COLORS[s.category] || 'text-gray-500'}`}>{s.category}</span>
         )}
-        {WALL_CATEGORIES.includes(s.category) ? (
-          <span className="text-[10px] text-gray-400" title={`W:${formatInUnit(s.width, inputUnit)} × H:${formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)} × D:${formatInUnit(s.height, inputUnit)} — face ${(s.width * (s.wallHeight || defaultWallHeight)).toFixed(0)} ft²`}>
-            {formatInUnit(s.width, inputUnit)}×{formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)}×{formatInUnit(s.height, inputUnit)}
-          </span>
-        ) : (
-          <span className="text-[10px] text-gray-400" title={`Floor area ${(s.width * s.height).toFixed(s.width * s.height >= 10 ? 0 : 1)} ft²`}>
-            {formatInUnit(s.width, inputUnit)}×{formatInUnit(s.height, inputUnit)}
-            <span className="text-gray-500 ml-1">
-              · {(s.width * s.height).toFixed(s.width * s.height >= 10 ? 0 : 1)}&nbsp;ft²
+        {(() => {
+          // Dimensions are W × D × H, floor area = W × D.
+          // Field map: s.width = W, s.height = D (floor depth, NOT vertical),
+          // s.wallHeight (or defaultWallHeight) = H (vertical).
+          const w = s.width
+          const d = s.height
+          const h = s.wallHeight || defaultWallHeight
+          const floorArea = w * d
+          const sqft = floorArea.toFixed(floorArea >= 10 ? 0 : 1)
+          const isWall = WALL_CATEGORIES.includes(s.category)
+          const tip = isWall
+            ? `W:${formatInUnit(w, inputUnit)} × D:${formatInUnit(d, inputUnit)} × H:${formatInUnit(h, inputUnit)} — floor ${sqft} ft² · face ${(w * h).toFixed(0)} ft²`
+            : `W:${formatInUnit(w, inputUnit)} × D:${formatInUnit(d, inputUnit)} × H:${formatInUnit(h, inputUnit)} — floor area ${sqft} ft²`
+          return (
+            <span className="text-[10px] text-gray-400" title={tip}>
+              {formatInUnit(w, inputUnit)}×{formatInUnit(d, inputUnit)}×{formatInUnit(h, inputUnit)}
+              <span className="text-gray-500 ml-1">· {sqft}&nbsp;ft²</span>
             </span>
-          </span>
-        )}
+          )
+        })()}
         {WALL_CATEGORIES.includes(s.category) && (
           <button onClick={(e) => {
             e.stopPropagation()
