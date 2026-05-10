@@ -116,11 +116,22 @@ function App() {
             · 📐 {projectName}
           </span>
         )}
-        {lastSaved && (
-          <span className="ml-auto text-gray-500" title={`Last save ${new Date(lastSaved).toLocaleString()}`}>
-            saved {new Date(lastSaved).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-        )}
+        <span className="ml-auto flex items-center gap-2">
+          {lastSaved && (
+            <span className="text-gray-500" title={`Last save ${new Date(lastSaved).toLocaleString()}`}>
+              saved {new Date(lastSaved).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+          {/* Refresh — pulls fresh bundle + project from the server in one tap.
+              Avoids the logout/login dance when iPad is showing stale data. */}
+          <button
+            onClick={() => window.location.reload()}
+            title="Reload — pulls the latest bundle and project data without signing out"
+            className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-[10px] leading-none"
+          >
+            🔄 Refresh
+          </button>
+        </span>
       </div>
       <QuickActionsBar />
       <div className="flex flex-1 overflow-hidden">
