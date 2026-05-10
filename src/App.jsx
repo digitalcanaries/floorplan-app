@@ -10,10 +10,17 @@ import ChangePasswordModal from './components/ChangePasswordModal.jsx'
 
 const Scene3D = lazy(() => import('./components/Scene3D.jsx'))
 
+// Build-time constants — defined in vite.config.js, string-replaced at compile.
+/* global __APP_VERSION__, __APP_BUILD_DATE__ */
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
+const APP_BUILD_DATE = typeof __APP_BUILD_DATE__ !== 'undefined' ? __APP_BUILD_DATE__ : ''
+
 function App() {
   const { user, token } = useAuthStore()
   const viewMode = useStore(s => s.viewMode)
   const loadLatestProject = useStore(s => s.loadLatestProject)
+  const projectName = useStore(s => s.projectName)
+  const lastSaved = useStore(s => s.lastSaved)
   const [canvasSize, setCanvasSize] = useState({ w: 1200, h: 800 })
   const [bootStatus, setBootStatus] = useState('idle') // 'idle' | 'loading' | 'ready' | 'empty' | 'failed'
   const [bootMessage, setBootMessage] = useState(null)
@@ -93,6 +100,27 @@ function App() {
         </div>
       )}
       <TopBar canvasSize={canvasSize} />
+      {/* Thin status strip — version + build date + active project. Sits as
+          its own row directly under the main toolbar so the version info
+          never crams the TopBar height (which on iPad was forcing an
+          extra wrapped row). */}
+      <div className="flex items-center gap-3 px-4 py-0.5 bg-gray-850 bg-gray-900 text-[10px] text-gray-500 border-b border-gray-800 shrink-0 leading-none">
+        <span className="text-gray-400">
+          v{APP_VERSION}
+        </span>
+        <span>· Build {APP_BUILD_DATE}</span>
+        {user?.username && <span>· @{user.username}</span>}
+        {projectName && (
+          <span className="truncate max-w-[40ch]" title={projectName}>
+            · 📐 {projectName}
+          </span>
+        )}
+        {lastSaved && (
+          <span className="ml-auto text-gray-600" title={`Last save ${new Date(lastSaved).toLocaleString()}`}>
+            saved {new Date(lastSaved).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
+      </div>
       <QuickActionsBar />
       <div className="flex flex-1 overflow-hidden">
         {!is3D && <Sidebar />}
