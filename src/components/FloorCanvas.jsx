@@ -408,6 +408,112 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
   }, [])
 
+  // === Touch gestures (iPad) — two-finger pan + pinch zoom ===
+  // A single touch is left for Fabric to handle (drag a set, tap to select).
+  // When a 2nd finger lands we take over the canvas: prevent default,
+  // discard any active selection so the in-progress drag aborts, and
+  // translate/scale the viewport based on the centroid + pinch distance.
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+    const fc = fabricRef.current
+    if (!fc) return
+
+    const touches = new Map()
+    let gestureActive = false
+    let lastCentroid = null
+    let lastDistance = null
+
+    const centroidOf = () => {
+      let sx = 0, sy = 0
+      for (const t of touches.values()) { sx += t.x; sy += t.y }
+      return { x: sx / touches.size, y: sy / touches.size }
+    }
+    const distanceOf = () => {
+      const arr = [...touches.values()]
+      if (arr.length < 2) return 0
+      return Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y)
+    }
+
+    const onStart = (e) => {
+      for (const t of e.changedTouches) touches.set(t.identifier, { x: t.clientX, y: t.clientY })
+      if (touches.size >= 2 && !gestureActive) {
+        gestureActive = true
+        lastCentroid = centroidOf()
+        lastDistance = distanceOf()
+        // Abort any in-progress fabric drag so the second finger doesn't
+        // continue to drag the set the first finger had grabbed.
+        if (fc.getActiveObject()) {
+          fc.discardActiveObject()
+          fc.requestRenderAll()
+        }
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    const onMove = (e) => {
+      let updated = false
+      for (const t of e.changedTouches) {
+        if (touches.has(t.identifier)) {
+          touches.set(t.identifier, { x: t.clientX, y: t.clientY })
+          updated = true
+        }
+      }
+      if (!gestureActive || !updated || touches.size < 2) return
+      e.preventDefault()
+      e.stopPropagation()
+
+      const centroid = centroidOf()
+      const distance = distanceOf()
+      const rect = container.getBoundingClientRect()
+      const cx = centroid.x - rect.left
+      const cy = centroid.y - rect.top
+
+      // Pan by centroid delta
+      const vpt = fc.viewportTransform
+      vpt[4] += centroid.x - lastCentroid.x
+      vpt[5] += centroid.y - lastCentroid.y
+
+      // Pinch zoom around centroid
+      if (lastDistance > 0 && distance > 0) {
+        const factor = distance / lastDistance
+        const newZoom = Math.min(Math.max(fc.getZoom() * factor, 0.05), 20)
+        fc.zoomToPoint(new fabric.Point(cx, cy), newZoom)
+        setZoomLevel(Math.round(newZoom * 100))
+      } else {
+        fc.requestRenderAll()
+      }
+
+      lastCentroid = centroid
+      lastDistance = distance
+    }
+    const onEnd = (e) => {
+      for (const t of e.changedTouches) touches.delete(t.identifier)
+      if (touches.size < 2 && gestureActive) {
+        gestureActive = false
+        lastCentroid = null
+        lastDistance = null
+      }
+    }
+
+    container.addEventListener('touchstart', onStart, { passive: false, capture: true })
+    container.addEventListener('touchmove', onMove, { passive: false, capture: true })
+    container.addEventListener('touchend', onEnd, { passive: false, capture: true })
+    container.addEventListener('touchcancel', onEnd, { passive: false, capture: true })
+
+    // Block iOS native page scroll/zoom on the artboard
+    const prevTouchAction = container.style.touchAction
+    container.style.touchAction = 'none'
+
+    return () => {
+      container.removeEventListener('touchstart', onStart, true)
+      container.removeEventListener('touchmove', onMove, true)
+      container.removeEventListener('touchend', onEnd, true)
+      container.removeEventListener('touchcancel', onEnd, true)
+      container.style.touchAction = prevTouchAction
+    }
+  }, [])
+
   // Canvas-level selection handler — plain click = single select,
   // Shift/Ctrl/Cmd+click = toggle multi-select. Centralised here so the
   // "roll the previously-focused set into the multi-select" logic reads
