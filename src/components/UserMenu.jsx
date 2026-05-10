@@ -4,6 +4,12 @@ import { apiFetch } from '../api.js'
 import ChangePasswordModal from './ChangePasswordModal.jsx'
 import HelpGuide from './HelpGuide.jsx'
 
+// Build-time constants — defined in vite.config.js. eslint-disable-next-line
+// for the bare identifiers since they're string-replaced at compile time.
+/* global __APP_VERSION__, __APP_BUILD_DATE__ */
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev'
+const APP_BUILD_DATE = typeof __APP_BUILD_DATE__ !== 'undefined' ? __APP_BUILD_DATE__ : ''
+
 export default function UserMenu() {
   const { user, logout } = useAuthStore()
   const [open, setOpen] = useState(false)
@@ -24,10 +30,16 @@ export default function UserMenu() {
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
+        className="flex flex-col items-end px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded transition-colors leading-tight"
       >
-        <span className="text-gray-300">{user?.display_name || user?.username}</span>
-        <span className="text-gray-500 text-xs ml-1">▼</span>
+        <span className="flex items-center gap-1">
+          <span className="text-gray-300 text-sm">{user?.display_name || user?.username}</span>
+          <span className="text-gray-500 text-xs">▼</span>
+        </span>
+        <span className="text-[9px] text-gray-500 -mt-0.5"
+          title={`Build ${APP_BUILD_DATE}`}>
+          v{APP_VERSION} · {APP_BUILD_DATE}
+        </span>
       </button>
 
       {open && (
