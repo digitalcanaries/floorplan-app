@@ -395,9 +395,8 @@ export default memo(function SetsTab() {
           <span className={`text-[9px] ${CATEGORY_COLORS[s.category] || 'text-gray-500'}`}>{s.category}</span>
         )}
         {(() => {
-          // Dimensions are W × D × H, floor area = W × D.
-          // Field map: s.width = W, s.height = D (floor depth, NOT vertical),
-          // s.wallHeight (or defaultWallHeight) = H (vertical).
+          // Inline display: W × D · floor area. Vertical height (H) goes
+          // in the tooltip only — showing 3 numbers reads like volume.
           const w = s.width
           const d = s.height
           const h = s.wallHeight || defaultWallHeight
@@ -409,7 +408,7 @@ export default memo(function SetsTab() {
             : `W:${formatInUnit(w, inputUnit)} × D:${formatInUnit(d, inputUnit)} × H:${formatInUnit(h, inputUnit)} — floor area ${sqft} ft²`
           return (
             <span className="text-[10px] text-gray-400" title={tip}>
-              {formatInUnit(w, inputUnit)}×{formatInUnit(d, inputUnit)}×{formatInUnit(h, inputUnit)}
+              {formatInUnit(w, inputUnit)}×{formatInUnit(d, inputUnit)}
               <span className="text-gray-500 ml-1">· {sqft}&nbsp;ft²</span>
             </span>
           )
