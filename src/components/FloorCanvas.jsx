@@ -92,6 +92,8 @@ export default function FloorCanvas({ onCanvasSize }) {
   const labelRefsMap = useRef({})  // setId -> [fabric label objects] for O(1) drag lookup
   const shapeRefsMap = useRef({})  // setId -> fabric shape object for O(1) selection updates
   const prevSelectedRef = useRef(null)  // track previous selectedSetId for in-place deselection
+  const penActiveRef = useRef(false)    // true while Apple Pencil / stylus is in use — used for palm rejection
+  const penReleaseTimerRef = useRef(null)
   const [zoomLevel, setZoomLevel] = useState(100)
 
   // --- Zoom control functions ---
@@ -435,7 +437,20 @@ export default function FloorCanvas({ onCanvasSize }) {
       return Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y)
     }
 
+    const isStylusTouch = (t) => {
+      // Safari iOS exposes Apple Pencil touches via the non-standard `touchType`
+      // field set to 'stylus'. When the pen is engaged, ignore non-stylus
+      // touches so the user's palm doesn't trigger pan/zoom or drag.
+      return t.touchType === 'stylus'
+    }
     const onStart = (e) => {
+      // Palm rejection — if the pen is active and none of the new touches
+      // are from the pen itself, swallow the event so fabric never sees it.
+      if (penActiveRef.current && ![...e.changedTouches].some(isStylusTouch)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
       for (const t of e.changedTouches) touches.set(t.identifier, { x: t.clientX, y: t.clientY })
       if (touches.size >= 2 && !gestureActive) {
         gestureActive = true
@@ -452,6 +467,12 @@ export default function FloorCanvas({ onCanvasSize }) {
       }
     }
     const onMove = (e) => {
+      // Palm rejection during pen use — swallow finger touchmove
+      if (penActiveRef.current && ![...e.changedTouches].some(isStylusTouch)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
       let updated = false
       for (const t of e.changedTouches) {
         if (touches.has(t.identifier)) {
@@ -496,6 +517,34 @@ export default function FloorCanvas({ onCanvasSize }) {
       }
     }
 
+    // === Apple Pencil / stylus tracking via PointerEvents ===
+    // PointerEvents fire alongside TouchEvents on iOS. We only use them to
+    // know when the pen is engaged so the touch handlers above can reject
+    // palm contact. Drag/select with the pencil itself flows through the
+    // existing single-touch fabric path.
+    const onPenDown = (e) => {
+      if (e.pointerType !== 'pen') return
+      penActiveRef.current = true
+      if (penReleaseTimerRef.current) {
+        clearTimeout(penReleaseTimerRef.current)
+        penReleaseTimerRef.current = null
+      }
+    }
+    const onPenUp = (e) => {
+      if (e.pointerType !== 'pen') return
+      // Hold the flag for a short tail so palm contact lingering after the
+      // pen lifts doesn't suddenly resume fabric drag/select.
+      if (penReleaseTimerRef.current) clearTimeout(penReleaseTimerRef.current)
+      penReleaseTimerRef.current = setTimeout(() => {
+        penActiveRef.current = false
+        penReleaseTimerRef.current = null
+      }, 300)
+    }
+    container.addEventListener('pointerdown', onPenDown)
+    container.addEventListener('pointerup', onPenUp)
+    container.addEventListener('pointercancel', onPenUp)
+    container.addEventListener('pointerleave', onPenUp)
+
     container.addEventListener('touchstart', onStart, { passive: false, capture: true })
     container.addEventListener('touchmove', onMove, { passive: false, capture: true })
     container.addEventListener('touchend', onEnd, { passive: false, capture: true })
@@ -510,6 +559,14 @@ export default function FloorCanvas({ onCanvasSize }) {
       container.removeEventListener('touchmove', onMove, true)
       container.removeEventListener('touchend', onEnd, true)
       container.removeEventListener('touchcancel', onEnd, true)
+      container.removeEventListener('pointerdown', onPenDown)
+      container.removeEventListener('pointerup', onPenUp)
+      container.removeEventListener('pointercancel', onPenUp)
+      container.removeEventListener('pointerleave', onPenUp)
+      if (penReleaseTimerRef.current) {
+        clearTimeout(penReleaseTimerRef.current)
+        penReleaseTimerRef.current = null
+      }
       container.style.touchAction = prevTouchAction
     }
   }, [])
