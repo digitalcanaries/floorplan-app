@@ -1,0 +1,19 @@
+{
+  "name": "Film Set Floor Plan",
+  "short_name": "Floor Plan",
+  "description": "Plan film/TV sets — drag scaled set rectangles onto a PDF blueprint, with rules and 3D walkthrough.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

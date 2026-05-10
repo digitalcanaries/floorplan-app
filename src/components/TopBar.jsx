@@ -48,6 +48,29 @@ export default function TopBar({ canvasSize }) {
   const { user } = useAuthStore()
   const [showHelp, setShowHelp] = useState(false)
   const [showPngMenu, setShowPngMenu] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Track fullscreen state so the toggle button label/icon stays accurate
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement))
+    document.addEventListener('fullscreenchange', handler)
+    document.addEventListener('webkitfullscreenchange', handler)
+    return () => {
+      document.removeEventListener('fullscreenchange', handler)
+      document.removeEventListener('webkitfullscreenchange', handler)
+    }
+  }, [])
+
+  const handleToggleFullscreen = () => {
+    const el = document.documentElement
+    if (!(document.fullscreenElement || document.webkitFullscreenElement)) {
+      if (el.requestFullscreen) el.requestFullscreen()
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen()
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen()
+    }
+  }
 
   // Flash the autosave indicator briefly when lastSaved changes
   useEffect(() => {
@@ -902,6 +925,12 @@ export default function TopBar({ canvasSize }) {
       <button onClick={() => setShowHelp(true)}
         className="px-2 py-1 bg-gray-700 hover:bg-indigo-600 rounded text-xs font-bold" title="Help & User Guide">
         ?
+      </button>
+
+      <button onClick={handleToggleFullscreen}
+        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen (hides browser chrome)'}>
+        {isFullscreen ? '⤓ Exit Full' : '⛶ Fullscreen'}
       </button>
 
       <div className="h-5 w-px bg-gray-600" />
