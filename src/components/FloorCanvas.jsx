@@ -264,8 +264,8 @@ export default function FloorCanvas({ onCanvasSize }) {
     drawingMode, drawingWallPoints, addDrawingPoint, cancelDrawing,
     breakDrawingChain, drawingWallSnap,
     pendingFitAll,
-    freehandStrokes, freehandDrawMode, freehandColor, freehandWidth,
-    addFreehandStroke,
+    freehandStrokes, freehandDrawMode, freehandEraseMode, freehandColor, freehandWidth,
+    addFreehandStroke, deleteFreehandStroke,
   } = useStore()
 
   // Auto-fit after project import
@@ -578,10 +578,12 @@ export default function FloorCanvas({ onCanvasSize }) {
   // Toggles fabric's isDrawingMode. When the user finishes a stroke,
   // capture its data and persist to the store, then drop the auto-added
   // fabric path so the dedicated render effect below owns the visuals.
+  // The Erase sub-mode (handled in the next effect) keeps draw mode on
+  // but disables the brush so taps can be interpreted as deletes instead.
   useEffect(() => {
     const fc = fabricRef.current
     if (!fc) return
-    if (!freehandDrawMode) {
+    if (!freehandDrawMode || freehandEraseMode) {
       fc.isDrawingMode = false
       fc.defaultCursor = 'default'
       return
@@ -612,7 +614,84 @@ export default function FloorCanvas({ onCanvasSize }) {
       fc.off('path:created', onPathCreated)
       fc.isDrawingMode = false
     }
-  }, [freehandDrawMode, freehandColor, freehandWidth, addFreehandStroke])
+  }, [freehandDrawMode, freehandEraseMode, freehandColor, freehandWidth, addFreehandStroke])
+
+  // === Freehand eraser — tap a stroke (or near it) to delete it ===
+  // Uses point-to-segment distance against the stroke's path commands so
+  // the hit area follows the line itself rather than the bounding box.
+  // The 12px hit margin is in screen pixels: divide by zoom so it stays
+  // generous when zoomed out and precise when zoomed in.
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    if (!freehandDrawMode || !freehandEraseMode) {
+      fc.defaultCursor = freehandDrawMode ? 'crosshair' : 'default'
+      return
+    }
+    fc.defaultCursor = 'crosshair'
+    fc.hoverCursor = 'crosshair'
+
+    const SCREEN_MARGIN_PX = 12
+
+    // Distance from point P to segment AB
+    const segDist = (px, py, ax, ay, bx, by) => {
+      const dx = bx - ax, dy = by - ay
+      const len2 = dx * dx + dy * dy
+      if (len2 === 0) return Math.hypot(px - ax, py - ay)
+      let t = ((px - ax) * dx + (py - ay) * dy) / len2
+      t = Math.max(0, Math.min(1, t))
+      const cx = ax + t * dx, cy = ay + t * dy
+      return Math.hypot(px - cx, py - cy)
+    }
+
+    const findStrokeAt = (sx, sy, marginScene) => {
+      const state = useStore.getState()
+      let bestId = null
+      let bestDist = marginScene
+      for (const s of state.freehandStrokes) {
+        if (!s.path?.length) continue
+        // Path commands are in path-local coords; offset by left/top.
+        // (PencilBrush stores absolute scene-space coords in the commands
+        // and sets left/top to 0, so this falls out cleanly either way.)
+        const ox = s.left || 0, oy = s.top || 0
+        let prev = null
+        for (const cmd of s.path) {
+          const op = cmd[0]
+          let x = null, y = null
+          if (op === 'M' || op === 'L') { x = cmd[1]; y = cmd[2] }
+          else if (op === 'Q') { x = cmd[3]; y = cmd[4] }
+          else if (op === 'C') { x = cmd[5]; y = cmd[6] }
+          if (x === null) continue
+          const ax = ox + x, ay = oy + y
+          if (prev) {
+            const d = segDist(sx, sy, prev.x, prev.y, ax, ay)
+            if (d < bestDist) { bestDist = d; bestId = s.id }
+          }
+          prev = { x: ax, y: ay }
+        }
+      }
+      return bestId
+    }
+
+    const onCanvasPointer = (e) => {
+      // Use scene-space hit testing so pan/zoom don't break the math.
+      const pt = fc.getScenePoint ? fc.getScenePoint(e) : fc.getPointer(e)
+      const marginScene = SCREEN_MARGIN_PX / fc.getZoom()
+      const id = findStrokeAt(pt.x, pt.y, marginScene)
+      if (id != null) {
+        deleteFreehandStroke(id)
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+
+    const upper = fc.upperCanvasEl
+    upper.addEventListener('pointerdown', onCanvasPointer, { capture: true })
+    return () => {
+      upper.removeEventListener('pointerdown', onCanvasPointer, true)
+      fc.hoverCursor = 'move'
+    }
+  }, [freehandDrawMode, freehandEraseMode, deleteFreehandStroke])
 
   // Render freehand strokes — rebuild from store so undo/redo, load, and
   // import all flow through one path. Strokes sit above sets but are not

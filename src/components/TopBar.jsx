@@ -26,6 +26,7 @@ export default function TopBar({ canvasSize }) {
     pdfLayers, activePdfLayerId, pdfOriginalSize, setPdfScale, unit,
     lockAllToPdf, unlockAllFromPdf, pdfImage,
     freehandDrawMode, setFreehandDrawMode,
+    freehandEraseMode, setFreehandEraseMode,
     freehandColor, setFreehandColor,
     freehandWidth, setFreehandWidth,
     freehandStrokes, clearFreehandStrokes,
@@ -610,7 +611,18 @@ export default function TopBar({ canvasSize }) {
       </button>
       {freehandDrawMode && (
         <>
-          {['#ef4444', '#facc15', '#3b82f6', '#22c55e', '#000000', '#ffffff'].map(c => (
+          <button
+            onClick={() => setFreehandEraseMode(!freehandEraseMode)}
+            title={freehandEraseMode ? 'Switch back to drawing' : 'Tap a stroke to erase it'}
+            className={`px-2 py-1 rounded text-xs ${
+              freehandEraseMode
+                ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+            }`}
+          >
+            {freehandEraseMode ? '⌫ Erasing' : '⌫ Erase'}
+          </button>
+          {!freehandEraseMode && ['#ef4444', '#facc15', '#3b82f6', '#22c55e', '#000000', '#ffffff'].map(c => (
             <button
               key={c}
               onClick={() => setFreehandColor(c)}
@@ -621,19 +633,21 @@ export default function TopBar({ canvasSize }) {
               style={{ backgroundColor: c }}
             />
           ))}
-          <select
-            value={freehandWidth}
-            onChange={e => setFreehandWidth(parseInt(e.target.value))}
-            className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
-            title="Stroke width"
-          >
-            <option value={1}>1 px</option>
-            <option value={2}>2 px</option>
-            <option value={3}>3 px</option>
-            <option value={5}>5 px</option>
-            <option value={8}>8 px</option>
-            <option value={12}>12 px</option>
-          </select>
+          {!freehandEraseMode && (
+            <select
+              value={freehandWidth}
+              onChange={e => setFreehandWidth(parseInt(e.target.value))}
+              className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
+              title="Stroke width"
+            >
+              <option value={1}>1 px</option>
+              <option value={2}>2 px</option>
+              <option value={3}>3 px</option>
+              <option value={5}>5 px</option>
+              <option value={8}>8 px</option>
+              <option value={12}>12 px</option>
+            </select>
+          )}
         </>
       )}
       {freehandStrokes.length > 0 && (

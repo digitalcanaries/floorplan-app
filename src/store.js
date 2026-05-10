@@ -221,6 +221,7 @@ const useStore = create((set, get) => ({
   freehandStrokes: [],
   nextStrokeId: 1,
   freehandDrawMode: false,                              // transient UI state
+  freehandEraseMode: false,                             // transient sub-mode within draw mode
   freehandColor: saved?.freehandColor || '#ef4444',     // red default — high contrast on plans
   freehandWidth: saved?.freehandWidth || 3,
 
@@ -1218,7 +1219,8 @@ const useStore = create((set, get) => ({
     set({ freehandStrokes: [] })
     get().autosave()
   },
-  setFreehandDrawMode: (on) => set({ freehandDrawMode: !!on }),
+  setFreehandDrawMode: (on) => set({ freehandDrawMode: !!on, freehandEraseMode: false }),
+  setFreehandEraseMode: (on) => set({ freehandEraseMode: !!on }),
   setFreehandColor: (color) => { set({ freehandColor: color }); get().autosave() },
   setFreehandWidth: (width) => { set({ freehandWidth: width }); get().autosave() },
 
@@ -1881,6 +1883,7 @@ const useStore = create((set, get) => ({
       freehandStrokes: [],
       nextStrokeId: 1,
       freehandDrawMode: false,
+      freehandEraseMode: false,
       drawingMode: null,
       drawingWallPoints: [],
       layerVisibility: {},
