@@ -395,11 +395,16 @@ export default memo(function SetsTab() {
           <span className={`text-[9px] ${CATEGORY_COLORS[s.category] || 'text-gray-500'}`}>{s.category}</span>
         )}
         {WALL_CATEGORIES.includes(s.category) ? (
-          <span className="text-[10px] text-gray-400" title={`W:${formatInUnit(s.width, inputUnit)} × H:${formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)} × D:${formatInUnit(s.height, inputUnit)}`}>
+          <span className="text-[10px] text-gray-400" title={`W:${formatInUnit(s.width, inputUnit)} × H:${formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)} × D:${formatInUnit(s.height, inputUnit)} — face ${(s.width * (s.wallHeight || defaultWallHeight)).toFixed(0)} ft²`}>
             {formatInUnit(s.width, inputUnit)}×{formatInUnit(s.wallHeight || defaultWallHeight, inputUnit)}×{formatInUnit(s.height, inputUnit)}
           </span>
         ) : (
-          <span className="text-[10px] text-gray-400">{formatInUnit(s.width, inputUnit)}×{formatInUnit(s.height, inputUnit)}</span>
+          <span className="text-[10px] text-gray-400" title={`Floor area ${(s.width * s.height).toFixed(s.width * s.height >= 10 ? 0 : 1)} ft²`}>
+            {formatInUnit(s.width, inputUnit)}×{formatInUnit(s.height, inputUnit)}
+            <span className="text-gray-500 ml-1">
+              · {(s.width * s.height).toFixed(s.width * s.height >= 10 ? 0 : 1)}&nbsp;ft²
+            </span>
+          </span>
         )}
         {WALL_CATEGORIES.includes(s.category) && (
           <button onClick={(e) => {
