@@ -280,6 +280,7 @@ const useStore = create((set, get) => ({
   pendingFitAll: false,
   calibrationPoints: [],
   selectedSetId: null,
+  editingSetId: null, // id of set whose Edit modal is open, or null
 
   // PDF Layer actions
   addPdfLayer: (name, image, originalWidth, originalHeight) => {
@@ -705,6 +706,7 @@ const useStore = create((set, get) => ({
 
   // Sidebar
   setSidebarTab: (t) => set({ sidebarTab: t }),
+  setEditingSetId: (id) => set({ editingSetId: id }),
   setSelectedSetId: (id) => set({ selectedSetId: id }),
 
   // Set CRUD

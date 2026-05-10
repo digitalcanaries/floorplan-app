@@ -7,6 +7,7 @@ import FloorCanvas from './components/FloorCanvas.jsx'
 import QuickActionsBar from './components/QuickActionsBar.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import ChangePasswordModal from './components/ChangePasswordModal.jsx'
+import EditSetModal from './components/EditSetModal.jsx'
 
 const Scene3D = lazy(() => import('./components/Scene3D.jsx'))
 
@@ -139,6 +140,7 @@ function App() {
           <FloorCanvas onCanvasSize={setCanvasSize} />
         )}
       </div>
+      <EditSetModal />
     </div>
   )
 }

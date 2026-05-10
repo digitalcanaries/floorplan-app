@@ -39,10 +39,12 @@ const ACTION_REGISTRY = {
   },
   'edit': {
     label: '✎ Edit',
-    title: 'Edit set properties (opens sidebar)',
+    title: 'Edit set properties',
     handler: (id, store) => {
-      store.setSidebarTab('sets')
-      // SetsTab auto-scrolls to selectedSetId
+      // Open the Edit modal for this set. Works on iPad where the
+      // sidebar is usually collapsed (the old behavior of switching
+      // sidebarTab was a no-op when the sidebar wasn't visible).
+      store.setEditingSetId(id)
     },
   },
   'pin-set-to-pdf': {
