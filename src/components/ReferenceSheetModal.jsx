@@ -20,6 +20,12 @@ const STATUSES = ['to-source', 'owned', 'rented', 'purchased', 'returned']
 function isImage(mime) { return (mime || '').startsWith('image/') }
 function isPdf(mime) { return (mime || '') === 'application/pdf' }
 
+// Minimal HTML escaping for the print sheet doc we hand to window.open.
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/'/g, '&#39;') }
+
 // Load a file by id with auth, return object URL. Caller must revoke later.
 async function fetchAuthedObjectURL(fileId) {
   const token = localStorage.getItem('floorplan-token')
@@ -78,6 +84,7 @@ export default function ReferenceSheetModal() {
   const target = useStore(s => s.referencesPanelTarget)
   const setTarget = useStore(s => s.setReferencesPanelTarget)
   const sets = useStore(s => s.sets)
+  const projectName = useStore(s => s.projectName)
   const uploadFile = useStore(s => s.uploadFile)
   const listRefs = useStore(s => s.listRefs)
   const addRef = useStore(s => s.addRef)
@@ -86,30 +93,23 @@ export default function ReferenceSheetModal() {
   const deleteFile = useStore(s => s.deleteFile)
 
   const [refs, setRefs] = useState([])
-  const [filesById, setFilesById] = useState({}) // id -> { mime_type, filename }
   const [tab, setTab] = useState('document') // 'document' | 'paint' | 'furniture'
   const [uploading, setUploading] = useState(false)
-  const [editingRefId, setEditingRefId] = useState(null)
   const [error, setError] = useState(null)
+  const [printing, setPrinting] = useState(false)
   const fileInputRef = useRef(null)
 
   const setSet = target !== null && target !== 'project' ? sets.find(s => s.id === target) : null
   const setIdParam = target === 'project' ? null : target
 
-  // Load refs whenever the target changes
+  // Load refs whenever the target changes. The refs endpoint now returns
+  // file_mime_type / file_filename via a LEFT JOIN so thumbnails branch
+  // correctly without a second request per attachment.
   useEffect(() => {
     if (target === null) return
     setError(null)
     listRefs({ setId: setIdParam })
-      .then(rows => {
-        setRefs(rows)
-        // Cache file metadata for thumbs (we already have it via the join
-        // would be cleaner, but refs only have file_id — assume present.
-        // We'll lazily fetch as the thumbs render.)
-        const byId = {}
-        for (const r of rows) if (r.file_id) byId[r.file_id] = { mime_type: null, filename: r.label }
-        setFilesById(byId)
-      })
+      .then(rows => setRefs(rows))
       .catch(e => setError(e.message))
   }, [target, listRefs])
 
@@ -151,7 +151,6 @@ export default function ReferenceSheetModal() {
           file_id: uploaded.id,
           category: uploaded.mime_type?.startsWith('image/') ? 'photo' : 'drawing',
         })
-        setFilesById(prev => ({ ...prev, [uploaded.id]: uploaded }))
       }
       await refresh()
     } catch (err) {
@@ -159,6 +158,156 @@ export default function ReferenceSheetModal() {
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // Print sheet — build a self-contained HTML doc with all images embedded
+  // as object URLs (auth-fetched in this window so the print tab doesn't
+  // need credentials), open it in a new window, and trigger window.print().
+  // Images are inlined; PDFs render as a tile with the filename.
+  const handlePrintSheet = async () => {
+    setPrinting(true)
+    setError(null)
+    try {
+      // Pre-fetch image blobs so the print window can show them without auth.
+      const blobUrls = {}
+      for (const r of refs) {
+        if (!r.file_id) continue
+        if (!(r.file_mime_type || '').startsWith('image/')) continue
+        try {
+          blobUrls[r.file_id] = await fetchAuthedObjectURL(r.file_id)
+        } catch {}
+      }
+
+      const today = new Date().toLocaleDateString()
+      const heading = setSet ? setSet.name : 'Project'
+
+      const docHTML = documentRefs.map(r => {
+        const url = r.file_id ? blobUrls[r.file_id] : null
+        const isImg = (r.file_mime_type || '').startsWith('image/')
+        const cell = url && isImg
+          ? `<img src="${url}" alt="${escapeHtml(r.label || '')}" />`
+          : `<div class="placeholder">${isPdf(r.file_mime_type) ? 'PDF' : 'file'}</div>`
+        return `<figure>
+          ${cell}
+          <figcaption>${escapeHtml(r.label || 'Untitled')}${r.category ? ' · ' + escapeHtml(r.category) : ''}</figcaption>
+        </figure>`
+      }).join('')
+
+      const paintHTML = paintRefs.map(r => `
+        <tr>
+          <td><div class="swatch" style="background:${escapeAttr(r.paint_color || '#ccc')}"></div></td>
+          <td>${escapeHtml(r.label || '')}</td>
+          <td>${escapeHtml(r.paint_brand || '')}</td>
+          <td>${escapeHtml(r.paint_code || '')}</td>
+          <td>${escapeHtml(r.paint_finish || '')}</td>
+          <td>${escapeHtml(r.notes || '')}</td>
+        </tr>
+      `).join('')
+
+      const furnitureHTML = furnitureRefs.map(r => {
+        const url = r.file_id ? blobUrls[r.file_id] : null
+        const isImg = (r.file_mime_type || '').startsWith('image/')
+        const photo = url && isImg
+          ? `<img src="${url}" alt="" />`
+          : `<div class="placeholder">no photo</div>`
+        return `<tr>
+          <td class="photo-cell">${photo}</td>
+          <td>
+            <strong>${escapeHtml(r.label || '')}</strong>
+            ${r.furniture_dimensions ? `<div class="meta">${escapeHtml(r.furniture_dimensions)}</div>` : ''}
+            ${r.furniture_source ? `<div class="meta">from: ${escapeHtml(r.furniture_source)}</div>` : ''}
+            ${r.furniture_url ? `<div class="meta">${escapeHtml(r.furniture_url)}</div>` : ''}
+            ${r.notes ? `<div class="meta">${escapeHtml(r.notes)}</div>` : ''}
+          </td>
+          <td class="status-cell">${escapeHtml(r.furniture_status || '')}</td>
+        </tr>`
+      }).join('')
+
+      const html = `<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<title>Reference Sheet — ${escapeHtml(heading)}</title>
+<style>
+  @page { margin: 0.5in; }
+  body { font-family: -apple-system, system-ui, sans-serif; color: #111; margin: 0; padding: 24px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .subtitle { color: #555; font-size: 11px; margin-bottom: 18px; }
+  h2 { margin-top: 26px; margin-bottom: 8px; font-size: 14px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  section { page-break-inside: avoid; margin-bottom: 12px; }
+  /* Documents grid */
+  .docs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  figure { margin: 0; page-break-inside: avoid; }
+  figure img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border: 1px solid #ddd; border-radius: 3px; }
+  figure .placeholder { aspect-ratio: 4/3; background: #eee; border: 1px solid #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #666; font-size: 12px; }
+  figcaption { font-size: 10px; color: #444; margin-top: 4px; }
+  /* Paint table */
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+  th { background: #f5f5f5; font-weight: 600; font-size: 10px; text-transform: uppercase; color: #555; }
+  .swatch { width: 28px; height: 28px; border: 1px solid #999; border-radius: 3px; }
+  /* Furniture */
+  .photo-cell { width: 80px; }
+  .photo-cell img { width: 72px; height: 72px; object-fit: cover; border: 1px solid #ddd; border-radius: 3px; }
+  .photo-cell .placeholder { width: 72px; height: 72px; background: #eee; border: 1px solid #ddd; border-radius: 3px; display: flex; align-items: center; justify-content: center; color: #888; font-size: 9px; }
+  .status-cell { width: 80px; text-transform: uppercase; font-size: 9px; color: #555; }
+  .meta { font-size: 10px; color: #666; margin-top: 2px; }
+  .empty { color: #888; font-style: italic; font-size: 11px; padding: 6px 0; }
+</style>
+</head><body>
+<h1>${escapeHtml(heading)}</h1>
+<div class="subtitle">Reference Sheet · ${escapeHtml(projectName || 'Project')} · ${escapeHtml(today)}</div>
+
+${documentRefs.length > 0 ? `
+<section>
+  <h2>Drawings &amp; Photos</h2>
+  <div class="docs">${docHTML}</div>
+</section>` : ''}
+
+${paintRefs.length > 0 ? `
+<section>
+  <h2>Paint</h2>
+  <table>
+    <thead><tr><th></th><th>Color</th><th>Brand</th><th>Code</th><th>Finish</th><th>Notes</th></tr></thead>
+    <tbody>${paintHTML}</tbody>
+  </table>
+</section>` : ''}
+
+${furnitureRefs.length > 0 ? `
+<section>
+  <h2>Furniture &amp; Assets</h2>
+  <table>
+    <tbody>${furnitureHTML}</tbody>
+  </table>
+</section>` : ''}
+
+${refs.length === 0 ? '<div class="empty">No references on this sheet.</div>' : ''}
+</body></html>`
+
+      const win = window.open('', '_blank')
+      if (!win) {
+        alert('Popup blocked — allow popups for this site to print the reference sheet.')
+        // Revoke any blobs we won't use
+        Object.values(blobUrls).forEach(URL.revokeObjectURL)
+        return
+      }
+      win.document.open()
+      win.document.write(html)
+      win.document.close()
+      // Wait for images to load, then print. Listen on the new window.
+      const triggerPrint = () => {
+        try { win.focus(); win.print() } catch {}
+        // Revoke blob URLs after a delay so print can use them first
+        setTimeout(() => Object.values(blobUrls).forEach(URL.revokeObjectURL), 30_000)
+      }
+      // If the doc finished writing synchronously and images are quick,
+      // fire after a small timeout; otherwise wait for load.
+      if (win.document.readyState === 'complete') setTimeout(triggerPrint, 300)
+      else win.addEventListener('load', () => setTimeout(triggerPrint, 300))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setPrinting(false)
     }
   }
 
@@ -214,15 +363,25 @@ export default function ReferenceSheetModal() {
         onClick={(e) => e.stopPropagation()}>
 
         {/* Header */}
-        <div className="px-4 py-3 flex items-center justify-between border-b border-gray-700">
-          <h2 className="text-base font-semibold text-white flex items-center gap-2">
+        <div className="px-4 py-3 flex items-center justify-between border-b border-gray-700 gap-2">
+          <h2 className="text-base font-semibold text-white flex items-center gap-2 min-w-0">
             {setSet && (
-              <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: setSet.color }} />
+              <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: setSet.color }} />
             )}
-            📎 {title}
+            <span className="truncate">📎 {title}</span>
           </h2>
-          <button onClick={() => setTarget(null)}
-            className="text-gray-400 hover:text-white text-2xl leading-none px-2">×</button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handlePrintSheet}
+              disabled={printing || refs.length === 0}
+              className="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-gray-200 rounded text-xs"
+              title="Open a printable reference sheet with all docs/paint/furniture"
+            >
+              🖨 {printing ? 'Preparing…' : 'Print Sheet'}
+            </button>
+            <button onClick={() => setTarget(null)}
+              className="text-gray-400 hover:text-white text-2xl leading-none px-2">×</button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -257,8 +416,6 @@ export default function ReferenceSheetModal() {
           {tab === 'document' && (
             <DocumentsTab
               refs={documentRefs}
-              filesById={filesById}
-              setFilesById={setFilesById}
               onUpload={() => fileInputRef.current?.click()}
               onUpdate={handleUpdate}
               onDelete={handleDelete}
@@ -269,8 +426,6 @@ export default function ReferenceSheetModal() {
           {tab === 'paint' && (
             <PaintTab
               refs={paintRefs}
-              filesById={filesById}
-              setFilesById={setFilesById}
               onAdd={handleAddPaint}
               onUpdate={handleUpdate}
               onDelete={handleDelete}
@@ -278,20 +433,15 @@ export default function ReferenceSheetModal() {
                 try {
                   const uploaded = await uploadFile(file)
                   await updateRef(refId, { file_id: uploaded.id })
-                  setFilesById(prev => ({ ...prev, [uploaded.id]: uploaded }))
                   await refresh()
                 } catch (e) { setError(e.message) }
               }}
               onOpen={openFileInTab}
-              editingRefId={editingRefId}
-              setEditingRefId={setEditingRefId}
             />
           )}
           {tab === 'furniture' && (
             <FurnitureTab
               refs={furnitureRefs}
-              filesById={filesById}
-              setFilesById={setFilesById}
               onAdd={handleAddFurniture}
               onUpdate={handleUpdate}
               onDelete={handleDelete}
@@ -299,13 +449,10 @@ export default function ReferenceSheetModal() {
                 try {
                   const uploaded = await uploadFile(file)
                   await updateRef(refId, { file_id: uploaded.id })
-                  setFilesById(prev => ({ ...prev, [uploaded.id]: uploaded }))
                   await refresh()
                 } catch (e) { setError(e.message) }
               }}
               onOpen={openFileInTab}
-              editingRefId={editingRefId}
-              setEditingRefId={setEditingRefId}
             />
           )}
         </div>
@@ -352,7 +499,7 @@ function DocumentsTab({ refs, onUpload, onUpdate, onDelete, onOpen, uploading })
                 onClick={() => r.file_id && onOpen(r.file_id)}
                 className="block w-full aspect-square overflow-hidden bg-gray-700"
               >
-                <AuthedFileThumb fileId={r.file_id} mime={null} filename={r.label} className="w-full h-full" />
+                <AuthedFileThumb fileId={r.file_id} mime={r.file_mime_type} filename={r.file_filename || r.label} className="w-full h-full" />
               </button>
               <div className="p-2">
                 <input
@@ -462,7 +609,7 @@ function PaintTab({ refs, onAdd, onUpdate, onDelete, onUploadSwatch, onOpen }) {
                       onClick={() => onOpen(r.file_id)}
                       className="w-20 h-20 rounded border border-gray-700 overflow-hidden bg-gray-800"
                     >
-                      <AuthedFileThumb fileId={r.file_id} mime={null} filename={r.label} className="w-full h-full" />
+                      <AuthedFileThumb fileId={r.file_id} mime={r.file_mime_type} filename={r.file_filename || r.label} className="w-full h-full" />
                     </button>
                     <button onClick={() => onUpdate(r.id, { file_id: null })}
                       className="text-[9px] text-gray-500 hover:text-red-400">
@@ -522,7 +669,7 @@ function FurnitureTab({ refs, onAdd, onUpdate, onDelete, onUploadPhoto, onOpen }
                       onClick={() => onOpen(r.file_id)}
                       className="w-24 h-24 rounded border border-gray-700 overflow-hidden bg-gray-800"
                     >
-                      <AuthedFileThumb fileId={r.file_id} mime={null} filename={r.label} className="w-full h-full" />
+                      <AuthedFileThumb fileId={r.file_id} mime={r.file_mime_type} filename={r.file_filename || r.label} className="w-full h-full" />
                     </button>
                     <button onClick={() => onUpdate(r.id, { file_id: null })}
                       className="text-[9px] text-gray-500 hover:text-red-400">

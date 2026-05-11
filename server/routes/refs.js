@@ -28,13 +28,26 @@ router.get('/projects/:pid/refs', (req, res) => {
   const project = getOwnedProject(req.user.id, req.params.pid)
   if (!project) return res.status(404).json({ error: 'Project not found' })
 
+  // LEFT JOIN files so the client knows the mime type for each attachment
+  // without a second round-trip per ref (the modal's thumbnails branch on it).
+  const baseSql = `
+    SELECT
+      r.*,
+      f.mime_type AS file_mime_type,
+      f.filename AS file_filename,
+      f.size_bytes AS file_size_bytes
+    FROM refs r
+    LEFT JOIN files f ON f.id = r.file_id
+    WHERE r.project_id = ?
+  `
+
   let rows
   if (req.query.set_id === 'null' || req.query.set_id === 'project') {
-    rows = db.prepare('SELECT * FROM refs WHERE project_id = ? AND set_id IS NULL ORDER BY kind, sort_order, id').all(project.id)
+    rows = db.prepare(baseSql + ' AND r.set_id IS NULL ORDER BY r.kind, r.sort_order, r.id').all(project.id)
   } else if (req.query.set_id) {
-    rows = db.prepare('SELECT * FROM refs WHERE project_id = ? AND set_id = ? ORDER BY kind, sort_order, id').all(project.id, parseInt(req.query.set_id))
+    rows = db.prepare(baseSql + ' AND r.set_id = ? ORDER BY r.kind, r.sort_order, r.id').all(project.id, parseInt(req.query.set_id))
   } else {
-    rows = db.prepare('SELECT * FROM refs WHERE project_id = ? ORDER BY set_id, kind, sort_order, id').all(project.id)
+    rows = db.prepare(baseSql + ' ORDER BY r.set_id, r.kind, r.sort_order, r.id').all(project.id)
   }
   res.json(rows)
 })

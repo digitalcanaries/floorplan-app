@@ -54,6 +54,26 @@ const ACTION_REGISTRY = {
       store.setReferencesPanelTarget(id)
     },
   },
+  'add-paint': {
+    label: '🎨 +Paint',
+    title: 'Quick-add a paint chip to this set\'s references',
+    handler: async (id, store) => {
+      try {
+        await store.addRef({
+          set_id: id,
+          kind: 'paint',
+          label: 'New paint',
+          paint_color: '#cccccc',
+          paint_finish: 'eggshell',
+        })
+      } catch (e) {
+        alert('Could not add paint: ' + (e?.message || 'project not saved to server yet?'))
+        return
+      }
+      // Jump to the references modal so the user can fill in the details
+      store.setReferencesPanelTarget(id)
+    },
+  },
   'pin-set-to-pdf': {
     label: '📌 Set→PDF',
     title: 'Pin this set to master PDF (set follows when PDF moves)',
@@ -154,7 +174,7 @@ const ACTION_REGISTRY = {
 
 const DEFAULT_ACTIONS = [
   'rotate-cw-90', 'rotate-ccw-90', 'rotate-plus-1', 'rotate-minus-1',
-  'edit', 'references', 'pin-set-to-pdf', 'pin-pdf-to-set', 'duplicate', 'delete',
+  'edit', 'references', 'add-paint', 'pin-set-to-pdf', 'pin-pdf-to-set', 'duplicate', 'delete',
 ]
 
 const PREFS_KEY = 'floorplan-quick-actions'
