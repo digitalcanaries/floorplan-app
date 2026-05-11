@@ -8,6 +8,7 @@ import QuickActionsBar from './components/QuickActionsBar.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import ChangePasswordModal from './components/ChangePasswordModal.jsx'
 import EditSetModal from './components/EditSetModal.jsx'
+import ReferenceSheetModal from './components/ReferenceSheetModal.jsx'
 
 const Scene3D = lazy(() => import('./components/Scene3D.jsx'))
 
@@ -22,6 +23,7 @@ function App() {
   const loadLatestProject = useStore(s => s.loadLatestProject)
   const projectName = useStore(s => s.projectName)
   const lastSaved = useStore(s => s.lastSaved)
+  const setReferencesPanelTarget = useStore(s => s.setReferencesPanelTarget)
   const [canvasSize, setCanvasSize] = useState({ w: 1200, h: 800 })
   const [bootStatus, setBootStatus] = useState('idle') // 'idle' | 'loading' | 'ready' | 'empty' | 'failed'
   const [bootMessage, setBootMessage] = useState(null)
@@ -122,6 +124,15 @@ function App() {
               saved {new Date(lastSaved).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
+          {/* Project-level references — mood boards, script, anything not
+              tied to a specific set. */}
+          <button
+            onClick={() => setReferencesPanelTarget('project')}
+            title="Project-wide references — photos / PDFs / paint / furniture not tied to one set"
+            className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-[10px] leading-none"
+          >
+            📎 Project Refs
+          </button>
           {/* Refresh — pulls fresh bundle + project from the server in one tap.
               Avoids the logout/login dance when iPad is showing stale data. */}
           <button
@@ -152,6 +163,7 @@ function App() {
         )}
       </div>
       <EditSetModal />
+      <ReferenceSheetModal />
     </div>
   )
 }

@@ -1655,6 +1655,91 @@ const useStore = create((set, get) => ({
   getServerProjectId: () => loadServerProjectId(),
   setServerProjectId: (id) => saveServerProjectId(id),
 
+  // === Reference materials (documents, paint, furniture) ===
+  // Files are uploaded via multipart, then a 'ref' row links the file to
+  // a set (or to the project, set_id null) with kind=document/paint/furniture.
+
+  // Upload a file. Returns { id, filename, mime_type, size_bytes }.
+  uploadFile: async (file) => {
+    const token = localStorage.getItem('floorplan-token')
+    if (!token) throw new Error('Not signed in')
+    const fd = new FormData()
+    fd.append('file', file)
+    const resp = await fetch('/api/files', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: fd,
+    })
+    if (!resp.ok) throw new Error('Upload failed: ' + resp.status)
+    return await resp.json()
+  },
+
+  deleteFile: async (fileId) => {
+    const token = localStorage.getItem('floorplan-token')
+    if (!token) return false
+    const resp = await fetch(`/api/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    return resp.ok
+  },
+
+  // List refs for the current project. setId=null lists project-level refs.
+  // Omit setId entirely to list ALL refs in the project.
+  listRefs: async ({ setId } = {}) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) return []
+    const qs = setId === null ? '?set_id=null' : setId !== undefined ? `?set_id=${setId}` : ''
+    const resp = await fetch(`/api/projects/${projectId}/refs${qs}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (!resp.ok) return []
+    return await resp.json()
+  },
+
+  addRef: async (payload) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) throw new Error('Need server project')
+    const resp = await fetch(`/api/projects/${projectId}/refs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok) throw new Error('Create reference failed: ' + resp.status)
+    return await resp.json()
+  },
+
+  updateRef: async (refId, payload) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) throw new Error('Need server project')
+    const resp = await fetch(`/api/projects/${projectId}/refs/${refId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok) throw new Error('Update reference failed: ' + resp.status)
+    return await resp.json()
+  },
+
+  deleteRef: async (refId) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) return false
+    const resp = await fetch(`/api/projects/${projectId}/refs/${refId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    return resp.ok
+  },
+
+  // UI state — which set's references panel is open (null = closed,
+  // 'project' = project-level refs panel).
+  referencesPanelTarget: null, // null | number (setId) | 'project'
+  setReferencesPanelTarget: (target) => set({ referencesPanelTarget: target }),
+
   // === Version history ===
   // saveVersion — POST a snapshot of the current project state. `kind`
   // distinguishes auto-versions (triggered by annotation edits) from

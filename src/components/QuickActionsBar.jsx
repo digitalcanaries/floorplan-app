@@ -47,6 +47,13 @@ const ACTION_REGISTRY = {
       store.setEditingSetId(id)
     },
   },
+  'references': {
+    label: '📎 Refs',
+    title: 'Open this set\'s reference sheet (photos, drawings, paint, furniture)',
+    handler: (id, store) => {
+      store.setReferencesPanelTarget(id)
+    },
+  },
   'pin-set-to-pdf': {
     label: '📌 Set→PDF',
     title: 'Pin this set to master PDF (set follows when PDF moves)',
@@ -147,7 +154,7 @@ const ACTION_REGISTRY = {
 
 const DEFAULT_ACTIONS = [
   'rotate-cw-90', 'rotate-ccw-90', 'rotate-plus-1', 'rotate-minus-1',
-  'edit', 'pin-set-to-pdf', 'pin-pdf-to-set', 'duplicate', 'delete',
+  'edit', 'references', 'pin-set-to-pdf', 'pin-pdf-to-set', 'duplicate', 'delete',
 ]
 
 const PREFS_KEY = 'floorplan-quick-actions'

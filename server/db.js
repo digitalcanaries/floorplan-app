@@ -48,6 +48,50 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS idx_versions_project ON project_versions(project_id, id DESC);
+
+  -- Uploaded files (PDFs / photos / etc). One row per blob on disk.
+  CREATE TABLE IF NOT EXISTS files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    storage_key TEXT NOT NULL UNIQUE,
+    mime_type TEXT,
+    size_bytes INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  -- References: a unified table for documents / paint / furniture / other
+  -- reference materials. Each row belongs to a project; if set_id is set,
+  -- the reference is scoped to that set, otherwise it's project-level.
+  -- The 'kind' column drives which other columns are meaningful.
+  CREATE TABLE IF NOT EXISTS refs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    set_id INTEGER,                   -- null = project-level, otherwise scoped to that set
+    kind TEXT NOT NULL,               -- 'document' | 'paint' | 'furniture'
+    label TEXT,                       -- display name
+    category TEXT,                    -- free-form sub-grouping ('drawing','photo','swatch',...)
+    file_id INTEGER,                  -- for documents/photos and paint/furniture images
+    -- Paint metadata
+    paint_brand TEXT,
+    paint_code TEXT,
+    paint_color TEXT,                 -- hex like '#FF5733'
+    paint_finish TEXT,                -- 'matte'|'eggshell'|'satin'|'semi-gloss'|'gloss'
+    -- Furniture metadata
+    furniture_url TEXT,
+    furniture_status TEXT,            -- 'owned'|'to-source'|'rented'|'purchased'
+    furniture_dimensions TEXT,
+    furniture_source TEXT,
+    -- Common
+    notes TEXT,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_refs_project_set ON refs(project_id, set_id, kind);
 `)
 
 // Component types library

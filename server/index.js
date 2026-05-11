@@ -7,6 +7,8 @@ import authRoutes from './routes/auth.js'
 import projectRoutes from './routes/projects.js'
 import adminRoutes from './routes/admin.js'
 import componentRoutes from './routes/components.js'
+import fileRoutes from './routes/files.js'
+import refRoutes from './routes/refs.js'
 
 // Import db to ensure tables are created on startup
 import './db.js'
@@ -23,6 +25,10 @@ app.use('/api', authRoutes)
 app.use('/api/projects', projectRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/components', componentRoutes)
+app.use('/api/files', fileRoutes)
+// References live under /api/projects/:pid/refs but the router is split out
+// for clarity. Mount at /api so it can own the full path including the pid.
+app.use('/api', refRoutes)
 
 // Serve static frontend (Vite build output)
 const distPath = path.join(__dirname, '..', 'dist')
