@@ -347,7 +347,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     gridVisible, snapToGrid, snapToSets, gridSize,
     labelsVisible, labelMode, labelFontSize: globalLabelFontSize, labelColor: globalLabelColor, showOverlaps,
     sets, addSet, updateSet, selectedSetId, deleteSet,
-    fitOutlierIds, multiSelected,
+    fitOutlierIds, multiSelected, artboards,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
     unit, viewMode,
@@ -548,7 +548,8 @@ export default function FloorCanvas({ onCanvasSize }) {
       if (e.touches || e.pointerType === 'touch') return            // leave touch to gesture handler
       if (useStore.getState().drawingMode) return                   // mid-draw
       const tgt = opt.target
-      if (tgt && tgt.name && tgt.name.startsWith(SET_PREFIX)) return // dragging a set = move
+      // dragging a set = move; clicking an artboard chip = handled elsewhere
+      if (tgt && tgt.name && (tgt.name.startsWith(SET_PREFIX) || tgt.name.startsWith('artboard-'))) return
       const p = scenePt(e)
       marqueeRef.current = { active: true, x0: p.x, y0: p.y, moved: false, rect: null, left: p.x, top: p.y, w: 0, h: 0 }
     }
@@ -2336,6 +2337,72 @@ export default function FloorCanvas({ onCanvasSize }) {
   useEffect(() => {
     syncSets()
   }, [syncSets])
+
+  // === Artboard frames — each board draws a dashed frame around the bounding
+  // box of its member sets (set.boardId) plus a clickable title chip. Placed
+  // after syncSets so the title chip layers above the set shapes. The frame is
+  // purely derived from member positions, so moving the members moves the frame.
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    fc.getObjects().filter(o => o.name?.startsWith('artboard-')).forEach(o => fc.remove(o))
+    const ppu = pixelsPerUnit
+    for (const board of (artboards || [])) {
+      const members = sets.filter(s => s.boardId === board.id && s.onPlan !== false && !s.hidden)
+      if (!members.length) continue
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const s of members) {
+        const wPx = s.width * ppu, hPx = s.height * ppu
+        const isRot = (s.rotation || 0) % 180 !== 0
+        const sw = isRot ? hPx : wPx, sh = isRot ? wPx : hPx
+        minX = Math.min(minX, s.x); minY = Math.min(minY, s.y)
+        maxX = Math.max(maxX, s.x + sw); maxY = Math.max(maxY, s.y + sh)
+      }
+      const pad = 24
+      const fx = minX - pad, fy = minY - pad
+      const fw = (maxX - minX) + pad * 2, fh = (maxY - minY) + pad * 2
+      const color = board.color || '#0ea5e9'
+      const frame = new fabric.Rect({
+        left: fx, top: fy, width: fw, height: fh,
+        fill: color + '12', stroke: color, strokeWidth: 1.5, strokeDashArray: [8, 5],
+        rx: 6, ry: 6, selectable: false, evented: false, objectCaching: false,
+        name: 'artboard-frame-' + board.id,
+      })
+      fc.add(frame)
+      fc.sendObjectToBack(frame)
+      const txt = new fabric.FabricText(board.name || ('Board ' + board.id), {
+        left: fx + 8, top: fy - 20, fontSize: 13, fill: '#ffffff',
+        fontFamily: 'Arial, Helvetica, sans-serif', fontWeight: '600',
+        selectable: false, evented: false, name: 'artboard-title-' + board.id,
+      })
+      const chip = new fabric.Rect({
+        left: fx, top: fy - 24, width: (txt.width || 40) + 16, height: 22,
+        fill: color, rx: 5, ry: 5, selectable: false, evented: true,
+        hoverCursor: 'pointer', objectCaching: false,
+        name: 'artboard-titlebg-' + board.id,
+      })
+      fc.add(chip)
+      fc.add(txt)
+    }
+    // Keep the PDF background behind the frames we just sent to back.
+    fc.getObjects().filter(o => o.name?.startsWith('pdf-bg')).forEach(o => fc.sendObjectToBack(o))
+    fc.requestRenderAll()
+  }, [artboards, sets, pixelsPerUnit])
+
+  // Click an artboard title chip → select all sets on that board (then drag/Delete).
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    const PFX = 'artboard-titlebg-'
+    const onDown = (opt) => {
+      const tgt = opt.target
+      if (!tgt || !tgt.name || !tgt.name.startsWith(PFX)) return
+      const id = parseInt(tgt.name.slice(PFX.length))
+      if (id) useStore.getState().selectBoardContents(id)
+    }
+    fc.on('mouse:down', onDown)
+    return () => fc.off('mouse:down', onDown)
+  }, [])
 
   // === SELECTION HIGHLIGHTING — lightweight in-place updates, no full rebuild ===
   useEffect(() => {

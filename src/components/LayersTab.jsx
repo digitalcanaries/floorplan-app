@@ -51,6 +51,8 @@ export default memo(function LayersTab() {
     togglePdfLayerVisibility, setPdfLayerOpacity,
     renamePdfLayer, removePdfLayer, updatePdfLayer,
     lockPdfToSet, unlockPdfFromSet, setPdfLayerZOrder,
+    artboards, multiSelected, createBoardFromSelection, deleteArtboard,
+    renameArtboard, selectBoardContents, assignToBoard,
   } = useStore()
 
   const [newGroupName, setNewGroupName] = useState('')
@@ -508,6 +510,66 @@ export default memo(function LayersTab() {
           </button>
         </div>
         <p className="text-[9px] text-gray-600 italic">Select sets in Sets tab, then group them here</p>
+      </div>
+
+      {/* Boards (artboard frames) */}
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Boards</span>
+        {(artboards || []).map(b => {
+          const count = sets.filter(s => s.boardId === b.id).length
+          return (
+            <div key={b.id} className="flex items-center gap-1.5 px-2 py-1.5 bg-gray-800/50 rounded border border-gray-700">
+              <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: b.color }} />
+              <span
+                className="text-xs text-white flex-1 truncate cursor-pointer"
+                title="Click to rename"
+                onClick={() => { const n = prompt('Board name:', b.name); if (n?.trim()) renameArtboard(b.id, n.trim()) }}
+              >
+                {b.name}
+              </span>
+              <span className="text-[10px] text-gray-500">{count}</span>
+              <button
+                onClick={() => selectBoardContents(b.id)}
+                className="text-[10px] px-1.5 py-0.5 bg-gray-700 hover:bg-indigo-600 rounded text-gray-200"
+                title="Select this board's pieces (then drag or Delete)"
+              >
+                Select
+              </button>
+              <button
+                onClick={() => {
+                  const ids = new Set(multiSelected)
+                  if (selectedSetId != null) ids.add(selectedSetId)
+                  if (ids.size === 0) { alert('Select some sets first, then add them to this board.'); return }
+                  assignToBoard(ids, b.id)
+                }}
+                className="text-[10px] px-1.5 py-0.5 bg-gray-700 hover:bg-green-600 rounded text-gray-200"
+                title="Add the current selection to this board"
+              >
+                + Sel
+              </button>
+              <button
+                onClick={() => { if (confirm(`Remove board "${b.name}"? The pieces stay on the canvas.`)) deleteArtboard(b.id) }}
+                className="text-[10px] text-red-400 hover:text-red-300"
+                title="Remove board (keep pieces)"
+              >
+                ✕
+              </button>
+            </div>
+          )
+        })}
+        <button
+          onClick={() => {
+            const ids = new Set(multiSelected)
+            if (selectedSetId != null) ids.add(selectedSetId)
+            if (ids.size === 0) { alert('Select sets first (marquee-drag on the canvas, or Shift+click), then make a board from them.'); return }
+            const n = prompt('Name this board:', `Board ${(artboards?.length || 0) + 1}`)
+            if (n?.trim()) createBoardFromSelection(n.trim())
+          }}
+          className="px-2 py-1 mt-1 bg-indigo-600 hover:bg-indigo-500 rounded text-xs text-white"
+        >
+          + New board from selection
+        </button>
+        <p className="text-[9px] text-gray-600 italic">Select pieces, make a board, then click its title on the canvas (or “Select”) to move/delete them together. Frame auto-wraps its pieces.</p>
       </div>
 
       {/* Annotations */}

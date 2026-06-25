@@ -57,6 +57,8 @@ function buildSaveData(state, extraFields = {}) {
     nextAnnotationId: state.nextAnnotationId,
     groups: state.groups,
     nextGroupId: state.nextGroupId,
+    artboards: state.artboards,
+    nextArtboardId: state.nextArtboardId,
     buildingWalls: state.buildingWalls,
     nextBuildingWallId: state.nextBuildingWallId,
     buildingWallDefaults: state.buildingWallDefaults,
@@ -210,6 +212,11 @@ const useStore = create((set, get) => ({
   nextAnnotationId: 1,
   groups: [],
   nextGroupId: 1,
+  // Artboards — named frames that wrap the sets assigned to them (set.boardId).
+  // The frame is derived from its members' bounding box; move a board by
+  // selecting its contents and dragging (reuses multi-select).
+  artboards: [],
+  nextArtboardId: 1,
   buildingWalls: [],
   nextBuildingWallId: 1,
   buildingWallDefaults: saved?.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },
@@ -1547,6 +1554,67 @@ const useStore = create((set, get) => ({
   },
   clearMultiSelect: () => set({ multiSelected: new Set() }),
 
+  // === Artboard (in-canvas frame) CRUD ===
+  // A board is { id, name, color }. Sets belong via set.boardId; the frame is
+  // derived from members' bounding box at render time. Board create/delete are
+  // organizational (not on the undo stack); deleting contents IS undoable.
+  addArtboard: (name, color) => {
+    const id = get().nextArtboardId
+    const palette = ['#0ea5e9', '#a855f7', '#f59e0b', '#10b981', '#ef4444', '#64748b']
+    const board = { id, name: name || `Board ${id}`, color: color || palette[(id - 1) % palette.length] }
+    set({ artboards: [...get().artboards, board], nextArtboardId: id + 1 })
+    get().autosave()
+    return id
+  },
+  renameArtboard: (id, name) => {
+    set({ artboards: get().artboards.map(b => b.id === id ? { ...b, name } : b) })
+    get().autosave()
+  },
+  setArtboardColor: (id, color) => {
+    set({ artboards: get().artboards.map(b => b.id === id ? { ...b, color } : b) })
+    get().autosave()
+  },
+  assignToBoard: (ids, boardId) => {
+    const idSet = ids instanceof Set ? ids : new Set(ids)
+    if (idSet.size === 0) return
+    set({ sets: get().sets.map(s => idSet.has(s.id) ? { ...s, boardId } : s) })
+    get().autosave()
+  },
+  removeFromBoard: (ids) => {
+    const idSet = ids instanceof Set ? ids : new Set(ids)
+    set({ sets: get().sets.map(s => idSet.has(s.id) ? { ...s, boardId: null } : s) })
+    get().autosave()
+  },
+  // Create a board around the current selection and assign those sets to it.
+  createBoardFromSelection: (name) => {
+    const st = get()
+    const ids = new Set(st.multiSelected)
+    if (st.selectedSetId != null) ids.add(st.selectedSetId)
+    if (ids.size === 0) return null
+    const id = st.addArtboard(name)
+    st.assignToBoard(ids, id)
+    return id
+  },
+  deleteArtboard: (id, opts = {}) => {
+    const { deleteContents = false } = opts
+    if (deleteContents) {
+      const memberIds = get().sets.filter(s => s.boardId === id).map(s => s.id)
+      if (memberIds.length) get().deleteMultiple(memberIds) // pushes history
+    }
+    set({
+      artboards: get().artboards.filter(b => b.id !== id),
+      sets: get().sets.map(s => s.boardId === id ? { ...s, boardId: null } : s),
+    })
+    get().autosave()
+  },
+  // Select all sets on a board (so they can be moved/deleted as a group).
+  selectBoardContents: (id) => {
+    const memberIds = get().sets.filter(s => s.boardId === id && s.onPlan !== false && !s.hidden).map(s => s.id)
+    if (!memberIds.length) { get().clearMultiSelect(); get().setSelectedSetId(null); return }
+    get().setMultiSelected(new Set(memberIds))
+    get().setSelectedSetId(memberIds[memberIds.length - 1])
+  },
+
   // Batch movement (sets + locked children + pinned PDFs)
   // Skips sets locked to the master PDF — those move only when the PDF moves.
   moveMultiple: (ids, dx, dy) => {
@@ -1976,6 +2044,8 @@ const useStore = create((set, get) => ({
       nextAnnotationId: data.nextAnnotationId || 1,
       groups: migratedGroups,
       nextGroupId: data.nextGroupId || (migratedGroups.length > 0 ? Math.max(...migratedGroups.map(g => g.id || 0)) + 1 : 1),
+      artboards: data.artboards || [],
+      nextArtboardId: data.nextArtboardId || ((data.artboards?.length > 0) ? Math.max(...data.artboards.map(b => b.id || 0)) + 1 : 1),
       buildingWalls: data.buildingWalls || [],
       nextBuildingWallId: data.nextBuildingWallId || 1,
       buildingWallDefaults: data.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },
