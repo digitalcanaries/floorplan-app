@@ -259,7 +259,10 @@ export default function FloorCanvas({ onCanvasSize }) {
     // Far-flung strays force a zoomed-out, off-centre fit. Exclude them so the
     // real layout fills the screen, and surface them for review (flash + prompt).
     const outlierIds = includeOutliers ? [] : findFitOutliers(visibleSets, ppu)
-    if (!includeOutliers) setFitOutlierIds(outlierIds)
+    // NOTE: getState() not a destructured setter — fitAll is defined ABOVE the
+    // `const {…}=useStore()` destructure, so referencing destructured vars here
+    // (or in this callback's deps) throws a TDZ error during render.
+    if (!includeOutliers) useStore.getState().setFitOutlierIds(outlierIds)
     const strayIds = includeOutliers ? (state.fitOutlierIds || []) : outlierIds
     const outlierSet = new Set(outlierIds)
     const allSets = outlierIds.length
@@ -320,17 +323,19 @@ export default function FloorCanvas({ onCanvasSize }) {
 
     // Draw the eye to any strays (visible only when included in the fit).
     if (strayIds.length) flashSets(fc, strayIds)
-  }, [zoomReset, setFitOutlierIds])
+  }, [zoomReset])
 
   // "Show me" — re-fit including the strays so they're on screen, and flash them.
   const showOutliers = useCallback(() => fitAll({ includeOutliers: true }), [fitAll])
   // "Delete them" — remove the strays, then re-fit (now fills the screen).
+  // getState() rather than destructured actions — this callback is above the
+  // useStore() destructure too (same TDZ reason as fitAll).
   const deleteOutliers = useCallback(() => {
-    const ids = useStore.getState().fitOutlierIds || []
-    ids.forEach(id => deleteSet(id))
-    setFitOutlierIds([])
+    const st = useStore.getState()
+    ;(st.fitOutlierIds || []).forEach(id => st.deleteSet(id))
+    st.setFitOutlierIds([])
     setTimeout(() => fitAll(), 60)
-  }, [deleteSet, setFitOutlierIds, fitAll])
+  }, [fitAll])
 
   const {
     setPdfPosition,
@@ -340,7 +345,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     gridVisible, snapToGrid, snapToSets, gridSize,
     labelsVisible, labelMode, labelFontSize: globalLabelFontSize, labelColor: globalLabelColor, showOverlaps,
     sets, addSet, updateSet, selectedSetId, deleteSet,
-    fitOutlierIds, setFitOutlierIds,
+    fitOutlierIds,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
     unit, viewMode,
@@ -3403,7 +3408,7 @@ export default function FloorCanvas({ onCanvasSize }) {
             Delete {fitOutlierIds.length > 1 ? 'them' : 'it'}
           </button>
           <button
-            onClick={() => setFitOutlierIds([])}
+            onClick={() => useStore.getState().setFitOutlierIds([])}
             className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-xs shrink-0"
             title="Keep them and dismiss this message"
           >
