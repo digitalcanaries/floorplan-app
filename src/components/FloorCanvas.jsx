@@ -33,57 +33,6 @@ const DRAWING_POINT_NAME = 'drawing-point'
 const EXCL_PREFIX = 'exclusion-zone-'
 const CLEAR_PREFIX = 'clearance-'
 
-// Detect "stray" sets that sit far from the main cluster and would force Fit
-// All to zoom way out (so the real layout can't fill / centre the screen).
-// Returns the ids of such pieces. Conservative on purpose: needs a clear
-// majority cluster, an absolute distance floor, and never flags more than 40%
-// of the pieces (a genuinely spread-out plan isn't a stray problem).
-function findFitOutliers(sets, ppu) {
-  if (!sets || sets.length < 5) return []
-  const median = (arr) => {
-    const a = [...arr].sort((x, y) => x - y)
-    const m = Math.floor(a.length / 2)
-    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2
-  }
-  const centers = sets.map(s => {
-    const w = s.width * ppu, h = s.height * ppu
-    const isRot = (s.rotation || 0) % 180 !== 0
-    const sw = isRot ? h : w, sh = isRot ? w : h
-    return { id: s.id, cx: s.x + sw / 2, cy: s.y + sh / 2 }
-  })
-  const mx = median(centers.map(c => c.cx))
-  const my = median(centers.map(c => c.cy))
-  const dists = centers.map(c => Math.hypot(c.cx - mx, c.cy - my))
-  const medDist = median(dists) || 1
-  const threshold = Math.max(medDist * 5, 30 * ppu) // 5x typical spread, or ≥30 ft
-  const flagged = centers.filter((c, i) => dists[i] > threshold).map(c => c.id)
-  if (flagged.length > Math.floor(sets.length * 0.4)) return []
-  return flagged
-}
-
-// Pulse the given set rectangles red/amber a few times to draw the eye, then
-// restore their original stroke. Best-effort — silently no-ops for ids that
-// have no rendered rect (e.g. hidden).
-function flashSets(fc, ids) {
-  if (!fc || !ids || !ids.length) return
-  const objs = ids
-    .map(id => fc.getObjects().find(o => o.name === SET_PREFIX + id))
-    .filter(Boolean)
-  if (!objs.length) return
-  const orig = objs.map(o => ({ o, stroke: o.stroke, strokeWidth: o.strokeWidth }))
-  let n = 0
-  const iv = setInterval(() => {
-    const on = n % 2 === 0
-    objs.forEach(o => o.set({ stroke: on ? '#ff2d2d' : '#ffd400', strokeWidth: on ? 6 : 3 }))
-    fc.requestRenderAll()
-    if (++n >= 8) {
-      clearInterval(iv)
-      orig.forEach(({ o, stroke, strokeWidth }) => o.set({ stroke, strokeWidth }))
-      fc.requestRenderAll()
-    }
-  }, 220)
-}
-
 // Helper: creates selection decorations (wall gaps, FIXED icons, rotation label) on the canvas
 function addSelectionDecorations(fc, s, ppu, rules) {
   if (!s) return
@@ -235,36 +184,13 @@ export default function FloorCanvas({ onCanvasSize }) {
     fc.requestRenderAll()
   }, [])
 
-  const fitAll = useCallback((opts = {}) => {
-    const { includeOutliers = false } = opts
+  const fitAll = useCallback(() => {
     const fc = fabricRef.current
     if (!fc) return
-
-    // Fit to the CURRENT visible canvas area ("full to the open screen") — the
-    // ResizeObserver normally keeps this in sync, but sync defensively in case
-    // Fit All is hit during a layout transition.
-    const container = containerRef.current
-    if (container) {
-      const cw = container.clientWidth, ch = container.clientHeight
-      if (cw && ch && (cw !== fc.getWidth() || ch !== fc.getHeight())) {
-        fc.setDimensions({ width: cw, height: ch })
-      }
-    }
-
     const state = useStore.getState()
-    const visibleSets = state.sets.filter(s => s.onPlan !== false && !s.hidden)
+    const allSets = state.sets.filter(s => s.onPlan !== false && !s.hidden)
     const ppu = state.pixelsPerUnit
     const bwalls = state.buildingWalls || []
-
-    // Far-flung strays force a zoomed-out, off-centre fit. Exclude them so the
-    // real layout fills the screen, and surface them for review (flash + prompt).
-    const outlierIds = includeOutliers ? [] : findFitOutliers(visibleSets, ppu)
-    if (!includeOutliers) setFitOutlierIds(outlierIds)
-    const strayIds = includeOutliers ? (state.fitOutlierIds || []) : outlierIds
-    const outlierSet = new Set(outlierIds)
-    const allSets = outlierIds.length
-      ? visibleSets.filter(s => !outlierSet.has(s.id))
-      : visibleSets
 
     if (allSets.length === 0 && bwalls.length === 0) {
       // Nothing to fit — just reset
@@ -272,7 +198,7 @@ export default function FloorCanvas({ onCanvasSize }) {
       return
     }
 
-    // Calculate bounding box of fitted content (sets + building walls)
+    // Calculate bounding box of ALL content (sets + building walls)
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
 
     for (const s of allSets) {
@@ -317,20 +243,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     fc.setViewportTransform([zoom, 0, 0, zoom, vpCenterX - centerX * zoom, vpCenterY - centerY * zoom])
     setZoomLevel(Math.round(zoom * 100))
     fc.requestRenderAll()
-
-    // Draw the eye to any strays (visible only when included in the fit).
-    if (strayIds.length) flashSets(fc, strayIds)
-  }, [zoomReset, setFitOutlierIds])
-
-  // "Show me" — re-fit including the strays so they're on screen, and flash them.
-  const showOutliers = useCallback(() => fitAll({ includeOutliers: true }), [fitAll])
-  // "Delete them" — remove the strays, then re-fit (now fills the screen).
-  const deleteOutliers = useCallback(() => {
-    const ids = useStore.getState().fitOutlierIds || []
-    ids.forEach(id => deleteSet(id))
-    setFitOutlierIds([])
-    setTimeout(() => fitAll(), 60)
-  }, [deleteSet, setFitOutlierIds, fitAll])
+  }, [zoomReset])
 
   const {
     setPdfPosition,
@@ -340,7 +253,6 @@ export default function FloorCanvas({ onCanvasSize }) {
     gridVisible, snapToGrid, snapToSets, gridSize,
     labelsVisible, labelMode, labelFontSize: globalLabelFontSize, labelColor: globalLabelColor, showOverlaps,
     sets, addSet, updateSet, selectedSetId, deleteSet,
-    fitOutlierIds, setFitOutlierIds,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
     unit, viewMode,
@@ -426,36 +338,19 @@ export default function FloorCanvas({ onCanvasSize }) {
       }
     }, 200)
 
-    // Keep the fabric canvas matched to its container. A ResizeObserver fires
-    // for window resizes AND layout changes the window 'resize' event misses —
-    // most importantly collapsing/expanding the sidebar, which changes the
-    // available width with no window event (this is why the view used to stay
-    // off-centre after closing the sidebar). On each change we resize the
-    // canvas and shift the viewport by half the delta, so whatever was centred
-    // stays centred (zoom preserved, no jump).
-    let lastW = w, lastH = h
-    const applyResize = () => {
+    // Resize handler
+    const handleResize = () => {
       const nw = container.clientWidth
       const nh = container.clientHeight
-      if (!nw || !nh || (nw === lastW && nh === lastH)) return
-      const dw = nw - lastW, dh = nh - lastH
-      lastW = nw; lastH = nh
       fc.setDimensions({ width: nw, height: nh })
-      const vpt = fc.viewportTransform
-      vpt[4] += dw / 2
-      vpt[5] += dh / 2
-      fc.setViewportTransform(vpt)
       onCanvasSize?.({ w: nw, h: nh })
       fc.requestRenderAll()
     }
-    const ro = new ResizeObserver(applyResize)
-    ro.observe(container)
-    window.addEventListener('resize', applyResize)
+    window.addEventListener('resize', handleResize)
 
     return () => {
       clearTimeout(fitTimer)
-      ro.disconnect()
-      window.removeEventListener('resize', applyResize)
+      window.removeEventListener('resize', handleResize)
       fc.dispose()
       fabricRef.current = null
     }
@@ -3377,37 +3272,6 @@ export default function FloorCanvas({ onCanvasSize }) {
           <button onClick={cancelDrawing}
             className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-xs">
             Done
-          </button>
-        </div>
-      )}
-
-      {/* Stray-pieces prompt — shown when Fit All excluded far-flung sets so
-          the real layout could fill the screen. Flash + offer to delete them. */}
-      {fitOutlierIds.length > 0 && (
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 bg-amber-900/95 border border-amber-500 text-amber-50 px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-sm max-w-[92%]">
-          <span>
-            ⚠ {fitOutlierIds.length} piece{fitOutlierIds.length > 1 ? 's' : ''} sit far from your layout and {fitOutlierIds.length > 1 ? 'were' : 'was'} left out of the fit.
-          </span>
-          <button
-            onClick={showOutliers}
-            className="px-2 py-0.5 bg-amber-700 hover:bg-amber-600 rounded text-xs font-medium shrink-0"
-            title="Zoom out to show the stray pieces and flash them"
-          >
-            Show me
-          </button>
-          <button
-            onClick={deleteOutliers}
-            className="px-2 py-0.5 bg-red-600 hover:bg-red-500 rounded text-xs font-medium shrink-0"
-            title="Delete the stray pieces and re-fit"
-          >
-            Delete {fitOutlierIds.length > 1 ? 'them' : 'it'}
-          </button>
-          <button
-            onClick={() => setFitOutlierIds([])}
-            className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-xs shrink-0"
-            title="Keep them and dismiss this message"
-          >
-            Keep
           </button>
         </div>
       )}

@@ -278,10 +278,6 @@ const useStore = create((set, get) => ({
   sidebarTab: 'sets',
   calibrating: false,
   pendingFitAll: false,
-  // Set ids that Fit All judged to be far-flung outliers (transient UI only —
-  // not persisted). Drives the "delete strays?" prompt over the canvas.
-  fitOutlierIds: [],
-  setFitOutlierIds: (ids) => set({ fitOutlierIds: ids }),
   calibrationPoints: [],
   selectedSetId: null,
   editingSetId: null, // id of set whose Edit modal is open, or null
