@@ -240,6 +240,41 @@ export default function TopBar({ canvasSize }) {
     }
   }
 
+  // Duplicate the project into a fresh server project that keeps all sets,
+  // walls, columns, groups, rules and annotations but drops the PDF
+  // background(s) — ready to drop a new plan onto the same layout.
+  const handleDuplicateFreshBackground = async () => {
+    const name = prompt('Name for the duplicate (sets kept, background cleared):', `${projectName} (copy)`)
+    if (!name || !name.trim()) return
+    const base = exportProject()
+    const data = {
+      ...base,
+      projectName: name.trim(),
+      pdfLayers: [],
+      activePdfLayerId: null,
+      nextPdfLayerId: 1,
+      pdfImage: null,
+      pdfRotation: 0,
+      pdfPosition: { x: 0, y: 0 },
+      pdfScale: 1,
+      pdfOriginalSize: null,
+    }
+    try {
+      const result = await apiFetch('/projects', {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim(), data }),
+      })
+      // Switch to the new project and load its (background-free) state
+      importProject(data)
+      setProjectName(name.trim())
+      setServerProjectId(result.id)
+      useStore.getState().setServerProjectId(result.id)
+      setShowSaveMenu(false)
+    } catch (e) {
+      alert('Duplicate failed: ' + e.message)
+    }
+  }
+
   // Download backup JSON file with timestamp
   const handleBackupDownload = () => {
     const data = exportProject()
@@ -779,6 +814,11 @@ export default function TopBar({ canvasSize }) {
             <button onClick={handleServerSaveAs}
               className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600">
               Save As New...
+            </button>
+            <button onClick={handleDuplicateFreshBackground}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-600 text-indigo-300">
+              Duplicate → New Background
+              <span className="text-[10px] text-gray-500 block">Same sets &amp; walls, blank canvas for a new plan</span>
             </button>
             <div className="h-px bg-gray-600" />
             <button onClick={() => { handleQuickSave(); setShowSaveMenu(false) }}

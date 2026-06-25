@@ -1,5 +1,6 @@
-import { useState, memo } from 'react'
+import { useState, useRef, memo } from 'react'
 import useStore from '../store.js'
+import { loadBackgroundFile } from '../loadBackground.js'
 
 const CATEGORY_ICONS = {
   Set: '📦',
@@ -59,6 +60,24 @@ export default memo(function LayersTab() {
   const [pdfNameInput, setPdfNameInput] = useState('')
   const [scalingPdfId, setScalingPdfId] = useState(null)
   const [scaleDimInput, setScaleDimInput] = useState('')
+  const [replacingPdfId, setReplacingPdfId] = useState(null)
+  const replaceFileRef = useRef(null)
+
+  // Swap a layer's image in place — keeps its scale, position, pins, flip
+  // and opacity. Only the picture (and its originalSize) changes.
+  const handleReplaceFile = async (e) => {
+    const file = e.target.files[0]
+    const layerId = replacingPdfId
+    e.target.value = ''
+    setReplacingPdfId(null)
+    if (!file || layerId == null) return
+    try {
+      const { dataUrl, width, height } = await loadBackgroundFile(file)
+      updatePdfLayer(layerId, { image: dataUrl, originalSize: { width, height } })
+    } catch (err) {
+      alert('Failed to load file: ' + err.message)
+    }
+  }
 
   // Collect unique categories from sets
   const visibleSets = sets.filter(s => s.onPlan !== false)
@@ -162,6 +181,13 @@ export default memo(function LayersTab() {
       {pdfLayers.length > 0 && (
         <div className="flex flex-col gap-1">
           <span className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">PDF Layers</span>
+          <input
+            ref={replaceFileRef}
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg,.webp"
+            className="hidden"
+            onChange={handleReplaceFile}
+          />
           {pdfLayers.map(layer => (
             <div
               key={layer.id}
@@ -211,6 +237,15 @@ export default memo(function LayersTab() {
                   title="Set as active PDF"
                 >
                   {layer.id === activePdfLayerId ? 'Active' : 'Select'}
+                </button>
+
+                {/* Replace image — swap the picture, keep scale/position/pins */}
+                <button
+                  onClick={() => { setReplacingPdfId(layer.id); replaceFileRef.current?.click() }}
+                  className="text-[10px] text-gray-300 hover:text-indigo-300"
+                  title="Replace image — keeps this layer's scale, position & pins"
+                >
+                  ⤓
                 </button>
 
                 {/* Remove */}
