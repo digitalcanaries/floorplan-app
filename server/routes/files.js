@@ -66,7 +66,7 @@ router.delete('/:id', (req, res) => {
   ).get(req.params.id, req.user.id)
   if (!file) return res.status(404).json({ error: 'File not found' })
   const fullPath = path.join(REFS_DIR, file.storage_key)
-  try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath) } catch {}
+  try { if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath) } catch { /* best-effort: file may already be gone */ }
   db.prepare('DELETE FROM files WHERE id = ?').run(file.id)
   res.json({ ok: true })
 })

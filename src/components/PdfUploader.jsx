@@ -1,3 +1,7 @@
+/* eslint-disable react-refresh/only-export-components --
+   extractPdfText / extractPdfTextOCR are PDF-text helpers colocated with the
+   uploader because they read the same module-level pdf doc. They are not
+   components; the Fast Refresh caveat does not apply. */
 import { useRef } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
@@ -7,7 +11,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLi
 
 // Store the PDF document globally so we can re-extract text later
 let lastPdfDoc = null
-let lastPdfCanvasDataUrl = null
 
 export async function extractPdfText() {
   if (!lastPdfDoc) return ''
@@ -100,7 +103,6 @@ export default function PdfUploader() {
 
       await page.render({ canvasContext: ctx, viewport }).promise
       const dataUrl = canvas.toDataURL('image/png')
-      lastPdfCanvasDataUrl = dataUrl
 
       // Derive a name from the filename (strip extension)
       const name = file.name.replace(/\.pdf$/i, '') || 'Floor Plan'

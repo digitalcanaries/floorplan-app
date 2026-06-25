@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
-import { getAABB, getOverlapRect, buildCutPolygon, getLabelPosition } from '../engine/geometry.js'
+import { getAABB, getOverlapRect, buildCutPolygon } from '../engine/geometry.js'
 import { drawComponentIcon, ICON_PREFIX } from '../engine/componentIcons.js'
 import { autoLayout } from '../engine/autoLayout.js'
 import { getComponentClearance } from '../engine/scoring.js'
@@ -240,13 +240,13 @@ export default function FloorCanvas({ onCanvasSize }) {
   }, [zoomReset])
 
   const {
-    pdfImage, pdfRotation, pdfPosition, setPdfPosition,
-    pdfScale, setPdfScale, pdfOriginalSize,
+    setPdfPosition,
+    setPdfScale,
     pdfLayers, updatePdfLayer,
     pixelsPerUnit, setPixelsPerUnit,
     gridVisible, snapToGrid, snapToSets, gridSize,
     labelsVisible, labelMode, labelFontSize: globalLabelFontSize, labelColor: globalLabelColor, showOverlaps,
-    sets, addSet, updateSet, selectedSetId, setSelectedSetId, deleteSet,
+    sets, addSet, updateSet, selectedSetId, deleteSet,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
     unit, viewMode,
@@ -262,7 +262,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     duplicateBuildingColumn, addBuildingColumn, columnPlacementTemplate,
     componentPlacementTemplate,
     drawingMode, drawingWallPoints, addDrawingPoint, cancelDrawing,
-    breakDrawingChain, drawingWallSnap,
+    breakDrawingChain,
     pendingFitAll,
     freehandStrokes, freehandDrawMode, freehandEraseMode, freehandColor, freehandWidth,
     addFreehandStroke, deleteFreehandStroke,
@@ -776,14 +776,6 @@ export default function FloorCanvas({ onCanvasSize }) {
         if (state.multiSelected?.size > 0) state.clearMultiSelect()
         state.setSelectedSetId(id)
       }
-    }
-    // AABB fallback when a shape has no containsPoint (polygons after cutouts)
-    function pointInBounds(pt, obj) {
-      const left = obj.left || 0
-      const top = obj.top || 0
-      const right = left + (obj.width || 0) * (obj.scaleX || 1)
-      const bottom = top + (obj.height || 0) * (obj.scaleY || 1)
-      return pt.x >= left && pt.x <= right && pt.y >= top && pt.y <= bottom
     }
     fc.on('mouse:down', onDown)
     return () => fc.off('mouse:down', onDown)

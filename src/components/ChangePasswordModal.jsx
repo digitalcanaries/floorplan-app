@@ -2,7 +2,7 @@ import { useState } from 'react'
 import useAuthStore from '../authStore.js'
 
 export default function ChangePasswordModal({ forced, onClose }) {
-  const { changePassword, user } = useAuthStore()
+  const { changePassword } = useAuthStore()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirm, setConfirm] = useState('')

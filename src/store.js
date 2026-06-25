@@ -628,7 +628,6 @@ const useStore = create((set, get) => ({
     }
     const previous = _past[_past.length - 1]
     const restoreUpdate = {
-      _recording: false,
       sets: structuredClone(previous.sets),
       rules: structuredClone(previous.rules),
       annotations: structuredClone(previous.annotations || []),
@@ -676,7 +675,6 @@ const useStore = create((set, get) => ({
     }
     const next = _future[0]
     const restoreUpdate = {
-      _recording: false,
       sets: structuredClone(next.sets),
       rules: structuredClone(next.rules),
       annotations: structuredClone(next.annotations || []),
@@ -1049,7 +1047,6 @@ const useStore = create((set, get) => ({
   bringForward: (id) => {
     get()._pushHistory()
     const sets = get().sets
-    const maxZ = Math.max(...sets.map(s => s.zIndex || 0))
     set({ sets: sets.map(s => s.id === id ? { ...s, zIndex: (s.zIndex || 0) + 1 } : s) })
     get().autosave()
   },

@@ -29,19 +29,18 @@ const CATEGORY_TEXT = {
 
 export default memo(function BuildTab() {
   const {
-    addSet, unit, viewMode, setViewMode, pixelsPerUnit,
+    unit, viewMode, setViewMode, pixelsPerUnit,
     buildingWalls, deleteBuildingWall, clearBuildingWalls,
-    updateBuildingWall, toggleBuildingWallLock, rotateBuildingWall,
+    toggleBuildingWallLock, rotateBuildingWall,
     drawingMode, setDrawingMode, cancelDrawing, breakDrawingChain,
     drawingWallSnap, setDrawingWallSnap,
     buildingWallDefaults, setBuildingWallDefaults,
-    buildingColumns, addBuildingColumn, deleteBuildingColumn,
+    buildingColumns, deleteBuildingColumn,
     clearBuildingColumns, toggleBuildingColumnLock,
     startColumnPlacement, columnPlacementTemplate,
     startComponentPlacement, componentPlacementTemplate,
     selectedBuildingColumnId, setSelectedBuildingColumnId,
     duplicateBuildingColumn,
-    pdfPosition,
   } = useStore()
   const [components, setComponents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -646,7 +645,7 @@ function getDefaultColor(category) {
  * Suggest Flats — analyses selected set and suggests flat combinations
  */
 function SuggestFlats() {
-  const { sets, selectedSetId, unit, addSet } = useStore()
+  const { sets, selectedSetId, unit } = useStore()
   const selectedSet = sets.find(s => s.id === selectedSetId)
   const [suggestions, setSuggestions] = useState(null)
 

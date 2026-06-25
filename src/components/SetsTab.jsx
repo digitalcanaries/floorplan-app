@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, memo } from 'react'
 import useStore from '../store.js'
 import { getAABB } from '../engine/geometry.js'
-import { toFeet, fromFeet, formatInUnit, UNITS, UNIT_OPTIONS } from '../engine/units.js'
+import { toFeet, formatInUnit, UNITS, UNIT_OPTIONS } from '../engine/units.js'
 import BulkImport from './BulkImport.jsx'
 
 const COLORS = [
@@ -32,11 +32,11 @@ const CATEGORY_COLORS = {
 
 export default memo(function SetsTab() {
   const {
-    sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId, unit,
+    sets, addSet, updateSet, deleteSet, selectedSetId, setSelectedSetId,
     pdfImage, toggleLockToPdf, lockAllToPdf, unlockAllFromPdf,
     duplicateSet, removeSetFromPlan, addSetToPlan, clearCutouts,
     hideSet, showSet, cutIntoSet,
-    bringForward, sendBackward, bringToFront, sendToBack,
+    bringForward, sendBackward,
     labelMode,
     addGroup,
     startComponentPlacement, drawingMode, cancelDrawing,
@@ -75,6 +75,19 @@ export default memo(function SetsTab() {
   // Auto-scroll refs
   const rowRefs = useRef({})
 
+  const resetForm = () => {
+    setForm({
+      name: '', width: '', height: '', color: COLORS[(sets.length + 1) % COLORS.length],
+      category: 'Set', wallGap: '', opacity: '1', noCut: false,
+      wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
+      removedWalls: { top: false, right: false, bottom: false, left: false },
+      hiddenWalls: { top: false, right: false, bottom: false, left: false },
+      wallExtensions: { top: '', right: '', bottom: '', left: '' },
+      rotation: '0',
+      placeCount: '1', placeSpacing: '', elevation: '',
+    })
+  }
+
   // When placement mode ends (Esc on canvas), reset the form
   const prevDrawingMode = useRef(drawingMode)
   useEffect(() => {
@@ -109,19 +122,6 @@ export default memo(function SetsTab() {
       placeSpacing: isWallType && form.placeSpacing ? dimToFeet(form.placeSpacing) : 0,
       elevation: isWallType && form.elevation ? dimToFeet(form.elevation) : 0,
     }
-  }
-
-  const resetForm = () => {
-    setForm({
-      name: '', width: '', height: '', color: COLORS[(sets.length + 1) % COLORS.length],
-      category: 'Set', wallGap: '', opacity: '1', noCut: false,
-      wallHeight: '', gapSides: { top: true, right: true, bottom: true, left: true },
-      removedWalls: { top: false, right: false, bottom: false, left: false },
-      hiddenWalls: { top: false, right: false, bottom: false, left: false },
-      wallExtensions: { top: '', right: '', bottom: '', left: '' },
-      rotation: '0',
-      placeCount: '1', placeSpacing: '', elevation: '',
-    })
   }
 
   const handleAdd = (e) => {

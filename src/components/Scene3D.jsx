@@ -573,7 +573,7 @@ function DraggableSetGroup({ set, ppu, children, defaultWallHeight }) {
   const [dragOffset, setDragOffset] = useState([0, 0, 0])  // [dx, dy, dz] visual offset
   const [dragRotation, setDragRotation] = useState(0)        // visual rotation offset (radians)
   const [dragLabel, setDragLabel] = useState(null)            // { mode, value } for HUD overlay
-  const { camera, gl, size } = useThree()
+  const { camera, gl } = useThree()
   const { orbitRef, controlMode, locked3D, rKeyRef } = useContext(DragContext)
 
   const groundPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), [])
@@ -778,12 +778,6 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight, 
       const center = getRoomCenter(s)
       const aabb = getAABB(s)
       return { s, ...center, aabb }
-    })
-
-    // Pre-compute door/window bounding boxes (axis-aligned) for opening detection
-    const openingBoxes = [...doorSets, ...windowSets].map(o => {
-      const aabb = getAABB(o)
-      return { o, ...aabb, isDoor: o.category === 'Door' }
     })
 
     // Helper: subtract intervals from a range, returning remaining segments

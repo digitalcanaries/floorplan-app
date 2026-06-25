@@ -603,9 +603,6 @@ function drawStairIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
  */
 function drawBayWindowIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
   const objects = []
-  const sections = props.baySections || 3
-  const bayAngle = props.bayAngle || 30
-  const angleRad = (bayAngle * Math.PI) / 180
 
   // Draw as a front elevation — angled side sections + flat centre
   const sideW = w * 0.25
@@ -922,7 +919,6 @@ function drawPlanBracedWallIcon(prefix, x, y, w, h, lineColor, fillColor, props)
  */
 function drawPlanBayWindowIcon(prefix, x, y, w, h, lineColor, fillColor, props) {
   const objects = []
-  const sections = props.baySections || 3
   const bayAngle = props.bayAngle || 30
   const isWide = w >= h
 

@@ -165,7 +165,6 @@ export function scoreLayout(sets, rules, ppu, obstacles = [], options = {}) {
 
     if (comp.category === 'Door') {
       // Doors: heavy penalty if any non-parent set overlaps the door's footprint
-      const doorRect = getRect(comp, ppu)
       // Extend door clearance 2ft outward
       const clearZone = getComponentClearance(comp, parent, ppu, 2)
       if (clearZone) {

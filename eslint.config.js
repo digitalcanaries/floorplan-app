@@ -23,7 +23,24 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Flag genuine dead local variables, but allow:
+      //  - SCREAMING_CASE / PascalCase placeholders (varsIgnorePattern)
+      //  - unused function args (builder/callback signatures are positional)
+      //  - unused catch bindings
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', args: 'none', caughtErrors: 'none', ignoreRestSiblings: true }],
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // React Compiler advisory rules — this project builds with plain Vite
+      // (no compiler), so surface these as warnings for review rather than
+      // hard errors. See the known-items list in project notes.
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/preserve-manual-memoization': 'warn',
+    },
+  },
+  {
+    // Backend + build config run under Node, not the browser.
+    files: ['server/**/*.js', '*.config.js'],
+    languageOptions: {
+      globals: globals.node,
     },
   },
 ])

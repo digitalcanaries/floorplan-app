@@ -59,11 +59,11 @@ function parseSetText(text) {
 
 function extractDimensions(text) {
   const dims = []
-  const parts = text.split(/[\/,]/)
+  const parts = text.split(/[/,]/)
 
   for (const part of parts) {
     // Match WxH with optional ' or " or ft or - marks, and optional spaces
-    const match = part.match(/(\d+(?:\.\d+)?)\s*['\u2019\u2032"ft]*\s*[xX×\*]\s*(\d+(?:\.\d+)?)\s*['\u2019\u2032"ft]*/)
+    const match = part.match(/(\d+(?:\.\d+)?)\s*['\u2019\u2032"ft]*\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*['\u2019\u2032"ft]*/)
     if (match) {
       dims.push({ w: parseFloat(match[1]), h: parseFloat(match[2]) })
     }
@@ -107,7 +107,7 @@ function parsePdfText(rawText) {
   }
 
   // Also try simpler patterns: just "23 x 27" or "23'x27'"
-  const simplePattern = /(\d+(?:\.\d+)?)\s*['\u2019ft]*\s*[xX×\*]\s*(\d+(?:\.\d+)?)\s*['\u2019ft]*/g
+  const simplePattern = /(\d+(?:\.\d+)?)\s*['\u2019ft]*\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*['\u2019ft]*/g
   while ((match = simplePattern.exec(text)) !== null) {
     const w = parseFloat(match[1])
     const h = parseFloat(match[2])
@@ -176,7 +176,7 @@ export default function BulkImport() {
   const [show, setShow] = useState(false)
   const [reading, setReading] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
-  const [rawPdfText, setRawPdfText] = useState('')
+  const [, setRawPdfText] = useState('')
 
   const handleParse = () => {
     const parsed = parseSetText(text)
