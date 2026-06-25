@@ -816,6 +816,28 @@ const useStore = create((set, get) => ({
     })
     get().autosave()
   },
+  // Delete several sets at once (one undo step) — same cleanup as deleteSet.
+  deleteMultiple: (ids) => {
+    const idSet = ids instanceof Set ? ids : new Set(ids)
+    if (idSet.size === 0) return
+    get()._pushHistory()
+    const cleanedGroups = get().groups
+      .map(g => ({ ...g, setIds: (g.setIds || []).filter(sid => !idSet.has(sid)) }))
+      .filter(g => g.setIds.length > 0)
+    set({
+      sets: get().sets
+        .filter(s => !idSet.has(s.id))
+        .map(s => idSet.has(s.lockedToSetId) ? { ...s, lockedToSetId: null, lockedToSetOffset: null } : s),
+      rules: get().rules.filter(r => !idSet.has(r.setA) && !idSet.has(r.setB)),
+      selectedSetId: idSet.has(get().selectedSetId) ? null : get().selectedSetId,
+      groups: cleanedGroups,
+      pdfLayers: get().pdfLayers.map(l =>
+        idSet.has(l.lockedToSetId) ? { ...l, lockedToSetId: null, lockedToSetOffset: null } : l
+      ),
+      multiSelected: new Set(),
+    })
+    get().autosave()
+  },
   // Lock a component to a parent set (moves with it)
   lockToSet: (componentId, parentSetId) => {
     get()._pushHistory()

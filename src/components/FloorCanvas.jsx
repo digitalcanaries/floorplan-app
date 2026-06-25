@@ -150,6 +150,8 @@ export default function FloorCanvas({ onCanvasSize }) {
   const labelRefsMap = useRef({})  // setId -> [fabric label objects] for O(1) drag lookup
   const shapeRefsMap = useRef({})  // setId -> fabric shape object for O(1) selection updates
   const prevSelectedRef = useRef(null)  // track previous selectedSetId for in-place deselection
+  const prevHighlightRef = useRef(new Set())  // ids currently highlighted (primary + multi-select)
+  const marqueeRef = useRef(null)  // rubber-band drag-select state
   const penActiveRef = useRef(false)    // true while Apple Pencil / stylus is in use — used for palm rejection
   const penReleaseTimerRef = useRef(null)
   const [zoomLevel, setZoomLevel] = useState(100)
@@ -345,7 +347,7 @@ export default function FloorCanvas({ onCanvasSize }) {
     gridVisible, snapToGrid, snapToSets, gridSize,
     labelsVisible, labelMode, labelFontSize: globalLabelFontSize, labelColor: globalLabelColor, showOverlaps,
     sets, addSet, updateSet, selectedSetId, deleteSet,
-    fitOutlierIds,
+    fitOutlierIds, multiSelected,
     rules,
     calibrating, setCalibrating, addCalibrationPoint, calibrationPoints,
     unit, viewMode,
@@ -517,6 +519,85 @@ export default function FloorCanvas({ onCanvasSize }) {
     const onUp = () => {
       isPanning.current = false
       fc.setCursor('default')
+    }
+
+    fc.on('mouse:down', onDown)
+    fc.on('mouse:move', onMove)
+    fc.on('mouse:up', onUp)
+    return () => {
+      fc.off('mouse:down', onDown)
+      fc.off('mouse:move', onMove)
+      fc.off('mouse:up', onUp)
+    }
+  }, [])
+
+  // Marquee (rubber-band) multi-select. Plain left-drag on empty canvas draws a
+  // box; on release every set it touches becomes the multi-selection. Ctrl/Cmd-
+  // drag stays reserved for panning and drag-on-a-set stays a move, so this only
+  // activates on an unmodified drag that starts off any set.
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc) return
+    const MARQUEE_NAME = 'marquee-select-box'
+
+    const scenePt = (e) => (fc.getScenePoint ? fc.getScenePoint(e) : fc.getPointer(e))
+
+    const onDown = (opt) => {
+      const e = opt.e
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return // pan / multi-toggle
+      if (e.touches || e.pointerType === 'touch') return            // leave touch to gesture handler
+      if (useStore.getState().drawingMode) return                   // mid-draw
+      const tgt = opt.target
+      if (tgt && tgt.name && tgt.name.startsWith(SET_PREFIX)) return // dragging a set = move
+      const p = scenePt(e)
+      marqueeRef.current = { active: true, x0: p.x, y0: p.y, moved: false, rect: null, left: p.x, top: p.y, w: 0, h: 0 }
+    }
+
+    const onMove = (opt) => {
+      const m = marqueeRef.current
+      if (!m || !m.active) return
+      const p = scenePt(opt.e)
+      m.left = Math.min(m.x0, p.x); m.top = Math.min(m.y0, p.y)
+      m.w = Math.abs(p.x - m.x0); m.h = Math.abs(p.y - m.y0)
+      if (!m.moved && (m.w > 3 || m.h > 3)) m.moved = true
+      if (!m.moved) return
+      if (!m.rect) {
+        m.rect = new fabric.Rect({
+          name: MARQUEE_NAME, fill: '#38bdf81a', stroke: '#38bdf8', strokeWidth: 1,
+          strokeDashArray: [4, 3], selectable: false, evented: false, objectCaching: false,
+        })
+        fc.add(m.rect)
+      }
+      m.rect.set({ left: m.left, top: m.top, width: m.w, height: m.h })
+      fc.requestRenderAll()
+    }
+
+    const onUp = () => {
+      const m = marqueeRef.current
+      marqueeRef.current = null
+      if (!m || !m.active) return
+      if (m.rect) fc.remove(m.rect)
+      if (!m.moved) return // a click, not a drag — leave selection alone
+      const rL = m.left, rT = m.top, rR = m.left + m.w, rB = m.top + m.h
+      const state = useStore.getState()
+      const ppu = state.pixelsPerUnit
+      const hits = []
+      for (const s of state.sets) {
+        if (s.onPlan === false || s.hidden) continue
+        const wPx = s.width * ppu, hPx = s.height * ppu
+        const isRot = (s.rotation || 0) % 180 !== 0
+        const sw = isRot ? hPx : wPx, sh = isRot ? wPx : hPx
+        // AABB intersection between the set and the marquee box (scene px)
+        if (s.x < rR && s.x + sw > rL && s.y < rB && s.y + sh > rT) hits.push(s.id)
+      }
+      if (hits.length) {
+        state.setMultiSelected(new Set(hits))
+        state.setSelectedSetId(hits[hits.length - 1])
+      } else {
+        state.clearMultiSelect()
+        state.setSelectedSetId(null)
+      }
+      fc.requestRenderAll()
     }
 
     fc.on('mouse:down', onDown)
@@ -862,18 +943,14 @@ export default function FloorCanvas({ onCanvasSize }) {
         const pt = fc.getScenePoint ? fc.getScenePoint(e) : fc.getPointer(e)
         const candidates = fc.getObjects().filter(o => o.name?.startsWith(SET_PREFIX))
         let found = null
-        const sample = []
         for (let i = candidates.length - 1; i >= 0; i--) {
           const o = candidates[i]
           const brAbs = o.getBoundingRect ? o.getBoundingRect(true) : null
-          const brDef = o.getBoundingRect ? o.getBoundingRect() : null
-          if (sample.length < 3) sample.push({ name: o.name, brAbs, brDef, left: o.left, top: o.top, width: o.width, height: o.height })
           if (brAbs && pt.x >= brAbs.left && pt.x <= brAbs.left + brAbs.width && pt.y >= brAbs.top && pt.y <= brAbs.top + brAbs.height) {
             found = o
             break
           }
         }
-        console.log('[pierce] pt=', JSON.stringify({ x: pt.x, y: pt.y }), 'found=', found?.name || 'none', 'sample=', JSON.stringify(sample))
         if (found) target = found
       }
 
@@ -2242,6 +2319,15 @@ export default function FloorCanvas({ onCanvasSize }) {
       const selSet = sets.find(ss => ss.id === currentSelId)
       addSelectionDecorations(fc, selSet, ppu, rules)
     }
+    // Re-apply the multi-select (cyan) highlight too — a rebuild drops it.
+    const curMulti = useStore.getState().multiSelected
+    if (curMulti && curMulti.size) {
+      for (const id of curMulti) {
+        if (id === currentSelId) continue
+        const shape = shapeRefsMap.current[id]
+        if (shape) shape.set({ stroke: '#38bdf8', strokeWidth: 3 })
+      }
+    }
     prevSelectedRef.current = currentSelId  // Keep selection ref in sync
 
     fc.requestRenderAll()
@@ -2256,27 +2342,31 @@ export default function FloorCanvas({ onCanvasSize }) {
     const fc = fabricRef.current
     if (!fc) return
 
-    const prevId = prevSelectedRef.current
-    const newId = selectedSetId
-    prevSelectedRef.current = newId
-
     const state = useStore.getState()
     const ppu = state.pixelsPerUnit
     const lblColor = state.labelColor || '#ffffff'
+    const newId = selectedSetId
+    prevSelectedRef.current = newId
 
-    // --- 1. Deselect previous: reset stroke/strokeWidth and label fill ---
-    if (prevId && prevId !== newId) {
-      const prevShape = shapeRefsMap.current[prevId]
-      if (prevShape) {
-        const ps = state.sets.find(s => s.id === prevId)
-        const prevLockVis = ps?.lockedToPdf && state.showLockIndicators
-        prevShape.set({
-          stroke: prevLockVis ? '#f59e0b' : (ps?.color || '#888'),
-          strokeWidth: 2,
-        })
+    // The full highlight set = the multi-selection plus the primary selected set.
+    const multi = multiSelected instanceof Set ? multiSelected : new Set()
+    const toHighlight = new Set(multi)
+    if (newId != null) toHighlight.add(newId)
+
+    const baseStrokeFor = (s) =>
+      (s?.lockedToPdf && state.showLockIndicators) ? '#f59e0b'
+        : s?.lockedToSetId ? '#8B5CF6'
+          : (s?.color || '#888')
+
+    // --- 1. Reset shapes/labels that are no longer highlighted ---
+    for (const id of prevHighlightRef.current) {
+      if (toHighlight.has(id)) continue
+      const shape = shapeRefsMap.current[id]
+      if (shape) {
+        const ps = state.sets.find(s => s.id === id)
+        shape.set({ stroke: baseStrokeFor(ps), strokeWidth: 2 })
       }
-      // Reset label fill
-      const prevLabels = labelRefsMap.current[prevId]
+      const prevLabels = labelRefsMap.current[id]
       if (prevLabels) {
         for (const lbl of prevLabels) {
           if (lbl.name?.endsWith('-dim')) lbl.set({ fill: lblColor + '99' })
@@ -2294,26 +2384,29 @@ export default function FloorCanvas({ onCanvasSize }) {
       )
       .forEach(o => fc.remove(o))
 
-    // --- 3. Select new: highlight stroke/strokeWidth, label fill, and decorations ---
-    if (newId) {
-      const newShape = shapeRefsMap.current[newId]
-      if (newShape) {
-        newShape.set({ stroke: '#ffffff', strokeWidth: 3 })
-      }
-      // Highlight label fill
-      const newLabels = labelRefsMap.current[newId]
-      if (newLabels) {
-        for (const lbl of newLabels) {
-          if (!lbl.name?.endsWith('-dim')) lbl.set({ fill: '#ffffff' })
+    // --- 3. Highlight the current set: primary = white, multi-select = cyan ---
+    for (const id of toHighlight) {
+      const shape = shapeRefsMap.current[id]
+      const isPrimary = id === newId
+      if (shape) shape.set({ stroke: isPrimary ? '#ffffff' : '#38bdf8', strokeWidth: 3 })
+      if (isPrimary) {
+        const newLabels = labelRefsMap.current[id]
+        if (newLabels) {
+          for (const lbl of newLabels) {
+            if (!lbl.name?.endsWith('-dim')) lbl.set({ fill: '#ffffff' })
+          }
         }
       }
-      // Add wall gaps, FIXED indicators, rotation label via shared helper
+    }
+    // Decorations (gaps/FIXED/rotation) only for the primary set
+    if (newId != null) {
       const s = state.sets.find(ss => ss.id === newId)
       addSelectionDecorations(fc, s, ppu, state.rules)
     }
+    prevHighlightRef.current = toHighlight
 
     fc.requestRenderAll()
-  }, [selectedSetId])
+  }, [selectedSetId, multiSelected])
 
   // === EXTRACTED EFFECTS: Each visual concern has its own render cycle ===
 
@@ -3278,8 +3371,13 @@ export default function FloorCanvas({ onCanvasSize }) {
           alert('Select 2+ sets first. Click one set, then Shift+click others to add to the selection.')
         }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Delete selected set
-        if (state.selectedSetId) {
+        // Delete the whole selection — multi-select if present, else the single set.
+        const ids = new Set(state.multiSelected)
+        if (state.selectedSetId != null) ids.add(state.selectedSetId)
+        if (ids.size > 1) {
+          e.preventDefault()
+          state.deleteMultiple(ids)
+        } else if (state.selectedSetId) {
           e.preventDefault()
           deleteSet(state.selectedSetId)
         }
