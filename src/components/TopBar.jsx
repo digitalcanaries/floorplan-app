@@ -3,7 +3,6 @@ import useStore from '../store.js'
 import { autoLayout, tryAlternate, layoutByCategory, layoutCompact, layoutShuffle, buildObstacles } from '../engine/autoLayout.js'
 import { scoreLayout } from '../engine/scoring.js'
 import { apiFetch } from '../api.js'
-import useAuthStore from '../authStore.js'
 import UserMenu from './UserMenu.jsx'
 import HelpGuide from './HelpGuide.jsx'
 
@@ -23,7 +22,7 @@ export default function TopBar({ canvasSize }) {
     crawlSpace, setCrawlSpace,
     exclusionZones, layoutScore, setLayoutScore,
     annotations, sets: allSets, pixelsPerUnit: ppu,
-    pdfLayers, activePdfLayerId, pdfOriginalSize, setPdfScale, unit,
+    pdfLayers, activePdfLayerId, setPdfScale, unit,
     lockAllToPdf, unlockAllFromPdf, pdfImage,
     freehandDrawMode, setFreehandDrawMode,
     freehandEraseMode, setFreehandEraseMode,
@@ -46,7 +45,6 @@ export default function TopBar({ canvasSize }) {
   const [shareUsername, setShareUsername] = useState('')
   const [shareError, setShareError] = useState(null)
   const [shareSuccess, setShareSuccess] = useState(null)
-  const { user } = useAuthStore()
   const [showHelp, setShowHelp] = useState(false)
   const [showPngMenu, setShowPngMenu] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -188,14 +186,6 @@ export default function TopBar({ canvasSize }) {
     saveProjectAs(projectName)
   }
 
-  // Save As (prompt for name)
-  const handleSaveAs = () => {
-    const name = prompt('Project name:', projectName)
-    if (name && name.trim()) {
-      saveProjectAs(name.trim())
-      setShowSaveMenu(false)
-    }
-  }
 
   // Save to server
   const handleServerSave = async () => {
@@ -352,7 +342,7 @@ export default function TopBar({ canvasSize }) {
       try {
         const data = JSON.parse(ev.target.result)
         importProject(data)
-      } catch (err) {
+      } catch {
         alert('Invalid project file')
       }
     }

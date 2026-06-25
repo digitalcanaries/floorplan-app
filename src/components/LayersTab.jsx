@@ -86,11 +86,6 @@ export default memo(function LayersTab() {
   const getCategoryCounts = (cat) => visibleSets.filter(s => (s.category || 'Set') === cat).length
   const isVisible = (cat) => layerVisibility[cat] !== false
 
-  // Group display — defensive guard in case a legacy group slips through without setIds
-  const ungroupedSets = visibleSets.filter(s =>
-    !groups.some(g => (g.setIds || []).includes(s.id))
-  )
-
   return (
     <div className="p-3 flex flex-col gap-3">
       <h3 className="text-sm font-bold text-white">Layers & Visibility</h3>
