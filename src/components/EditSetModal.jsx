@@ -39,6 +39,7 @@ export default function EditSetModal() {
       opacity: set.opacity ?? 1,
       noCut: !!set.noCut,
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sync form only when switching target (set.id), not on every set mutation
   }, [set?.id, defaultWallHeight])
 
   // Esc closes the modal

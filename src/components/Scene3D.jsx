@@ -318,7 +318,7 @@ function WallMesh({ set, ppu, allSets, renderMode, defaultWallHeight }) {
       const sx2 = sPos.cx + sPos.footprintW / 2, sy2 = sPos.cz + sPos.footprintH / 2
       return sx1 < wMaxX && sx2 > wMinX && sy1 < wMaxZ && sy2 > wMinZ
     })
-  }, [allSets, set, ppu, widthFt, depthFt])
+  }, [allSets, set, ppu, widthFt, depthFt, pivotX, pivotZ, cosR, sinR])
 
   // Wall colour
   const wallColor = useMemo(() => {
@@ -450,7 +450,7 @@ function WallWithOpenings({ widthFt, depthFt, wallHeight, openings, wallSet, ppu
     }
 
     return segs
-  }, [widthFt, depthFt, wallHeight, openings, wallSet, ppu])
+  }, [widthFt, wallHeight, openings, wallSet, ppu])
 
   return (
     <>
@@ -958,7 +958,7 @@ function SetRoomWalls({ roomSets, doorSets, windowSets, ppu, defaultWallHeight, 
     }
 
     return roomGroups
-  }, [roomSets, doorSets, windowSets, ppu, defaultWallHeight, wallRenderMode])
+  }, [roomSets, ppu, defaultWallHeight, wallRenderMode])
 
   return (
     <>

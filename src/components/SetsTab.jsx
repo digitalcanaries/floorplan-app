@@ -374,6 +374,7 @@ export default memo(function SetsTab() {
     setTimeout(() => {
       rowRefs.current[selectedSetId]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }, 50)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll only when the selection changes, not on every set edit
   }, [selectedSetId])
 
   // Shared row renderer for both Sets and Components sections

@@ -30,9 +30,10 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', args: 'none', caughtErrors: 'none', ignoreRestSiblings: true }],
       'no-empty': ['error', { allowEmptyCatch: true }],
       // React Compiler advisory rules — this project builds with plain Vite
-      // (no compiler), so surface these as warnings for review rather than
-      // hard errors. See the known-items list in project notes.
-      'react-hooks/set-state-in-effect': 'warn',
+      // (no compiler). The set-state-in-effect sites here are intentional
+      // (boot-once project load, form-sync-on-id, auto-expand-on-select), so
+      // this rule is off; keep preserve-manual-memoization visible as a warn.
+      'react-hooks/set-state-in-effect': 'off',
       'react-hooks/preserve-manual-memoization': 'warn',
     },
   },

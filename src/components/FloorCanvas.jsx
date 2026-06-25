@@ -1,3 +1,9 @@
+/* eslint-disable react-hooks/exhaustive-deps --
+   This is the imperative fabric.js canvas integration. Its effects deliberately
+   bind/teardown on their own lifecycle (mount-once canvas init, key-based PDF
+   reload, viewport centring on selection only). Auto-adding the flagged deps
+   would recreate the canvas or re-run renders on every edit. Dep arrays here
+   are intentional — review changes to them by hand. */
 import { useEffect, useRef, useCallback, useState } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'

@@ -111,6 +111,7 @@ export default function ReferenceSheetModal() {
     listRefs({ setId: setIdParam })
       .then(rows => setRefs(rows))
       .catch(e => setError(e.message))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setIdParam tracks target; refetch is keyed on target by design
   }, [target, listRefs])
 
   // Esc closes
