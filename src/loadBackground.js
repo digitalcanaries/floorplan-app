@@ -1,6 +1,4 @@
-import * as pdfjsLib from 'pdfjs-dist'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
+import { getPdfjs } from './pdfjs.js'
 
 // Load a PDF or image file into a background-layer payload.
 // Returns { name, dataUrl, width, height } where width/height are the
@@ -27,6 +25,7 @@ export async function loadBackgroundFile(file) {
   }
 
   // PDF files: render page 1 to a canvas at 2× for crisp tracing.
+  const pdfjsLib = await getPdfjs()
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
   const page = await pdf.getPage(1)

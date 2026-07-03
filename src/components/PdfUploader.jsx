@@ -3,11 +3,8 @@
    uploader because they read the same module-level pdf doc. They are not
    components; the Fast Refresh caveat does not apply. */
 import { useRef } from 'react'
-import * as pdfjsLib from 'pdfjs-dist'
-import Tesseract from 'tesseract.js'
+import { getPdfjs } from '../pdfjs.js'
 import useStore from '../store.js'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
 
 // Store the PDF document globally so we can re-extract text later
 let lastPdfDoc = null
@@ -46,9 +43,10 @@ export async function extractPdfTextOCR(onProgress) {
 
     await page.render({ canvasContext: ctx, viewport }).promise
 
-    // Run Tesseract OCR on the rendered page
+    // Run Tesseract OCR on the rendered page (lazy-loaded on first use)
     if (onProgress) onProgress(`OCR page ${i}/${numPages}...`)
 
+    const { default: Tesseract } = await import('tesseract.js')
     const result = await Tesseract.recognize(canvas, 'eng', {
       logger: (m) => {
         if (m.status === 'recognizing text' && onProgress) {
@@ -88,7 +86,8 @@ export default function PdfUploader() {
         return
       }
 
-      // PDF files: render via pdf.js
+      // PDF files: render via pdf.js (lazy-loaded on first use)
+      const pdfjsLib = await getPdfjs()
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
       lastPdfDoc = pdf
