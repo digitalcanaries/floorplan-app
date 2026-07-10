@@ -39,7 +39,7 @@ export default memo(function SetsTab() {
     bringForward, sendBackward,
     labelMode,
     addGroup,
-    startComponentPlacement, drawingMode, cancelDrawing,
+    startComponentPlacement, drawingMode, setDrawingMode, cancelDrawing,
     lockToSet, unlockFromSet,
   } = useStore()
   const { defaultWallHeight, setDefaultWallHeight } = useStore()
@@ -547,6 +547,19 @@ export default memo(function SetsTab() {
   return (
     <div className="p-3 flex flex-col gap-3">
       <BulkImport />
+
+      {/* Draw Set on canvas — drag to create a cell/room at that size */}
+      <button
+        onClick={() => drawingMode === 'draw-set' ? cancelDrawing() : setDrawingMode('draw-set')}
+        className={`w-full px-3 py-2 rounded text-sm font-medium transition-colors ${
+          drawingMode === 'draw-set'
+            ? 'bg-blue-600 text-white'
+            : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+        }`}
+        title="Drag on the canvas to draw a set at that size — trace a sketch or PDF"
+      >
+        {drawingMode === 'draw-set' ? '✏️ Drawing… (Esc to stop)' : '✏️ Draw Set on canvas'}
+      </button>
 
       {/* Collapsible form header */}
       <button onClick={() => setFormCollapsed(!formCollapsed)}

@@ -3154,6 +3154,86 @@ export default function FloorCanvas({ onCanvasSize }) {
     }
   }, [drawingMode])
 
+  // Draw-set mode — drag on the canvas to create a set (cell/room) at that
+  // size, with a live W×D readout. Lets you trace a sketch or PDF directly
+  // instead of typing dimensions. Stays active so you can draw several in a row.
+  useEffect(() => {
+    const fc = fabricRef.current
+    if (!fc || drawingMode !== 'draw-set') return
+
+    let startPt = null
+    let previewRect = null
+    let dimLabel = null
+    const snap = (v) => (snapToGrid ? Math.round(v / (gridSize || 10)) * (gridSize || 10) : v)
+    const clearPreview = () => {
+      if (previewRect) { fc.remove(previewRect); previewRect = null }
+      if (dimLabel) { fc.remove(dimLabel); dimLabel = null }
+    }
+
+    const onDown = (opt) => {
+      if (opt.e.ctrlKey || opt.e.metaKey || opt.e.button !== 0) return
+      const p = fc.getScenePoint(opt.e)
+      startPt = { x: snap(p.x), y: snap(p.y) }
+    }
+
+    const rectFrom = (opt) => {
+      const cur = fc.getScenePoint(opt.e)
+      const cx = snap(cur.x), cy = snap(cur.y)
+      return {
+        x: Math.min(startPt.x, cx), y: Math.min(startPt.y, cy),
+        w: Math.abs(cx - startPt.x), h: Math.abs(cy - startPt.y),
+      }
+    }
+
+    const onMove = (opt) => {
+      if (!startPt) return
+      clearPreview()
+      const { x, y, w, h } = rectFrom(opt)
+      const ppu = useStore.getState().pixelsPerUnit || 1
+      previewRect = new fabric.Rect({
+        left: x, top: y, width: w, height: h,
+        fill: '#3B82F620', stroke: '#3B82F6', strokeWidth: 1.5, strokeDashArray: [6, 4],
+        selectable: false, evented: false, name: DRAWING_PREVIEW_NAME,
+      })
+      fc.add(previewRect)
+      dimLabel = new fabric.FabricText(`${(w / ppu).toFixed(1)}' × ${(h / ppu).toFixed(1)}'`, {
+        left: x + w / 2, top: y + h / 2, fontSize: 14, fill: '#ffffff',
+        backgroundColor: '#1f2937cc', originX: 'center', originY: 'center',
+        selectable: false, evented: false, name: DRAWING_PREVIEW_NAME,
+      })
+      fc.add(dimLabel)
+      fc.requestRenderAll()
+    }
+
+    const onUp = (opt) => {
+      if (!startPt) return
+      const { x, y, w, h } = rectFrom(opt)
+      startPt = null
+      clearPreview()
+      const st = useStore.getState()
+      const ppu = st.pixelsPerUnit || 1
+      const wFt = w / ppu, hFt = h / ppu
+      if (wFt >= 0.5 && hFt >= 0.5) {
+        st.addSet({
+          name: `Set ${st.nextSetId}`, x, y,
+          width: +wFt.toFixed(2), height: +hFt.toFixed(2),
+          category: 'Set', color: '#3B82F6', wallHeight: st.defaultWallHeight,
+        })
+      }
+      fc.requestRenderAll()
+    }
+
+    fc.on('mouse:down', onDown)
+    fc.on('mouse:move', onMove)
+    fc.on('mouse:up', onUp)
+    return () => {
+      fc.off('mouse:down', onDown)
+      fc.off('mouse:move', onMove)
+      fc.off('mouse:up', onUp)
+      if (fabricRef.current) { clearPreview(); fabricRef.current.requestRenderAll() }
+    }
+  }, [drawingMode, snapToGrid, gridSize])
+
   // Component placement mode — click on canvas to place a window, door, wall, etc.
   useEffect(() => {
     const fc = fabricRef.current
@@ -3544,6 +3624,17 @@ export default function FloorCanvas({ onCanvasSize }) {
         <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-red-800 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg z-10 flex items-center gap-3">
           <span>⛔ Drawing Exclusion Zone</span>
           <span className="text-red-200 text-xs">Click+drag to draw · Esc=done</span>
+          <button onClick={cancelDrawing}
+            className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-xs">
+            Done
+          </button>
+        </div>
+      )}
+
+      {drawingMode === 'draw-set' && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg z-10 flex items-center gap-3">
+          <span>✏️ Draw Set — drag to draw a cell / room</span>
+          <span className="text-blue-200 text-xs">Live size shown · snaps to grid · Esc=done</span>
           <button onClick={cancelDrawing}
             className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded text-xs">
             Done
