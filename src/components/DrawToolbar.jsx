@@ -30,6 +30,8 @@ export default function DrawToolbar() {
   const defaultWallHeight = useStore(s => s.defaultWallHeight)
   const drawCategory = useStore(s => s.drawCategory)
   const setDrawCategory = useStore(s => s.setDrawCategory)
+  const flatDefaults = useStore(s => s.flatDefaults)
+  const setFlatDefaults = useStore(s => s.setFlatDefaults)
 
   const isSelect = !drawingMode
   const toggleMode = (mode) => (drawingMode === mode ? cancelDrawing() : setDrawingMode(mode))
@@ -56,7 +58,7 @@ export default function DrawToolbar() {
       <ToolBtn active={drawingMode === 'draw-set' && drawCategory === 'Set'} onClick={() => drawAs('Set')} icon="▭" label="Set"
         title="Draw a set / room — drag to size it. Editable: click to select, move, resize, delete." />
       <ToolBtn active={drawingMode === 'draw-set' && drawCategory === 'Wall'} onClick={() => drawAs('Wall')} icon="▬" label="Wall"
-        title="Draw a wall flat — drag to size it. Editable: click to select, move, resize, delete." />
+        title="Draw a wall — drag its length and it splits into standard flats (see Flat size at right). Each flat is editable on the canvas." />
       <ToolBtn active={drawingMode === 'building-wall'} onClick={() => toggleMode('building-wall')} icon="⛶" label="Bldg Wall"
         title="Structural building wall — click to chain corners (fixed shell, edited in the Build tab list)" />
       <ToolBtn active={drawingMode === 'place-component' && compTpl?.category === 'Door'}
@@ -71,6 +73,24 @@ export default function DrawToolbar() {
       <div className="h-4 w-px bg-gray-600 mx-0.5 shrink-0" />
       <ToolBtn active={drawingMode === 'exclusion-zone'} onClick={() => toggleMode('exclusion-zone')} icon="⛔" label="No-Go"
         title="Draw an exclusion / no-go zone — drag to size" activeCls="bg-red-700 text-white" />
+
+      <div className="h-4 w-px bg-gray-600 mx-0.5 shrink-0" />
+      <div className="flex items-center gap-1 shrink-0"
+        title="Standard flat size — drawing a Wall splits into flats this wide × tall (ft), this thick (inches). Change per set (e.g. courtroom = 16' tall).">
+        <span className="text-[10px] text-gray-500 shrink-0">Flat</span>
+        <input type="number" step="0.5" min="0.5" value={flatDefaults.width}
+          onChange={(e) => setFlatDefaults({ width: parseFloat(e.target.value) || 4 })}
+          className="w-10 px-1 py-0.5 bg-gray-900 border border-gray-600 rounded text-[11px] text-white focus:outline-none focus:border-indigo-500" />
+        <span className="text-[10px] text-gray-500">×</span>
+        <input type="number" step="1" min="1" value={flatDefaults.height}
+          onChange={(e) => setFlatDefaults({ height: parseFloat(e.target.value) || 10 })}
+          className="w-10 px-1 py-0.5 bg-gray-900 border border-gray-600 rounded text-[11px] text-white focus:outline-none focus:border-indigo-500" />
+        <span className="text-[10px] text-gray-500">ft ×</span>
+        <input type="number" step="0.5" min="0.5" value={+(flatDefaults.thickness * 12).toFixed(1)}
+          onChange={(e) => setFlatDefaults({ thickness: (parseFloat(e.target.value) || 3) / 12 })}
+          className="w-9 px-1 py-0.5 bg-gray-900 border border-gray-600 rounded text-[11px] text-white focus:outline-none focus:border-indigo-500" />
+        <span className="text-[10px] text-gray-500">″</span>
+      </div>
     </div>
   )
 }

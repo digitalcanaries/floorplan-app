@@ -59,6 +59,7 @@ function buildSaveData(state, extraFields = {}) {
     nextGroupId: state.nextGroupId,
     artboards: state.artboards,
     nextArtboardId: state.nextArtboardId,
+    flatDefaults: state.flatDefaults,
     buildingWalls: state.buildingWalls,
     nextBuildingWallId: state.nextBuildingWallId,
     buildingWallDefaults: state.buildingWallDefaults,
@@ -293,6 +294,10 @@ const useStore = create((set, get) => ({
   // toolbar draw editable Wall pieces via the same drag mechanic as Sets.
   drawCategory: 'Set',
   setDrawCategory: (c) => set({ drawCategory: c }),
+  // Standard flat dimensions (feet). Drawing a Wall splits its length into
+  // flats of this width; thickness 0.25 ft = 3". Editable in the Draw toolbar.
+  flatDefaults: { width: 4, height: 10, thickness: 0.25 },
+  setFlatDefaults: (partial) => set({ flatDefaults: { ...get().flatDefaults, ...partial } }),
   calibrationPoints: [],
   selectedSetId: null,
   editingSetId: null, // id of set whose Edit modal is open, or null
@@ -2050,6 +2055,7 @@ const useStore = create((set, get) => ({
       nextGroupId: data.nextGroupId || (migratedGroups.length > 0 ? Math.max(...migratedGroups.map(g => g.id || 0)) + 1 : 1),
       artboards: data.artboards || [],
       nextArtboardId: data.nextArtboardId || ((data.artboards?.length > 0) ? Math.max(...data.artboards.map(b => b.id || 0)) + 1 : 1),
+      flatDefaults: data.flatDefaults || { width: 4, height: 10, thickness: 0.25 },
       buildingWalls: data.buildingWalls || [],
       nextBuildingWallId: data.nextBuildingWallId || 1,
       buildingWallDefaults: data.buildingWallDefaults || { thickness: 1, height: 13, color: '#8B4513' },

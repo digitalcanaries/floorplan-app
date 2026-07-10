@@ -3217,18 +3217,44 @@ export default function FloorCanvas({ onCanvasSize }) {
       clearPreview()
       const st = useStore.getState()
       const ppu = st.pixelsPerUnit || 1
-      const wFt = w / ppu, hFt = h / ppu
-      if (wFt >= 0.5 && hFt >= 0.5) {
-        const cat = st.drawCategory || 'Set'
-        // A non-structural wall is built from flats — tag it so the 3D
-        // construction view and Suggest Flats treat it as flat construction.
-        const isWall = cat === 'Wall'
-        st.addSet({
-          name: `${cat} ${st.nextSetId}`, x, y,
-          width: +wFt.toFixed(2), height: +hFt.toFixed(2),
-          category: cat, color: DRAW_CAT_COLOR[cat] || '#3B82F6', wallHeight: st.defaultWallHeight,
-          iconType: isWall ? 'flat' : 'rect',
-        })
+      const cat = st.drawCategory || 'Set'
+
+      if (cat === 'Wall') {
+        // A non-structural wall IS flats — split its length into standard-width
+        // flats (fd.width, remainder as a short flat) laid along its longer axis.
+        const fd = st.flatDefaults || { width: 4, height: 10, thickness: 0.25 }
+        const horizontal = w >= h
+        const lengthFt = (horizontal ? w : h) / ppu
+        if (lengthFt >= 0.5) {
+          const thick = +(fd.thickness || 0.25).toFixed(3)
+          let remaining = lengthFt
+          let offPx = 0
+          let guard = 0
+          while (remaining > 0.05 && guard++ < 300) {
+            const fw = +Math.min(fd.width || 4, remaining).toFixed(2)
+            st.addSet({
+              name: 'Flat',
+              x: horizontal ? Math.round(x + offPx) : x,
+              y: horizontal ? y : Math.round(y + offPx),
+              width: horizontal ? fw : thick,
+              height: horizontal ? thick : fw,
+              category: 'Wall', color: DRAW_CAT_COLOR.Wall,
+              wallHeight: fd.height || 10, iconType: 'flat',
+            })
+            offPx += fw * ppu
+            remaining -= fw
+          }
+        }
+      } else {
+        const wFt = w / ppu, hFt = h / ppu
+        if (wFt >= 0.5 && hFt >= 0.5) {
+          st.addSet({
+            name: `${cat} ${st.nextSetId}`, x, y,
+            width: +wFt.toFixed(2), height: +hFt.toFixed(2),
+            category: cat, color: DRAW_CAT_COLOR[cat] || '#3B82F6',
+            wallHeight: st.defaultWallHeight, iconType: 'rect',
+          })
+        }
       }
       fc.requestRenderAll()
     }
