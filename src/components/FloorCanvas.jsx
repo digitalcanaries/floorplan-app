@@ -3220,10 +3220,14 @@ export default function FloorCanvas({ onCanvasSize }) {
       const wFt = w / ppu, hFt = h / ppu
       if (wFt >= 0.5 && hFt >= 0.5) {
         const cat = st.drawCategory || 'Set'
+        // A non-structural wall is built from flats — tag it so the 3D
+        // construction view and Suggest Flats treat it as flat construction.
+        const isWall = cat === 'Wall'
         st.addSet({
           name: `${cat} ${st.nextSetId}`, x, y,
           width: +wFt.toFixed(2), height: +hFt.toFixed(2),
           category: cat, color: DRAW_CAT_COLOR[cat] || '#3B82F6', wallHeight: st.defaultWallHeight,
+          iconType: isWall ? 'flat' : 'rect',
         })
       }
       fc.requestRenderAll()
