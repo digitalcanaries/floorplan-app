@@ -33,6 +33,9 @@ const DRAWING_POINT_NAME = 'drawing-point'
 const EXCL_PREFIX = 'exclusion-zone-'
 const CLEAR_PREFIX = 'clearance-'
 
+// Default colours per category for the draw-set tool.
+const DRAW_CAT_COLOR = { Set: '#3B82F6', Wall: '#D97706', Window: '#06B6D4', Door: '#10B981', Furniture: '#8B5CF6', Other: '#6B7280' }
+
 // Detect "stray" sets that sit far from the main cluster and would force Fit
 // All to zoom way out (so the real layout can't fill / centre the screen).
 // Returns the ids of such pieces. Conservative on purpose: needs a clear
@@ -3189,10 +3192,12 @@ export default function FloorCanvas({ onCanvasSize }) {
       if (!startPt) return
       clearPreview()
       const { x, y, w, h } = rectFrom(opt)
-      const ppu = useStore.getState().pixelsPerUnit || 1
+      const st0 = useStore.getState()
+      const ppu = st0.pixelsPerUnit || 1
+      const col = DRAW_CAT_COLOR[st0.drawCategory] || '#3B82F6'
       previewRect = new fabric.Rect({
         left: x, top: y, width: w, height: h,
-        fill: '#3B82F620', stroke: '#3B82F6', strokeWidth: 1.5, strokeDashArray: [6, 4],
+        fill: col + '20', stroke: col, strokeWidth: 1.5, strokeDashArray: [6, 4],
         selectable: false, evented: false, name: DRAWING_PREVIEW_NAME,
       })
       fc.add(previewRect)
@@ -3214,10 +3219,11 @@ export default function FloorCanvas({ onCanvasSize }) {
       const ppu = st.pixelsPerUnit || 1
       const wFt = w / ppu, hFt = h / ppu
       if (wFt >= 0.5 && hFt >= 0.5) {
+        const cat = st.drawCategory || 'Set'
         st.addSet({
-          name: `Set ${st.nextSetId}`, x, y,
+          name: `${cat} ${st.nextSetId}`, x, y,
           width: +wFt.toFixed(2), height: +hFt.toFixed(2),
-          category: 'Set', color: '#3B82F6', wallHeight: st.defaultWallHeight,
+          category: cat, color: DRAW_CAT_COLOR[cat] || '#3B82F6', wallHeight: st.defaultWallHeight,
         })
       }
       fc.requestRenderAll()

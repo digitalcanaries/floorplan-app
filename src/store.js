@@ -289,6 +289,10 @@ const useStore = create((set, get) => ({
   // not persisted). Drives the "delete strays?" prompt over the canvas.
   fitOutlierIds: [],
   setFitOutlierIds: (ids) => set({ fitOutlierIds: ids }),
+  // Category the "draw-set" tool creates (Set / Wall / …). Lets the Draw
+  // toolbar draw editable Wall pieces via the same drag mechanic as Sets.
+  drawCategory: 'Set',
+  setDrawCategory: (c) => set({ drawCategory: c }),
   calibrationPoints: [],
   selectedSetId: null,
   editingSetId: null, // id of set whose Edit modal is open, or null

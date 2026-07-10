@@ -39,7 +39,7 @@ export default memo(function SetsTab() {
     bringForward, sendBackward,
     labelMode,
     addGroup,
-    startComponentPlacement, drawingMode, setDrawingMode, cancelDrawing,
+    startComponentPlacement, drawingMode, setDrawingMode, setDrawCategory, cancelDrawing,
     lockToSet, unlockFromSet,
   } = useStore()
   const { defaultWallHeight, setDefaultWallHeight } = useStore()
@@ -550,7 +550,7 @@ export default memo(function SetsTab() {
 
       {/* Draw Set on canvas — drag to create a cell/room at that size */}
       <button
-        onClick={() => drawingMode === 'draw-set' ? cancelDrawing() : setDrawingMode('draw-set')}
+        onClick={() => drawingMode === 'draw-set' ? cancelDrawing() : (setDrawCategory('Set'), setDrawingMode('draw-set'))}
         className={`w-full px-3 py-2 rounded text-sm font-medium transition-colors ${
           drawingMode === 'draw-set'
             ? 'bg-blue-600 text-white'

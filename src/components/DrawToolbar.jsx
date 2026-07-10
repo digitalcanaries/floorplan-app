@@ -28,9 +28,16 @@ export default function DrawToolbar() {
   const columnTpl = useStore(s => s.columnPlacementTemplate)
   const compTpl = useStore(s => s.componentPlacementTemplate)
   const defaultWallHeight = useStore(s => s.defaultWallHeight)
+  const drawCategory = useStore(s => s.drawCategory)
+  const setDrawCategory = useStore(s => s.setDrawCategory)
 
   const isSelect = !drawingMode
   const toggleMode = (mode) => (drawingMode === mode ? cancelDrawing() : setDrawingMode(mode))
+  // Draw an editable piece of the given category by dragging (Set / Wall).
+  const drawAs = (cat) => {
+    if (drawingMode === 'draw-set' && drawCategory === cat) cancelDrawing()
+    else { setDrawCategory(cat); setDrawingMode('draw-set') }
+  }
   const placeComp = (tpl) => {
     if (drawingMode === 'place-component' && compTpl?.name === tpl.name) cancelDrawing()
     else startComponentPlacement(tpl)
@@ -46,10 +53,12 @@ export default function DrawToolbar() {
       <ToolBtn active={isSelect} onClick={cancelDrawing} icon="⭯" label="Select"
         title="Select / move pieces (Esc)" activeCls="bg-gray-600 text-white" />
       <div className="h-4 w-px bg-gray-600 mx-0.5 shrink-0" />
-      <ToolBtn active={drawingMode === 'draw-set'} onClick={() => toggleMode('draw-set')} icon="▭" label="Set"
-        title="Draw a set / room — drag on the canvas to size it (snaps to grid)" />
-      <ToolBtn active={drawingMode === 'building-wall'} onClick={() => toggleMode('building-wall')} icon="▬" label="Wall"
-        title="Draw building walls — click to chain corners" />
+      <ToolBtn active={drawingMode === 'draw-set' && drawCategory === 'Set'} onClick={() => drawAs('Set')} icon="▭" label="Set"
+        title="Draw a set / room — drag to size it. Editable: click to select, move, resize, delete." />
+      <ToolBtn active={drawingMode === 'draw-set' && drawCategory === 'Wall'} onClick={() => drawAs('Wall')} icon="▬" label="Wall"
+        title="Draw a wall flat — drag to size it. Editable: click to select, move, resize, delete." />
+      <ToolBtn active={drawingMode === 'building-wall'} onClick={() => toggleMode('building-wall')} icon="⛶" label="Bldg Wall"
+        title="Structural building wall — click to chain corners (fixed shell, edited in the Build tab list)" />
       <ToolBtn active={drawingMode === 'place-component' && compTpl?.category === 'Door'}
         onClick={() => placeComp({ name: 'Door', width: 3, height: 0.292, category: 'Door', color: '#10B981', iconType: 'door', wallHeight: defaultWallHeight })}
         icon="🚪" label="Door" title="Place a door — click where it goes" />
