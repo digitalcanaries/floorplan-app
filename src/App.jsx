@@ -5,6 +5,7 @@ import TopBar from './components/TopBar.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import FloorCanvas from './components/FloorCanvas.jsx'
 import QuickActionsBar from './components/QuickActionsBar.jsx'
+import DrawToolbar from './components/DrawToolbar.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import ChangePasswordModal from './components/ChangePasswordModal.jsx'
 import EditSetModal from './components/EditSetModal.jsx'
@@ -144,6 +145,7 @@ function App() {
           </button>
         </span>
       </div>
+      {!is3D && <DrawToolbar />}
       <QuickActionsBar />
       <div className="flex flex-1 overflow-hidden">
         {!is3D && <Sidebar />}
