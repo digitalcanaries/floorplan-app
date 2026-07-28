@@ -30,6 +30,7 @@ export default function TopBar({ canvasSize }) {
     freehandWidth, setFreehandWidth,
     freehandStrokes, clearFreehandStrokes,
     saveVersion, listVersions, restoreVersion, deleteVersion,
+    uploadFile, addRef, setAnnotatingRefId,
   } = useStore()
 
   const loadInputRef = useRef(null)
@@ -333,21 +334,64 @@ export default function TopBar({ canvasSize }) {
     }
   }
 
-  // Load from file
-  const handleLoadFile = (e) => {
+  // Load from file. Accepts JSON project bundles (the intended use case).
+  // If the user picks an image (common iPad slip — Safari doesn't always
+  // enforce the accept filter), offer to import it as a project-level
+  // reference and jump straight into the annotate view instead of the
+  // old "Invalid project file" dead-end.
+  const handleLoadFile = async (e) => {
     const file = e.target.files[0]
+    e.target.value = ''
     if (!file) return
+
+    if ((file.type || '').startsWith('image/')) {
+      const ok = window.confirm(`"${file.name}" is a ${file.type.replace('image/', '').toUpperCase()} image, not a project file.\n\nAdd it as a Photo Note (project-level reference) and open the annotate view?`)
+      if (!ok) return
+      await addPhotoNoteAndAnnotate(file)
+      return
+    }
+
     const reader = new FileReader()
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result)
         importProject(data)
       } catch {
-        alert('Invalid project file')
+        alert(`"${file.name}" isn't a project (.json) file and isn't an image either.\n\nProject files come from Save > Export to File. To attach a photo or PDF, use the 📎 References button on a set or the 📸 Photo Note button in the top bar.`)
       }
     }
     reader.readAsText(file)
+  }
+
+  // Upload a photo as a project-level document reference, then open the
+  // annotate view on it. Used by both the fallback in handleLoadFile and
+  // the dedicated "📸 Photo Note" top-bar button.
+  const addPhotoNoteAndAnnotate = async (file) => {
+    if (!serverProjectId) {
+      alert('Save the project to the server first — references need a project to attach to.')
+      return
+    }
+    try {
+      const uploaded = await uploadFile(file)
+      const ref = await addRef({
+        set_id: null,               // project-level (not tied to a specific set)
+        kind: 'document',
+        label: file.name,
+        file_id: uploaded.id,
+        category: 'photo',
+      })
+      setAnnotatingRefId(ref.id)
+    } catch (err) {
+      alert('Could not add photo: ' + (err?.message || 'unknown error'))
+    }
+  }
+
+  const photoNoteInputRef = useRef(null)
+  const handlePhotoNotePick = (e) => {
+    const file = e.target.files[0]
     e.target.value = ''
+    if (!file) return
+    addPhotoNoteAndAnnotate(file)
   }
 
   // Import only sets (& walls) from a project file, keeping current PDF/scale
@@ -726,6 +770,26 @@ export default function TopBar({ canvasSize }) {
           • auto-versioning
         </span>
       )}
+
+      {/* Photo Note — one-tap to attach a photo (or PDF via reuse of the
+          same handler) as a project-level reference and jump straight into
+          the annotate view. Bypasses the References-modal-per-set flow when
+          the user just wants to draw over a photo right now. */}
+      <button
+        onClick={() => photoNoteInputRef.current?.click()}
+        title="Photo Note — pick a photo, upload it, and start drawing on it"
+        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+      >
+        📸 Photo Note
+      </button>
+      <input
+        ref={photoNoteInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handlePhotoNotePick}
+      />
       {freehandDrawMode && (
         <>
           <button
