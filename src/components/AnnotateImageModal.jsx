@@ -33,11 +33,15 @@ export default function AnnotateImageModal() {
   const updateRef = useStore(s => s.updateRef)
 
   const wrapperRef = useRef(null)
+  const viewportRef = useRef(null)         // inner div — carries pan+zoom CSS transform
   const imgRef = useRef(null)
   const canvasElRef = useRef(null)
   const fcRef = useRef(null)
   const displayRef = useRef(null) // { natW, natH, dispW, dispH, dispLeft, dispTop, rotation, zoom }
   const shapeDrawStateRef = useRef({ startPt: null, active: null }) // in-flight shape drag
+  const spaceHeldRef = useRef(false)       // desktop: space bar = temporary pan mode
+  const panStateRef = useRef({ active: false, sx: 0, sy: 0, sPan: null })
+  const touchPanRef = useRef({ active: false, ids: [], startCentroid: null, startDist: null, startPan: null, startZoom: null })
 
   const [refRow, setRefRow] = useState(null)
   const [imgUrl, setImgUrl] = useState(null)
@@ -405,6 +409,153 @@ export default function AnnotateImageModal() {
     return () => fc.off('object:modified', onModified)
   }, [])
 
+  // ----- Zoom / pan: wheel + mouse (space+drag or middle-click) + 2-finger touch -----
+  // All handlers are attached imperatively on the wrapper with capture=true
+  // so we can steal events from fabric before they reach the drawing layer.
+  useEffect(() => {
+    const w = wrapperRef.current
+    if (!w || !imgUrl) return
+
+    const onWheel = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const rect = w.getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      setZoom(oldZoom => {
+        const newZoom = clampZoom(oldZoom * factor)
+        setPanOffset(p => ({
+          x: mx - (mx - p.x) * (newZoom / oldZoom),
+          y: my - (my - p.y) * (newZoom / oldZoom),
+        }))
+        return newZoom
+      })
+    }
+
+    const onMouseDown = (e) => {
+      // Middle button OR space+drag = pan mode.
+      const isPan = e.button === 1 || (e.button === 0 && spaceHeldRef.current)
+      if (!isPan) return
+      e.preventDefault()
+      e.stopPropagation()
+      panStateRef.current = {
+        active: true, sx: e.clientX, sy: e.clientY,
+        sPan: { ...panOffset },
+      }
+    }
+    const onMouseMove = (e) => {
+      const st = panStateRef.current
+      if (!st.active) return
+      e.preventDefault()
+      e.stopPropagation()
+      setPanOffset({
+        x: st.sPan.x + (e.clientX - st.sx),
+        y: st.sPan.y + (e.clientY - st.sy),
+      })
+    }
+    const onMouseUp = (e) => {
+      if (!panStateRef.current.active) return
+      e.preventDefault()
+      e.stopPropagation()
+      panStateRef.current.active = false
+    }
+
+    const onTouchStart = (e) => {
+      // Only 2-finger gestures trigger pan/zoom. Single touch is left for
+      // fabric (drawing / selecting).
+      if (e.touches.length < 2) return
+      e.preventDefault()
+      e.stopPropagation()
+      const t1 = e.touches[0], t2 = e.touches[1]
+      const cx = (t1.clientX + t2.clientX) / 2
+      const cy = (t1.clientY + t2.clientY) / 2
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+      touchPanRef.current = {
+        active: true,
+        ids: [t1.identifier, t2.identifier],
+        startCentroid: { x: cx, y: cy },
+        startDist: dist,
+        startPan: { ...panOffset },
+        startZoom: zoom,
+      }
+    }
+    const onTouchMove = (e) => {
+      const st = touchPanRef.current
+      if (!st.active) return
+      const arr = [...e.touches]
+      const t1 = arr.find(t => t.identifier === st.ids[0])
+      const t2 = arr.find(t => t.identifier === st.ids[1])
+      if (!t1 || !t2) return
+      e.preventDefault()
+      e.stopPropagation()
+      const cx = (t1.clientX + t2.clientX) / 2
+      const cy = (t1.clientY + t2.clientY) / 2
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY)
+      const newZoom = clampZoom(st.startZoom * (dist / st.startDist))
+      const rect = w.getBoundingClientRect()
+      const cxLocal = st.startCentroid.x - rect.left
+      const cyLocal = st.startCentroid.y - rect.top
+      const cdx = cx - st.startCentroid.x
+      const cdy = cy - st.startCentroid.y
+      const r = newZoom / st.startZoom
+      setZoom(newZoom)
+      setPanOffset({
+        x: cxLocal - (cxLocal - st.startPan.x) * r + cdx,
+        y: cyLocal - (cyLocal - st.startPan.y) * r + cdy,
+      })
+    }
+    const onTouchEnd = (e) => {
+      if (e.touches.length < 2 && touchPanRef.current.active) {
+        touchPanRef.current.active = false
+      }
+    }
+
+    w.addEventListener('wheel',      onWheel,      { passive: false, capture: true })
+    w.addEventListener('mousedown',  onMouseDown,  { capture: true })
+    w.addEventListener('mousemove',  onMouseMove,  { capture: true })
+    w.addEventListener('mouseup',    onMouseUp,    { capture: true })
+    w.addEventListener('mouseleave', onMouseUp,    { capture: true })
+    w.addEventListener('touchstart', onTouchStart, { passive: false, capture: true })
+    w.addEventListener('touchmove',  onTouchMove,  { passive: false, capture: true })
+    w.addEventListener('touchend',   onTouchEnd,   { passive: false, capture: true })
+    w.addEventListener('touchcancel',onTouchEnd,   { passive: false, capture: true })
+    return () => {
+      w.removeEventListener('wheel',      onWheel,      { capture: true })
+      w.removeEventListener('mousedown',  onMouseDown,  { capture: true })
+      w.removeEventListener('mousemove',  onMouseMove,  { capture: true })
+      w.removeEventListener('mouseup',    onMouseUp,    { capture: true })
+      w.removeEventListener('mouseleave', onMouseUp,    { capture: true })
+      w.removeEventListener('touchstart', onTouchStart, { capture: true })
+      w.removeEventListener('touchmove',  onTouchMove,  { capture: true })
+      w.removeEventListener('touchend',   onTouchEnd,   { capture: true })
+      w.removeEventListener('touchcancel',onTouchEnd,   { capture: true })
+    }
+  }, [imgUrl, panOffset, zoom])
+
+  // Track Space key for temporary pan mode
+  useEffect(() => {
+    if (!annotatingRefId) return
+    const onDown = (e) => {
+      if (e.code === 'Space' && !e.repeat) {
+        // Avoid conflicting with text editing
+        const active = fcRef.current?.getActiveObject()
+        if (active?.isEditing) return
+        spaceHeldRef.current = true
+        e.preventDefault()
+      }
+    }
+    const onUp = (e) => {
+      if (e.code === 'Space') { spaceHeldRef.current = false; e.preventDefault() }
+    }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+    }
+  }, [annotatingRefId])
+
   // Keyboard shortcuts
   useEffect(() => {
     if (!annotatingRefId) return
@@ -639,6 +790,24 @@ export default function AnnotateImageModal() {
 
           <div className="h-4 w-px bg-gray-600 mx-1" />
 
+          {/* Zoom controls — wheel zooms at cursor, space+drag or two-
+              finger pan. These buttons are here as a fallback. */}
+          <button onClick={() => setZoom(z => clampZoom(z / 1.2))}
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs font-bold"
+            title="Zoom out">−</button>
+          <button
+            onClick={() => { setZoom(1); setPanOffset({ x: 0, y: 0 }) }}
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-[10px] min-w-[3rem]"
+            title="Reset zoom + pan (Space+drag or wheel to zoom)"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button onClick={() => setZoom(z => clampZoom(z * 1.2))}
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs font-bold"
+            title="Zoom in">+</button>
+
+          <div className="h-4 w-px bg-gray-600 mx-1" />
+
           {/* Undo / redo */}
           <button onClick={doUndo}
             disabled={historyRef.current.past.length === 0}
@@ -682,27 +851,51 @@ export default function AnnotateImageModal() {
           </div>
         )}
 
-        {/* Canvas area */}
+        {/* Canvas area. Outer wrapper is fixed-size (flex-1). The inner
+            viewport div carries the pan+zoom CSS transform, and everything
+            inside (img + fabric overlay canvas) scales/translates together
+            keeping the annotation aligned to the image at any zoom. */}
         <div ref={wrapperRef}
           className="flex-1 relative bg-gray-950 overflow-hidden"
-          style={{ touchAction: 'none' }}>
+          style={{
+            touchAction: 'none',
+            cursor: spaceHeldRef.current ? 'grab' : undefined,
+          }}>
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm">
+            <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm z-10">
               Loading image…
             </div>
           )}
-          {imgUrl && (
-            <img
-              ref={imgRef}
-              src={imgUrl}
-              alt=""
-              onLoad={handleImgLoad}
-              className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-              style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 120ms' }}
-              draggable={false}
-            />
+          <div ref={viewportRef}
+            className="absolute inset-0"
+            style={{
+              transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+              transformOrigin: '0 0',
+              transition: panStateRef.current.active || touchPanRef.current.active ? 'none' : 'transform 60ms',
+            }}
+          >
+            {imgUrl && (
+              <img
+                ref={imgRef}
+                src={imgUrl}
+                alt=""
+                onLoad={handleImgLoad}
+                className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+                style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 120ms' }}
+                draggable={false}
+              />
+            )}
+            <canvas ref={canvasElRef}
+              style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 120ms' }} />
+          </div>
+
+          {/* Zoom hint overlay (bottom-right) — subtle */}
+          {(zoom !== 1 || panOffset.x !== 0 || panOffset.y !== 0) && (
+            <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/60 text-[10px] text-gray-300 rounded font-mono pointer-events-none">
+              {Math.round(zoom * 100)}%
+              {(panOffset.x !== 0 || panOffset.y !== 0) && ` · pan ${panOffset.x | 0},${panOffset.y | 0}`}
+            </div>
           )}
-          <canvas ref={canvasElRef} style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 120ms' }} />
         </div>
       </div>
     </div>
@@ -714,6 +907,8 @@ export default function AnnotateImageModal() {
 function countAnno(fc) {
   return fc.getObjects().filter(o => o.name === 'anno').length
 }
+
+function clampZoom(z) { return Math.max(0.1, Math.min(10, z)) }
 
 function configureBrush(fc, tool, color, width) {
   if (tool === 'draw') {
