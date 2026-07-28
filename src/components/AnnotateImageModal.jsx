@@ -84,56 +84,63 @@ export default function AnnotateImageModal() {
       const fImg = await fabric.FabricImage.fromURL(objectUrl)
       if (cancelled) { URL.revokeObjectURL(objectUrl); return }
 
-      const iw = fImg.width
-      const ih = fImg.height
-      // Fit canvas to the wrapper while preserving the image aspect ratio.
+      const iw = fImg.width || fImg._element?.naturalWidth || 1
+      const ih = fImg.height || fImg._element?.naturalHeight || 1
+
+      // Canvas fills the wrapper. Fallback to window size if the wrapper
+      // hasn't laid out yet (happens intermittently on iPad Safari when
+      // the modal just mounted). Fabric owns retina scaling internally.
       const rect = wrapperRef.current.getBoundingClientRect()
-      const maxW = rect.width - 8
-      const maxH = rect.height - 8
-      const scale = Math.min(maxW / iw, maxH / ih, 1)
-      const cw = Math.round(iw * scale)
-      const ch = Math.round(ih * scale)
+      const cw = Math.max(300, Math.round((rect.width || window.innerWidth) - 8))
+      const ch = Math.max(300, Math.round((rect.height || window.innerHeight - 60) - 8))
 
       const fc = new fabric.Canvas(canvasElRef.current, {
         width: cw, height: ch, backgroundColor: '#1a1a2e', selection: false,
       })
-      fc.setDimensions({ width: cw, height: ch })
-      fImg.set({ left: 0, top: 0, scaleX: scale, scaleY: scale, selectable: false, evented: false })
+
+      // Image at NATIVE resolution, no per-object scaling. The fit-and-
+      // center is done via viewportTransform so drawing coords map 1:1 to
+      // image-native pixels — strokes save as-is with no scaling math.
+      fImg.set({ left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false })
       fc.add(fImg)
       fc.sendObjectToBack(fImg)
 
-      // Restore prior strokes (server stores them at original image resolution;
-      // we scale them into the canvas coordinate space).
+      const fitScale = Math.min(cw / iw, ch / ih, 1)
+      const offsetX = (cw - iw * fitScale) / 2
+      const offsetY = (ch - ih * fitScale) / 2
+      fc.setViewportTransform([fitScale, 0, 0, fitScale, offsetX, offsetY])
+
+      // Restore prior strokes — stored in image-native pixel space.
       let prior = []
       if (refRow.annotations_json) {
         try { prior = JSON.parse(refRow.annotations_json)?.strokes || [] } catch {}
       }
-      for (const s of prior) {
-        addStrokeToCanvas(fc, s, scale)
-      }
+      for (const s of prior) addStrokeToCanvas(fc, s)
       setStrokeCount(prior.length)
 
+      // Brush stroke widths are in canvas-CSS pixels by default. With our
+      // viewport transform (scale < 1), a 4-px brush would produce a very
+      // thin visible line. Divide by fitScale so what the user sees on
+      // screen matches the width they picked.
       const brush = new fabric.PencilBrush(fc)
       brush.color = color
-      brush.width = width
+      brush.width = width / fitScale
       fc.freeDrawingBrush = brush
       fc.isDrawingMode = mode === 'draw'
       fc.defaultCursor = 'crosshair'
       fc.hoverCursor = 'crosshair'
 
-      // Capture new strokes → store scaled BACK to image space
       fc.on('path:created', (opt) => {
         const path = opt?.path
         if (!path) return
         pushHistorySnapshot(fc)
-        // Tag it with a name so the eraser + save routines can find it.
         path.set({ name: 'stroke', selectable: false, evented: mode === 'erase' })
         fc.requestRenderAll()
         setStrokeCount(countStrokes(fc))
       })
 
       fcRef.current = fc
-      bgImageRef.current = { fImg, imageWidth: iw, imageHeight: ih, canvasScale: scale, objectUrl }
+      bgImageRef.current = { fImg, imageWidth: iw, imageHeight: ih, fitScale, offsetX, offsetY, cw, ch, objectUrl }
       setLoading(false)
     })()
 
@@ -150,12 +157,14 @@ export default function AnnotateImageModal() {
   useEffect(() => {
     const fc = fcRef.current
     if (!fc) return
+    const fitScale = bgImageRef.current?.fitScale || 1
     if (fc.freeDrawingBrush) {
       fc.freeDrawingBrush.color = color
-      fc.freeDrawingBrush.width = width
+      // Brush width is in canvas-CSS pixels; divide by fitScale so the
+      // visible line matches the picked width regardless of zoom.
+      fc.freeDrawingBrush.width = width / fitScale
     }
     fc.isDrawingMode = mode === 'draw'
-    // In eraser mode, make stroke paths clickable so tap deletes them
     for (const o of fc.getObjects()) {
       if (o.name === 'stroke') { o.selectable = false; o.evented = mode === 'erase' }
     }
@@ -194,12 +203,13 @@ export default function AnnotateImageModal() {
 
   const handleSave = async () => {
     const fc = fcRef.current
-    const bg = bgImageRef.current
-    if (!fc || !bg) return
+    if (!fc) return
     setSaving(true)
     setError(null)
     try {
-      const strokes = collectStrokes(fc, bg.canvasScale)
+      // Strokes are already in image-native coords (viewport transform handles
+      // display fit), so we can store them without any scaling conversion.
+      const strokes = collectStrokes(fc)
       await updateRef(annotatingRefId, {
         annotations_json: JSON.stringify({ strokes, updated_at: new Date().toISOString() }),
       })
@@ -225,10 +235,20 @@ export default function AnnotateImageModal() {
     const fc = fcRef.current
     const bg = bgImageRef.current
     if (!fc || !bg) return
-    // Render at original image resolution so the exported PNG isn't
-    // downsampled to the on-screen canvas size.
-    const multiplier = 1 / bg.canvasScale
-    const dataUrl = fc.toDataURL({ format: 'png', multiplier })
+    // Export at native image resolution. Everything on the canvas is
+    // already in native coords; we just need to counteract the fit-scale
+    // that viewportTransform is applying for display, and pin the export
+    // region to the image's native bounds so we don't include the
+    // letterbox around it.
+    const multiplier = 1 / (bg.fitScale || 1)
+    const dataUrl = fc.toDataURL({
+      format: 'png',
+      multiplier,
+      left: bg.offsetX,
+      top: bg.offsetY,
+      width: bg.imageWidth * bg.fitScale,
+      height: bg.imageHeight * bg.fitScale,
+    })
     const filename = `${(refRow?.label || 'annotated').replace(/[^a-z0-9_.-]+/gi, '_')}_annotated.png`
     const a = document.createElement('a')
     a.href = dataUrl
@@ -399,46 +419,35 @@ function restoreSnapshot(fc, snap, bg) {
   fc.requestRenderAll()
 }
 
-// Add a persisted stroke to a fabric canvas.
-// Persisted strokes are stored fully in image-native pixel space — path
-// commands, left/top, and strokeWidth. `canvasScale` maps native → display
-// pixels for the current viewport (or 1.0 for a render at native size, e.g.
-// the print sheet composite). scaleX/scaleY scales the path commands AND
-// (since strokeUniform is left false) the visual stroke width uniformly,
-// so we do NOT pre-multiply strokeWidth here.
-export function addStrokeToCanvas(fc, s, canvasScale) {
+// Add a persisted stroke to a fabric canvas at image-native coords.
+// All display fit/zoom is handled via viewportTransform on the parent
+// canvas — the stroke itself is placed at scale 1 in scene coords.
+// Works for the annotate editor (viewportTransform scales to fit) and
+// the print composite (viewportTransform identity, canvas sized to
+// image-native).
+export function addStrokeToCanvas(fc, s) {
   const p = new fabric.Path(s.path, {
-    left: (s.left || 0) * canvasScale,
-    top: (s.top || 0) * canvasScale,
+    left: s.left || 0,
+    top: s.top || 0,
     stroke: s.color || '#ef4444',
     strokeWidth: s.width || 3,
     fill: null,
     strokeLineCap: 'round', strokeLineJoin: 'round',
-    scaleX: canvasScale,
-    scaleY: canvasScale,
     selectable: false, evented: false,
     name: 'stroke',
   })
   fc.add(p)
 }
 
-// Serialize strokes back to image-native pixel space for persistence.
-// Path commands are absolute in fabric's local space at draw time (canvas
-// pixels), so we scale them by inv=1/canvasScale alongside left/top/width
-// to land in a single self-consistent native-pixel format that renders
-// correctly at any future viewport size.
-export function collectStrokes(fc, canvasScale) {
-  const out = []
-  const inv = canvasScale === 0 ? 1 : 1 / canvasScale
-  for (const o of fc.getObjects().filter(o => o.name === 'stroke')) {
-    const scaledPath = (o.path || []).map(cmd => cmd.map((v, i) => i === 0 ? v : v * inv))
-    out.push({
-      path: scaledPath,
-      left: (o.left || 0) * inv,
-      top: (o.top || 0) * inv,
-      color: o.stroke || '#ef4444',
-      width: (o.strokeWidth || 3) * inv,
-    })
-  }
-  return out
+// Serialize strokes for persistence. PencilBrush captures pointer events
+// in scene coords (viewportTransform is applied on the way in), so the
+// stroke's path/left/top/width are already in image-native pixels.
+export function collectStrokes(fc) {
+  return fc.getObjects().filter(o => o.name === 'stroke').map(o => ({
+    path: structuredClone(o.path),
+    left: o.left || 0,
+    top: o.top || 0,
+    color: o.stroke || '#ef4444',
+    width: o.strokeWidth || 3,
+  }))
 }

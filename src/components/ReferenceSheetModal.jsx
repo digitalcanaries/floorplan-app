@@ -58,7 +58,7 @@ async function compositeImageWithAnnotations(imageBlobUrl, strokes) {
         fImg.set({ left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false })
         fc.add(fImg)
         // canvasScale = 1 → strokes render at native resolution
-        for (const s of (strokes || [])) addStrokeToCanvas(fc, s, 1)
+        for (const s of (strokes || [])) addStrokeToCanvas(fc, s)
         fc.renderAll()
         el.toBlob((blob) => {
           fc.dispose()
