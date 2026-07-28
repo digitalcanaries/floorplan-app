@@ -474,11 +474,12 @@ ${refs.length === 0 ? '<div class="empty">No references on this sheet.</div>' : 
 
 // ── Documents tab ──
 function DocumentsTab({ refs, onUpload, onUpdate, onDelete, onOpen, uploading }) {
+  const setAnnotatingRefId = useStore(s => s.setAnnotatingRefId)
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs text-gray-400">
-          Photos and PDFs. Tap a thumbnail to open in a new tab.
+          Photos and PDFs. Tap a thumbnail to open in a new tab. Image refs also have an ✎ Annotate button.
         </span>
         <button
           onClick={onUpload}
@@ -494,38 +495,58 @@ function DocumentsTab({ refs, onUpload, onUpdate, onDelete, onOpen, uploading })
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-          {refs.map(r => (
-            <div key={r.id} className="group bg-gray-900 rounded border border-gray-700 overflow-hidden">
-              <button
-                onClick={() => r.file_id && onOpen(r.file_id)}
-                className="block w-full aspect-square overflow-hidden bg-gray-700"
-              >
-                <AuthedFileThumb fileId={r.file_id} mime={r.file_mime_type} filename={r.file_filename || r.label} className="w-full h-full" />
-              </button>
-              <div className="p-2">
-                <input
-                  value={r.label || ''}
-                  onChange={(e) => onUpdate(r.id, { label: e.target.value })}
-                  className="w-full px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs text-white focus:outline-none focus:border-indigo-500"
-                />
-                <div className="flex items-center justify-between mt-1.5">
-                  <select
-                    value={r.category || 'drawing'}
-                    onChange={(e) => onUpdate(r.id, { category: e.target.value })}
-                    className="px-1 py-0.5 bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300"
-                  >
-                    <option value="drawing">drawing</option>
-                    <option value="photo">photo</option>
-                    <option value="other">other</option>
-                  </select>
-                  <button
-                    onClick={() => onDelete(r)}
-                    className="text-red-400 hover:text-red-300 text-[10px]"
-                  >Delete</button>
+          {refs.map(r => {
+            const isImage = (r.file_mime_type || '').startsWith('image/')
+            return (
+              <div key={r.id} className="group bg-gray-900 rounded border border-gray-700 overflow-hidden relative">
+                <button
+                  onClick={() => r.file_id && onOpen(r.file_id)}
+                  className="block w-full aspect-square overflow-hidden bg-gray-700"
+                >
+                  <AuthedFileThumb fileId={r.file_id} mime={r.file_mime_type} filename={r.file_filename || r.label} className="w-full h-full" />
+                </button>
+                {r.has_annotations ? (
+                  <span className="absolute top-1 left-1 px-1.5 py-0.5 bg-rose-600/90 text-white text-[9px] rounded shadow"
+                    title="This image has saved annotations">
+                    ✎ annotated
+                  </span>
+                ) : null}
+                <div className="p-2">
+                  <input
+                    value={r.label || ''}
+                    onChange={(e) => onUpdate(r.id, { label: e.target.value })}
+                    className="w-full px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs text-white focus:outline-none focus:border-indigo-500"
+                  />
+                  <div className="flex items-center justify-between mt-1.5 gap-1">
+                    <select
+                      value={r.category || 'drawing'}
+                      onChange={(e) => onUpdate(r.id, { category: e.target.value })}
+                      className="px-1 py-0.5 bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300"
+                    >
+                      <option value="drawing">drawing</option>
+                      <option value="photo">photo</option>
+                      <option value="other">other</option>
+                    </select>
+                    <div className="flex items-center gap-1">
+                      {isImage && (
+                        <button
+                          onClick={() => setAnnotatingRefId(r.id)}
+                          className="text-rose-300 hover:text-rose-200 text-[10px]"
+                          title="Draw / annotate on this image"
+                        >
+                          ✎ Annotate
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onDelete(r)}
+                        className="text-red-400 hover:text-red-300 text-[10px]"
+                      >Delete</button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

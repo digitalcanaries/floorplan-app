@@ -1798,6 +1798,24 @@ const useStore = create((set, get) => ({
     return await resp.json()
   },
 
+  // Single ref including annotations_json — the list endpoint strips it
+  // (strokes get large) so the AnnotateImageModal fetches it explicitly.
+  getRef: async (refId) => {
+    const projectId = loadServerProjectId()
+    const token = localStorage.getItem('floorplan-token')
+    if (!projectId || !token) return null
+    const resp = await fetch(`/api/projects/${projectId}/refs/${refId}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (!resp.ok) return null
+    return await resp.json()
+  },
+
+  // UI state for the image annotator — open with the ref id whose image
+  // we want to draw on top of; null = closed.
+  annotatingRefId: null,
+  setAnnotatingRefId: (id) => set({ annotatingRefId: id }),
+
   addRef: async (payload) => {
     const projectId = loadServerProjectId()
     const token = localStorage.getItem('floorplan-token')

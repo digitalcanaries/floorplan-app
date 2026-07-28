@@ -19,6 +19,7 @@ const REF_FIELDS = [
   'paint_brand', 'paint_code', 'paint_color', 'paint_finish',
   'furniture_url', 'furniture_status', 'furniture_dimensions', 'furniture_source',
   'notes', 'sort_order',
+  'annotations_json', // non-destructive draw-on-image overlay (JSON string)
 ]
 
 // GET /api/projects/:pid/refs?set_id=X
@@ -30,9 +31,16 @@ router.get('/projects/:pid/refs', (req, res) => {
 
   // LEFT JOIN files so the client knows the mime type for each attachment
   // without a second round-trip per ref (the modal's thumbnails branch on it).
+  // Exclude annotations_json from the list payload — strokes can be large
+  // and the modal only needs them when the user opens the annotate view.
+  // Client fetches them via the single-ref endpoint below on demand.
   const baseSql = `
     SELECT
-      r.*,
+      r.id, r.project_id, r.set_id, r.kind, r.label, r.category, r.file_id,
+      r.paint_brand, r.paint_code, r.paint_color, r.paint_finish,
+      r.furniture_url, r.furniture_status, r.furniture_dimensions, r.furniture_source,
+      r.notes, r.sort_order, r.created_at, r.updated_at,
+      (r.annotations_json IS NOT NULL) AS has_annotations,
       f.mime_type AS file_mime_type,
       f.filename AS file_filename,
       f.size_bytes AS file_size_bytes
@@ -50,6 +58,22 @@ router.get('/projects/:pid/refs', (req, res) => {
     rows = db.prepare(baseSql + ' ORDER BY r.set_id, r.kind, r.sort_order, r.id').all(project.id)
   }
   res.json(rows)
+})
+
+// GET /api/projects/:pid/refs/:rid — full row including annotations_json
+router.get('/projects/:pid/refs/:rid', (req, res) => {
+  const project = getOwnedProject(req.user.id, req.params.pid)
+  if (!project) return res.status(404).json({ error: 'Project not found' })
+  const row = db.prepare(`
+    SELECT r.*,
+           f.mime_type AS file_mime_type,
+           f.filename AS file_filename,
+           f.size_bytes AS file_size_bytes
+    FROM refs r LEFT JOIN files f ON f.id = r.file_id
+    WHERE r.id = ? AND r.project_id = ?
+  `).get(req.params.rid, project.id)
+  if (!row) return res.status(404).json({ error: 'Reference not found' })
+  res.json(row)
 })
 
 // POST /api/projects/:pid/refs — create a reference

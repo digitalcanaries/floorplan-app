@@ -94,6 +94,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_refs_project_set ON refs(project_id, set_id, kind);
 `)
 
+// Non-destructive image annotations — stored as JSON alongside the ref
+// so users can re-edit later. Added post-hoc via ALTER; the try/catch
+// swallows the 'duplicate column' error on subsequent boots. Format:
+//   { strokes: [ { path:[...], left, top, color, width } ] }
+try {
+  db.exec(`ALTER TABLE refs ADD COLUMN annotations_json TEXT`)
+} catch (e) {
+  if (!String(e.message || e).includes('duplicate column')) throw e
+}
+
 // Component types library
 db.exec(`
   CREATE TABLE IF NOT EXISTS component_types (

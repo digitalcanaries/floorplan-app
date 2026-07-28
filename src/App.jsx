@@ -9,6 +9,7 @@ import DrawToolbar from './components/DrawToolbar.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import ChangePasswordModal from './components/ChangePasswordModal.jsx'
 import EditSetModal from './components/EditSetModal.jsx'
+import AnnotateImageModal from './components/AnnotateImageModal.jsx'
 import ReferenceSheetModal from './components/ReferenceSheetModal.jsx'
 
 const Scene3D = lazy(() => import('./components/Scene3D.jsx'))
@@ -165,6 +166,7 @@ function App() {
         )}
       </div>
       <EditSetModal />
+      <AnnotateImageModal />
       <ReferenceSheetModal />
     </div>
   )
