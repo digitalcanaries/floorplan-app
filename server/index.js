@@ -12,6 +12,7 @@ import refRoutes from './routes/refs.js'
 
 // Import db to ensure tables are created on startup
 import './db.js'
+import { ensureCors, isR2Enabled } from './r2.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -51,4 +52,9 @@ app.get('/{*path}', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Floorplan server running on port ${PORT}`)
+  if (isR2Enabled()) {
+    ensureCors().catch(e => console.warn('[r2] ensureCors:', e?.message || e))
+  } else {
+    console.log('[files] R2 not configured — falling back to local disk storage')
+  }
 })
