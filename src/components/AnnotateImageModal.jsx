@@ -399,14 +399,19 @@ function restoreSnapshot(fc, snap, bg) {
   fc.requestRenderAll()
 }
 
-// When adding a persisted stroke to the canvas, scale it into on-screen
-// coords. Persisted strokes are stored in image-native pixel space.
-function addStrokeToCanvas(fc, s, canvasScale) {
+// Add a persisted stroke to a fabric canvas.
+// Persisted strokes are stored fully in image-native pixel space — path
+// commands, left/top, and strokeWidth. `canvasScale` maps native → display
+// pixels for the current viewport (or 1.0 for a render at native size, e.g.
+// the print sheet composite). scaleX/scaleY scales the path commands AND
+// (since strokeUniform is left false) the visual stroke width uniformly,
+// so we do NOT pre-multiply strokeWidth here.
+export function addStrokeToCanvas(fc, s, canvasScale) {
   const p = new fabric.Path(s.path, {
     left: (s.left || 0) * canvasScale,
     top: (s.top || 0) * canvasScale,
     stroke: s.color || '#ef4444',
-    strokeWidth: (s.width || 3) * canvasScale,
+    strokeWidth: s.width || 3,
     fill: null,
     strokeLineCap: 'round', strokeLineJoin: 'round',
     scaleX: canvasScale,
@@ -418,12 +423,17 @@ function addStrokeToCanvas(fc, s, canvasScale) {
 }
 
 // Serialize strokes back to image-native pixel space for persistence.
-function collectStrokes(fc, canvasScale) {
+// Path commands are absolute in fabric's local space at draw time (canvas
+// pixels), so we scale them by inv=1/canvasScale alongside left/top/width
+// to land in a single self-consistent native-pixel format that renders
+// correctly at any future viewport size.
+export function collectStrokes(fc, canvasScale) {
   const out = []
   const inv = canvasScale === 0 ? 1 : 1 / canvasScale
   for (const o of fc.getObjects().filter(o => o.name === 'stroke')) {
+    const scaledPath = (o.path || []).map(cmd => cmd.map((v, i) => i === 0 ? v : v * inv))
     out.push({
-      path: structuredClone(o.path),
+      path: scaledPath,
       left: (o.left || 0) * inv,
       top: (o.top || 0) * inv,
       color: o.stroke || '#ef4444',

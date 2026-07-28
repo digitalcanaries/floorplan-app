@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
+import * as fabric from 'fabric'
 import useStore from '../store.js'
+import { addStrokeToCanvas } from './AnnotateImageModal.jsx'
 
 // Modal — per-set or project-level reference sheet. Three tabs:
 // - Documents (photos + PDFs uploaded as files)
@@ -35,6 +37,42 @@ async function fetchAuthedObjectURL(fileId) {
   if (!resp.ok) throw new Error('Fetch failed')
   const blob = await resp.blob()
   return URL.createObjectURL(blob)
+}
+
+// Composite an image + persisted strokes into a fresh PNG object URL, at
+// the image's native resolution. Uses fabric.StaticCanvas (same rendering
+// path AnnotateImageModal uses at edit time) so what prints matches what
+// the user saw when they saved. Returns null if the image fails to load.
+async function compositeImageWithAnnotations(imageBlobUrl, strokes) {
+  return new Promise((resolve) => {
+    const probe = new Image()
+    probe.onload = async () => {
+      const el = document.createElement('canvas')
+      const w = probe.naturalWidth
+      const h = probe.naturalHeight
+      el.width = w
+      el.height = h
+      const fc = new fabric.StaticCanvas(el, { width: w, height: h, enableRetinaScaling: false })
+      try {
+        const fImg = await fabric.FabricImage.fromURL(imageBlobUrl)
+        fImg.set({ left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false })
+        fc.add(fImg)
+        // canvasScale = 1 → strokes render at native resolution
+        for (const s of (strokes || [])) addStrokeToCanvas(fc, s, 1)
+        fc.renderAll()
+        el.toBlob((blob) => {
+          fc.dispose()
+          if (!blob) return resolve(null)
+          resolve(URL.createObjectURL(blob))
+        }, 'image/png')
+      } catch {
+        fc.dispose()
+        resolve(null)
+      }
+    }
+    probe.onerror = () => resolve(null)
+    probe.src = imageBlobUrl
+  })
 }
 
 // <AuthedImage> — img backed by an authed fetch + object URL. Used for
@@ -87,6 +125,7 @@ export default function ReferenceSheetModal() {
   const projectName = useStore(s => s.projectName)
   const uploadFile = useStore(s => s.uploadFile)
   const listRefs = useStore(s => s.listRefs)
+  const getRef = useStore(s => s.getRef)
   const addRef = useStore(s => s.addRef)
   const updateRef = useStore(s => s.updateRef)
   const deleteRef = useStore(s => s.deleteRef)
@@ -171,12 +210,32 @@ export default function ReferenceSheetModal() {
     setError(null)
     try {
       // Pre-fetch image blobs so the print window can show them without auth.
+      // For images with saved annotations, composite the strokes onto the
+      // image at native resolution before handing to the print window — the
+      // printout matches exactly what the user drew.
       const blobUrls = {}
       for (const r of refs) {
         if (!r.file_id) continue
         if (!(r.file_mime_type || '').startsWith('image/')) continue
         try {
-          blobUrls[r.file_id] = await fetchAuthedObjectURL(r.file_id)
+          const rawUrl = await fetchAuthedObjectURL(r.file_id)
+          if (r.has_annotations) {
+            let strokes = []
+            try {
+              const full = await getRef(r.id)
+              if (full?.annotations_json) {
+                const parsed = JSON.parse(full.annotations_json)
+                strokes = parsed?.strokes || []
+              }
+            } catch {}
+            if (strokes.length > 0) {
+              const composited = await compositeImageWithAnnotations(rawUrl, strokes)
+              URL.revokeObjectURL(rawUrl)
+              blobUrls[r.file_id] = composited || rawUrl
+              continue
+            }
+          }
+          blobUrls[r.file_id] = rawUrl
         } catch {}
       }
 
