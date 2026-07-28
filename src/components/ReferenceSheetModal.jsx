@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
-import { addStrokeToCanvas } from './AnnotateImageModal.jsx'
+import { extractObjectsFromSaved, scaleObject } from './AnnotateImageModal.jsx'
 
 // Modal — per-set or project-level reference sheet. Three tabs:
 // - Documents (photos + PDFs uploaded as files)
@@ -39,36 +39,62 @@ async function fetchAuthedObjectURL(fileId) {
   return URL.createObjectURL(blob)
 }
 
-// Composite an image + persisted strokes into a fresh PNG object URL, at
-// the image's native resolution. Uses fabric.StaticCanvas (same rendering
-// path AnnotateImageModal uses at edit time) so what prints matches what
-// the user saw when they saved. Returns null if the image fails to load.
-async function compositeImageWithAnnotations(imageBlobUrl, strokes) {
+// Composite an image + persisted annotations into a fresh PNG object URL
+// at the image's native resolution. Accepts the parsed `annotations_json`
+// object (supports both v1 {strokes} and v2 {objects, rotation} formats)
+// so every shape type — freehand, highlight, line/arrow, rect, ellipse,
+// text — renders identically to what the user saw at save time.
+async function compositeImageWithAnnotations(imageBlobUrl, saved) {
   return new Promise((resolve) => {
     const probe = new Image()
     probe.onload = async () => {
-      const el = document.createElement('canvas')
       const w = probe.naturalWidth
       const h = probe.naturalHeight
-      el.width = w
-      el.height = h
-      const fc = new fabric.StaticCanvas(el, { width: w, height: h, enableRetinaScaling: false })
-      try {
-        const fImg = await fabric.FabricImage.fromURL(imageBlobUrl)
-        fImg.set({ left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false })
-        fc.add(fImg)
-        // canvasScale = 1 → strokes render at native resolution
-        for (const s of (strokes || [])) addStrokeToCanvas(fc, s)
-        fc.renderAll()
-        el.toBlob((blob) => {
-          fc.dispose()
-          if (!blob) return resolve(null)
-          resolve(URL.createObjectURL(blob))
-        }, 'image/png')
-      } catch {
-        fc.dispose()
-        resolve(null)
+      const rotation = ((saved?.rotation || 0) % 360 + 360) % 360
+      const swap = rotation % 180 !== 0
+      const outW = swap ? h : w
+      const outH = swap ? w : h
+
+      const out = document.createElement('canvas')
+      out.width = outW; out.height = outH
+      const ctx = out.getContext('2d')
+
+      // Draw original image (rotated if the user rotated it in the annotator)
+      ctx.save()
+      ctx.translate(outW / 2, outH / 2)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.drawImage(probe, -w / 2, -h / 2, w, h)
+      ctx.restore()
+
+      // Overlay annotations via a headless fabric.StaticCanvas at native size
+      const objects = extractObjectsFromSaved(saved)
+      if (objects.length > 0) {
+        const overlayEl = document.createElement('canvas')
+        overlayEl.width = w; overlayEl.height = h
+        const overlayFc = new fabric.StaticCanvas(overlayEl, {
+          width: w, height: h,
+          enableRetinaScaling: false,
+          backgroundColor: 'transparent',
+        })
+        try {
+          // Objects are already in native coords — enliven and add
+          const enlivened = await fabric.util.enlivenObjects(objects.map(o => scaleObject(o, 1)))
+          for (const o of enlivened) overlayFc.add(o)
+          overlayFc.renderAll()
+          ctx.save()
+          ctx.translate(outW / 2, outH / 2)
+          ctx.rotate((rotation * Math.PI) / 180)
+          ctx.drawImage(overlayEl, -w / 2, -h / 2)
+          ctx.restore()
+        } finally {
+          overlayFc.dispose()
+        }
       }
+
+      out.toBlob((blob) => {
+        if (!blob) return resolve(null)
+        resolve(URL.createObjectURL(blob))
+      }, 'image/png')
     }
     probe.onerror = () => resolve(null)
     probe.src = imageBlobUrl
@@ -220,16 +246,20 @@ export default function ReferenceSheetModal() {
         try {
           const rawUrl = await fetchAuthedObjectURL(r.file_id)
           if (r.has_annotations) {
-            let strokes = []
+            let saved = null
             try {
               const full = await getRef(r.id)
-              if (full?.annotations_json) {
-                const parsed = JSON.parse(full.annotations_json)
-                strokes = parsed?.strokes || []
-              }
+              if (full?.annotations_json) saved = JSON.parse(full.annotations_json)
             } catch {}
-            if (strokes.length > 0) {
-              const composited = await compositeImageWithAnnotations(rawUrl, strokes)
+            // Composite when there's ANYTHING to render — v2 objects,
+            // legacy v1 strokes, or a rotation.
+            const hasAnything = saved && (
+              (Array.isArray(saved.objects) && saved.objects.length > 0) ||
+              (Array.isArray(saved.strokes) && saved.strokes.length > 0) ||
+              (saved.rotation && saved.rotation % 360 !== 0)
+            )
+            if (hasAnything) {
+              const composited = await compositeImageWithAnnotations(rawUrl, saved)
               URL.revokeObjectURL(rawUrl)
               blobUrls[r.file_id] = composited || rawUrl
               continue

@@ -2,19 +2,30 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
 
-// Draw-on-image editor. Same PencilBrush + eraser stack as the artboard's
-// Annotate mode, but the canvas overlays a rendered <img> element instead
-// of trying to fit the image inside a fabric canvas. The browser handles
-// image display via CSS object-fit: contain, so the WHOLE image is always
-// visible; we position the fabric overlay canvas exactly on top of the
-// rendered image area and translate stroke coords to/from image-native
-// pixels on save/load.
-//
-// UX contract:
-//   - Open via ReferenceSheetModal's "✎ Annotate" button on an image thumb
-//   - Escape closes without saving
-//   - Save persists strokes to the server
-//   - Flatten & Export downloads a PNG composite (image + strokes)
+// Draw-on-image editor. The <img> element handles image display (browser-
+// managed via object-fit: contain so the whole picture is always visible).
+// A fabric.Canvas overlays it for the annotation layer. Strokes/shapes/
+// text are captured in DISPLAY coords, scaled to image-native pixels on
+// save so annotations survive any viewport size / device / zoom level.
+
+const TOOLS = [
+  { id: 'draw',      label: '✎',   title: 'Freehand draw' },
+  { id: 'highlight', label: '🖍', title: 'Highlighter (translucent thick stroke)' },
+  { id: 'line',      label: '╱',   title: 'Straight line' },
+  { id: 'arrow',     label: '➤',   title: 'Arrow' },
+  { id: 'rect',      label: '▭',   title: 'Rectangle' },
+  { id: 'ellipse',   label: '◯',   title: 'Ellipse' },
+  { id: 'text',      label: 'T',   title: 'Text label' },
+  { id: 'select',    label: '↕',   title: 'Select / move / resize existing annotation' },
+  { id: 'erase',     label: '⌫',   title: 'Erase — tap an annotation to delete it' },
+]
+
+const COLORS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#a855f7', '#000000', '#ffffff']
+const WIDTHS = [1, 2, 3, 4, 6, 10, 16]
+
+// Tool → default stroke width map (highlighter is thick by default)
+const DEFAULT_WIDTH = { draw: 4, highlight: 20, line: 3, arrow: 3, rect: 2, ellipse: 2 }
+
 export default function AnnotateImageModal() {
   const annotatingRefId = useStore(s => s.annotatingRefId)
   const setAnnotatingRefId = useStore(s => s.setAnnotatingRefId)
@@ -25,23 +36,26 @@ export default function AnnotateImageModal() {
   const imgRef = useRef(null)
   const canvasElRef = useRef(null)
   const fcRef = useRef(null)
-  const displayRef = useRef(null) // { natW, natH, dispW, dispH, dispLeft, dispTop, objectUrl }
+  const displayRef = useRef(null) // { natW, natH, dispW, dispH, dispLeft, dispTop, rotation, zoom }
+  const shapeDrawStateRef = useRef({ startPt: null, active: null }) // in-flight shape drag
 
   const [refRow, setRefRow] = useState(null)
   const [imgUrl, setImgUrl] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [mode, setMode] = useState('draw') // 'draw' | 'erase'
+  const [tool, setTool] = useState('draw')
   const [color, setColor] = useState('#ef4444')
   const [width, setWidth] = useState(4)
-  const [strokeCount, setStrokeCount] = useState(0)
-  // Local undo/redo stacks — snapshots of stroke JSON
+  const [fontSize, setFontSize] = useState(24)
+  const [rotation, setRotation] = useState(0) // 0 | 90 | 180 | 270 — CSS rotation of img + overlay
+  const [zoom, setZoom] = useState(1)
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
+  const [objectCount, setObjectCount] = useState(0)
   const historyRef = useRef({ past: [], future: [] })
-  // Bump this to re-init the fabric overlay after a resize
   const [layoutTick, setLayoutTick] = useState(0)
 
-  // ----- 1. Load the ref (image URL + saved annotations) -----
+  // ----- Load the ref + image blob -----
   useEffect(() => {
     if (!annotatingRefId) { setRefRow(null); setImgUrl(null); return }
     setLoading(true)
@@ -54,10 +68,8 @@ export default function AnnotateImageModal() {
         if (!r.file_id) { setError('This reference has no image to annotate'); setLoading(false); return }
         if (!(r.file_mime_type || '').startsWith('image/')) {
           setError('Only image references can be annotated (this one is ' + (r.file_mime_type || 'unknown') + ')')
-          setLoading(false)
-          return
+          setLoading(false); return
         }
-        // Auth-fetch the file as a blob so <img src> doesn't need a token.
         const token = localStorage.getItem('floorplan-token')
         try {
           const resp = await fetch(`/api/files/${r.file_id}/raw`, {
@@ -69,6 +81,11 @@ export default function AnnotateImageModal() {
           const url = URL.createObjectURL(blob)
           setRefRow(r)
           setImgUrl(url)
+          // Restore rotation if saved
+          try {
+            const parsed = r.annotations_json ? JSON.parse(r.annotations_json) : null
+            if (parsed?.rotation) setRotation(parsed.rotation)
+          } catch {}
         } catch (e) {
           setError(e.message); setLoading(false)
         }
@@ -77,14 +94,7 @@ export default function AnnotateImageModal() {
     return () => { cancelled = true }
   }, [annotatingRefId, getRef])
 
-  // ----- 2. Init fabric overlay after the <img> renders + on resize -----
-  //
-  // We wait for the <img>'s onLoad to fire, then measure its rendered size
-  // and position within the wrapper. The fabric canvas is sized to match
-  // the rendered image bounds (not the wrapper — so it doesn't cover the
-  // letterbox), and positioned on top via absolute CSS. This guarantees
-  // the whole image is always visible and the drawing surface exactly
-  // aligns with the pixels the user sees.
+  // ----- Init fabric overlay after <img> renders -----
   const initFabricOverlay = useCallback(() => {
     const img = imgRef.current
     const wrapper = wrapperRef.current
@@ -92,11 +102,8 @@ export default function AnnotateImageModal() {
     if (!img || !wrapper || !canvasEl || !imgUrl || !refRow) return
     if (!img.complete || img.naturalWidth === 0) return
 
-    // Dispose any prior fabric canvas before creating a new one (handles
-    // resize + image switch cleanly).
     if (fcRef.current) { fcRef.current.dispose(); fcRef.current = null }
 
-    // Layout has settled by the time img.onload fires + rAF has run.
     const imgRect = img.getBoundingClientRect()
     const wrapperRect = wrapper.getBoundingClientRect()
     const dispW = Math.max(1, Math.round(imgRect.width))
@@ -106,20 +113,17 @@ export default function AnnotateImageModal() {
     const natW = img.naturalWidth
     const natH = img.naturalHeight
 
-    // Position the canvas exactly over the rendered image.
     canvasEl.style.position = 'absolute'
     canvasEl.style.left = `${dispLeft}px`
     canvasEl.style.top = `${dispTop}px`
 
     const fc = new fabric.Canvas(canvasEl, {
       width: dispW, height: dispH,
-      selection: false,
+      selection: tool === 'select',
       backgroundColor: 'transparent',
+      preserveObjectStacking: true,
     })
 
-    // Also style the fabric-generated wrapper element so the overlay
-    // stays aligned to the image (fabric wraps our canvas in a
-    // canvas-container div and moves the CSS positioning onto that).
     const fcWrapper = fc.wrapperEl || canvasEl.parentElement
     if (fcWrapper && fcWrapper !== wrapper) {
       fcWrapper.style.position = 'absolute'
@@ -128,47 +132,52 @@ export default function AnnotateImageModal() {
       fcWrapper.style.pointerEvents = 'auto'
     }
 
-    // Convert native-pixel stroke → display-pixel fabric.Path
+    // Load saved annotations (mixed types) — scale native → display
     const nativeToDisplay = dispW / natW
-
-    // Restore prior strokes stored in native image pixels.
-    let prior = []
+    let saved = null
     if (refRow.annotations_json) {
-      try { prior = JSON.parse(refRow.annotations_json)?.strokes || [] } catch {}
+      try { saved = JSON.parse(refRow.annotations_json) } catch {}
     }
-    for (const s of prior) addNativeStrokeToDisplay(fc, s, nativeToDisplay)
-    setStrokeCount(prior.length)
+    const savedObjects = extractObjectsFromSaved(saved)
+    if (savedObjects.length > 0) {
+      const scaledForDisplay = savedObjects.map(o => scaleObject(o, nativeToDisplay))
+      fabric.util.enlivenObjects(scaledForDisplay).then((enlivened) => {
+        for (const o of enlivened) {
+          o.set({ name: 'anno', selectable: tool === 'select', evented: tool === 'select' || tool === 'erase' })
+          fc.add(o)
+        }
+        setObjectCount(countAnno(fc))
+        fc.requestRenderAll()
+      })
+    }
 
-    // Brush width is in display pixels — matches what the user picked.
-    const brush = new fabric.PencilBrush(fc)
-    brush.color = color
-    brush.width = width
-    fc.freeDrawingBrush = brush
-    fc.isDrawingMode = mode === 'draw'
-    fc.defaultCursor = 'crosshair'
-    fc.hoverCursor = 'crosshair'
+    configureBrush(fc, tool, color, width)
+    fc.defaultCursor = tool === 'text' ? 'text' : 'crosshair'
+    fc.hoverCursor = tool === 'select' ? 'move' : (tool === 'text' ? 'text' : 'crosshair')
 
+    fcRef.current = fc
+    displayRef.current = { natW, natH, dispW, dispH, dispLeft, dispTop }
+
+    // Freehand + highlight: fabric.PencilBrush captures the path itself.
     fc.on('path:created', (opt) => {
       const path = opt?.path
       if (!path) return
       pushHistorySnapshot(fc)
-      path.set({ name: 'stroke', selectable: false, evented: mode === 'erase' })
+      path.set({ name: 'anno', selectable: false, evented: tool === 'erase' })
+      // For highlighter: reduce opacity of the finished path
+      if (tool === 'highlight') path.set({ opacity: 0.4 })
       fc.requestRenderAll()
-      setStrokeCount(countStrokes(fc))
+      setObjectCount(countAnno(fc))
     })
 
-    fcRef.current = fc
-    displayRef.current = { natW, natH, dispW, dispH, dispLeft, dispTop }
     setLoading(false)
-  }, [imgUrl, refRow, color, width, mode])
+  }, [imgUrl, refRow, tool, color, width])
 
-  // Wire <img> onLoad → initFabricOverlay (with rAF so layout has settled)
   const handleImgLoad = () => {
-    // Small delay to let CSS layout finish after the load event fires.
     requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
   }
 
-  // Handle viewport resize — re-measure + re-init the overlay
+  // Resize handler — re-init overlay while preserving annotations
   useEffect(() => {
     if (!imgUrl) return
     let raf = null
@@ -176,15 +185,11 @@ export default function AnnotateImageModal() {
       if (raf) cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
         raf = null
-        // Preserve current strokes across the re-init: pull them out in
-        // native coords, re-init, then addNativeStrokeToDisplay puts them
-        // back in the new display space.
         const fc = fcRef.current
         const disp = displayRef.current
         if (fc && disp) {
-          const strokesNative = collectStrokesInNative(fc, disp)
-          // Stash on refRow.annotations_json shape so init picks them up
-          setRefRow(r => r ? { ...r, annotations_json: JSON.stringify({ strokes: strokesNative }) } : r)
+          const nativeObjects = collectObjectsInNative(fc, disp)
+          setRefRow(r => r ? { ...r, annotations_json: JSON.stringify({ version: 2, objects: nativeObjects, rotation }) } : r)
         }
         setLayoutTick(t => t + 1)
       })
@@ -194,14 +199,18 @@ export default function AnnotateImageModal() {
       window.removeEventListener('resize', onResize)
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [imgUrl])
+  }, [imgUrl, rotation])
 
-  // Re-run overlay init when layoutTick bumps
   useEffect(() => {
     if (layoutTick > 0) initFabricOverlay()
   }, [layoutTick, initFabricOverlay])
 
-  // Cleanup fabric + object URL on modal close / ref switch
+  // Also re-init when rotation changes (so overlay lands on the rotated img)
+  useEffect(() => {
+    setLayoutTick(t => t + 1)
+  }, [rotation])
+
+  // Cleanup
   useEffect(() => {
     return () => {
       if (fcRef.current) { fcRef.current.dispose(); fcRef.current = null }
@@ -209,51 +218,219 @@ export default function AnnotateImageModal() {
       displayRef.current = null
       historyRef.current = { past: [], future: [] }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- imgUrl in deps would revoke a URL we're still using
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [annotatingRefId])
 
-  // ----- Sync brush + mode to fabric when they change -----
+  // Sync tool / color / width to fabric — swap brush, cursor, selectability
   useEffect(() => {
     const fc = fcRef.current
     if (!fc) return
-    if (fc.freeDrawingBrush) {
-      fc.freeDrawingBrush.color = color
-      fc.freeDrawingBrush.width = width
-    }
-    fc.isDrawingMode = mode === 'draw'
+    configureBrush(fc, tool, color, width)
+    fc.selection = tool === 'select'
+    fc.defaultCursor = tool === 'text' ? 'text' : 'crosshair'
+    fc.hoverCursor = tool === 'select' ? 'move' : (tool === 'text' ? 'text' : 'crosshair')
     for (const o of fc.getObjects()) {
-      if (o.name === 'stroke') { o.selectable = false; o.evented = mode === 'erase' }
+      if (o.name === 'anno') {
+        o.set({
+          selectable: tool === 'select',
+          evented: tool === 'select' || tool === 'erase',
+        })
+      }
     }
+    if (tool !== 'select') fc.discardActiveObject()
     fc.requestRenderAll()
-  }, [color, width, mode])
+  }, [tool, color, width])
 
-  // Eraser click-to-delete on stroke paths
+  // Shape drawing handlers — click-drag for rect/ellipse/line/arrow;
+  // click for text; erase for click-to-delete.
   useEffect(() => {
     const fc = fcRef.current
-    if (!fc || mode !== 'erase') return
-    const onClick = (opt) => {
-      const t = opt?.target
-      if (!t || t.name !== 'stroke') return
-      pushHistorySnapshot(fc)
-      fc.remove(t)
-      fc.requestRenderAll()
-      setStrokeCount(countStrokes(fc))
-    }
-    fc.on('mouse:down', onClick)
-    return () => fc.off('mouse:down', onClick)
-  }, [mode])
+    if (!fc) return
 
-  // Keyboard: Esc closes, Ctrl+Z undo, Ctrl+Shift+Z redo
+    const isShape = ['rect', 'ellipse', 'line', 'arrow'].includes(tool)
+
+    const onDown = (opt) => {
+      if (tool === 'text') {
+        const pt = fc.getScenePoint(opt.e)
+        pushHistorySnapshot(fc)
+        const t = new fabric.IText('Text', {
+          left: pt.x, top: pt.y,
+          fontSize: fontSize, fill: color,
+          fontFamily: 'sans-serif',
+          editable: true,
+          name: 'anno',
+          selectable: true,
+          evented: true,
+        })
+        fc.add(t)
+        fc.setActiveObject(t)
+        t.enterEditing()
+        t.selectAll()
+        fc.requestRenderAll()
+        setObjectCount(countAnno(fc))
+        return
+      }
+      if (tool === 'erase') {
+        const t = opt?.target
+        if (t && t.name === 'anno') {
+          pushHistorySnapshot(fc)
+          fc.remove(t)
+          fc.requestRenderAll()
+          setObjectCount(countAnno(fc))
+        }
+        return
+      }
+      if (!isShape) return
+      const pt = fc.getScenePoint(opt.e)
+      shapeDrawStateRef.current.startPt = pt
+      let shape
+      if (tool === 'rect') {
+        shape = new fabric.Rect({
+          left: pt.x, top: pt.y, width: 0, height: 0,
+          stroke: color, strokeWidth: width, fill: 'transparent',
+          selectable: false, evented: false, name: 'anno',
+        })
+      } else if (tool === 'ellipse') {
+        shape = new fabric.Ellipse({
+          left: pt.x, top: pt.y, rx: 0, ry: 0,
+          stroke: color, strokeWidth: width, fill: 'transparent',
+          selectable: false, evented: false, name: 'anno',
+        })
+      } else if (tool === 'line' || tool === 'arrow') {
+        // Both line and arrow rendered as fabric.Path — arrow adds
+        // arrowhead lines from the endpoint. Two commands to start:
+        // move-to (x1,y1), line-to (x1,y1) (will grow with mouse move)
+        shape = new fabric.Path(`M ${pt.x} ${pt.y} L ${pt.x} ${pt.y}`, {
+          stroke: color, strokeWidth: width, fill: '',
+          strokeLineCap: 'round', strokeLineJoin: 'round',
+          selectable: false, evented: false, name: 'anno',
+          objectCaching: false,
+        })
+        shape._annoKind = tool // remember whether to draw arrowhead on finish
+        shape._annoStart = { x: pt.x, y: pt.y }
+      }
+      if (shape) {
+        fc.add(shape)
+        shapeDrawStateRef.current.active = shape
+      }
+    }
+
+    const onMove = (opt) => {
+      const st = shapeDrawStateRef.current
+      if (!isShape || !st.active || !st.startPt) return
+      const pt = fc.getScenePoint(opt.e)
+      const s = st.active
+      if (tool === 'rect') {
+        s.set({
+          left: Math.min(st.startPt.x, pt.x),
+          top: Math.min(st.startPt.y, pt.y),
+          width: Math.abs(pt.x - st.startPt.x),
+          height: Math.abs(pt.y - st.startPt.y),
+        })
+      } else if (tool === 'ellipse') {
+        const rx = Math.abs(pt.x - st.startPt.x) / 2
+        const ry = Math.abs(pt.y - st.startPt.y) / 2
+        s.set({
+          left: Math.min(st.startPt.x, pt.x),
+          top: Math.min(st.startPt.y, pt.y),
+          rx, ry,
+        })
+      } else if (tool === 'line' || tool === 'arrow') {
+        // Rebuild the path from start to current pointer
+        const x1 = st.startPt.x, y1 = st.startPt.y
+        const x2 = pt.x, y2 = pt.y
+        const cmds = buildLineOrArrowPath(x1, y1, x2, y2, tool === 'arrow', width)
+        const newPath = new fabric.Path(cmds, {
+          stroke: color, strokeWidth: width, fill: '',
+          strokeLineCap: 'round', strokeLineJoin: 'round',
+          selectable: false, evented: false, name: 'anno',
+          objectCaching: false,
+        })
+        newPath._annoKind = tool
+        newPath._annoStart = { x: x1, y: y1 }
+        fc.remove(s)
+        fc.add(newPath)
+        shapeDrawStateRef.current.active = newPath
+      }
+      fc.requestRenderAll()
+    }
+
+    const onUp = () => {
+      const st = shapeDrawStateRef.current
+      if (!isShape || !st.active) { st.startPt = null; st.active = null; return }
+      const s = st.active
+      // Discard zero-size shapes (user just clicked, didn't drag)
+      let keep = true
+      if (tool === 'rect' && (s.width < 2 || s.height < 2)) keep = false
+      if (tool === 'ellipse' && (s.rx < 2 || s.ry < 2)) keep = false
+      if ((tool === 'line' || tool === 'arrow') && s._annoStart) {
+        const path = s.path
+        const last = path[path.length - 1]
+        const lastX = last?.[last.length - 2]
+        const lastY = last?.[last.length - 1]
+        const dx = (lastX ?? 0) - s._annoStart.x
+        const dy = (lastY ?? 0) - s._annoStart.y
+        if (Math.hypot(dx, dy) < 3) keep = false
+      }
+      if (!keep) {
+        fc.remove(s)
+      } else {
+        pushHistorySnapshot(fc)
+      }
+      st.startPt = null
+      st.active = null
+      fc.requestRenderAll()
+      setObjectCount(countAnno(fc))
+    }
+
+    fc.on('mouse:down', onDown)
+    fc.on('mouse:move', onMove)
+    fc.on('mouse:up', onUp)
+    return () => {
+      fc.off('mouse:down', onDown)
+      fc.off('mouse:move', onMove)
+      fc.off('mouse:up', onUp)
+    }
+  }, [tool, color, width, fontSize])
+
+  // Track object edits (drag/resize/text changes) for history + count
+  useEffect(() => {
+    const fc = fcRef.current
+    if (!fc) return
+    const onModified = () => {
+      pushHistorySnapshot(fc)
+      setObjectCount(countAnno(fc))
+    }
+    fc.on('object:modified', onModified)
+    return () => fc.off('object:modified', onModified)
+  }, [])
+
+  // Keyboard shortcuts
   useEffect(() => {
     if (!annotatingRefId) return
     const onKey = (e) => {
+      // Avoid capturing shortcuts while typing in text objects
+      const active = fcRef.current?.getActiveObject()
+      if (active?.isEditing) return
       if (e.key === 'Escape') { setAnnotatingRefId(null); return }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo() }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doRedo() }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
+        const fc = fcRef.current
+        const sel = fc?.getActiveObject()
+        if (sel && sel.name === 'anno') {
+          e.preventDefault()
+          pushHistorySnapshot(fc)
+          fc.remove(sel)
+          fc.discardActiveObject()
+          fc.requestRenderAll()
+          setObjectCount(countAnno(fc))
+        }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [annotatingRefId, setAnnotatingRefId])
+  }, [annotatingRefId, setAnnotatingRefId, tool])
 
   if (!annotatingRefId) return null
 
@@ -264,9 +441,11 @@ export default function AnnotateImageModal() {
     setSaving(true)
     setError(null)
     try {
-      const strokes = collectStrokesInNative(fc, disp)
+      const objects = collectObjectsInNative(fc, disp)
       await updateRef(annotatingRefId, {
-        annotations_json: JSON.stringify({ strokes, updated_at: new Date().toISOString() }),
+        annotations_json: JSON.stringify({
+          version: 2, objects, rotation, updated_at: new Date().toISOString(),
+        }),
       })
       setAnnotatingRefId(null)
     } catch (e) {
@@ -281,42 +460,67 @@ export default function AnnotateImageModal() {
     if (!fc) return
     if (!window.confirm('Erase all annotations on this image?')) return
     pushHistorySnapshot(fc)
-    for (const o of fc.getObjects().filter(o => o.name === 'stroke')) fc.remove(o)
+    for (const o of fc.getObjects().filter(o => o.name === 'anno')) fc.remove(o)
+    fc.discardActiveObject()
     fc.requestRenderAll()
-    setStrokeCount(0)
+    setObjectCount(0)
   }
 
   const handleFlattenExport = async () => {
     const disp = displayRef.current
     const fc = fcRef.current
     if (!disp || !fc || !imgUrl) return
-    // Render at native resolution. Draw the original image + the strokes
-    // (scaled from display → native) onto an off-screen canvas.
     try {
+      // Render at native resolution using a plain 2D context: draw image
+      // (rotated if needed), then overlay the annotation objects rendered
+      // by a headless fabric.StaticCanvas.
       const img = new Image()
       img.src = imgUrl
       await new Promise((res, rej) => { img.onload = res; img.onerror = rej })
+
+      // Rotated native dims for the output canvas
+      const swap = rotation % 180 !== 0
+      const outW = swap ? disp.natH : disp.natW
+      const outH = swap ? disp.natW : disp.natH
+
       const out = document.createElement('canvas')
-      out.width = disp.natW
-      out.height = disp.natH
+      out.width = outW; out.height = outH
       const ctx = out.getContext('2d')
-      ctx.drawImage(img, 0, 0, disp.natW, disp.natH)
-      // Draw fabric contents scaled up to native
-      const scale = disp.natW / disp.dispW
-      const strokes = collectStrokesInNative(fc, disp)
-      for (const s of strokes) drawStrokeOnCtx(ctx, s)
-      // Note: strokes are already in native, scale variable unused here.
-      void scale
+      // Rotate the image (draw in original coords + apply rotation transform)
+      ctx.save()
+      ctx.translate(outW / 2, outH / 2)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.drawImage(img, -disp.natW / 2, -disp.natH / 2, disp.natW, disp.natH)
+      ctx.restore()
+
+      // Render annotations via a headless fabric canvas at native size
+      const overlayEl = document.createElement('canvas')
+      overlayEl.width = disp.natW; overlayEl.height = disp.natH
+      const overlayFc = new fabric.StaticCanvas(overlayEl, {
+        width: disp.natW, height: disp.natH,
+        enableRetinaScaling: false,
+        backgroundColor: 'transparent',
+      })
+      const nativeObjects = collectObjectsInNative(fc, disp)
+      const enlivened = await fabric.util.enlivenObjects(nativeObjects)
+      for (const o of enlivened) overlayFc.add(o)
+      overlayFc.renderAll()
+
+      // Composite the overlay (rotated) on top
+      ctx.save()
+      ctx.translate(outW / 2, outH / 2)
+      ctx.rotate((rotation * Math.PI) / 180)
+      ctx.drawImage(overlayEl, -disp.natW / 2, -disp.natH / 2)
+      ctx.restore()
+      overlayFc.dispose()
+
       out.toBlob((blob) => {
         if (!blob) return
         const url = URL.createObjectURL(blob)
         const filename = `${(refRow?.label || 'annotated').replace(/[^a-z0-9_.-]+/gi, '_')}_annotated.png`
         const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
+        a.href = url; a.download = filename
+        document.body.appendChild(a); a.click(); document.body.removeChild(a)
         setTimeout(() => URL.revokeObjectURL(url), 5000)
       }, 'image/png')
     } catch (e) {
@@ -329,28 +533,37 @@ export default function AnnotateImageModal() {
     if (!fc) return
     const hist = historyRef.current
     if (hist.past.length === 0) return
-    const current = snapshot(fc)
+    hist.future.unshift(snapshot(fc))
     const prev = hist.past.pop()
-    hist.future.unshift(current)
     restoreSnapshot(fc, prev)
-    setStrokeCount(countStrokes(fc))
+    setObjectCount(countAnno(fc))
   }
   const doRedo = () => {
     const fc = fcRef.current
     if (!fc) return
     const hist = historyRef.current
     if (hist.future.length === 0) return
-    const current = snapshot(fc)
+    hist.past.push(snapshot(fc))
     const next = hist.future.shift()
-    hist.past.push(current)
     restoreSnapshot(fc, next)
-    setStrokeCount(countStrokes(fc))
+    setObjectCount(countAnno(fc))
   }
   const pushHistorySnapshot = (fc) => {
     const hist = historyRef.current
     hist.past.push(snapshot(fc))
     if (hist.past.length > 50) hist.past.shift()
     hist.future = []
+  }
+
+  const rotateBy = (delta) => {
+    setRotation(r => (((r + delta) % 360) + 360) % 360)
+  }
+
+  // Set tool with a nice UX: pick a good default width if user hasn't tuned it
+  const pickTool = (t) => {
+    setTool(t)
+    const def = DEFAULT_WIDTH[t]
+    if (def) setWidth(def)
   }
 
   return (
@@ -360,69 +573,98 @@ export default function AnnotateImageModal() {
         onClick={(e) => e.stopPropagation()}>
 
         {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-700 bg-gray-800">
-          <span className="text-sm font-semibold text-white truncate max-w-[35ch]" title={refRow?.label}>
-            ✎ {refRow?.label || 'Annotate image'}
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-gray-700 bg-gray-800">
+          <span className="text-sm font-semibold text-white truncate max-w-[24ch]" title={refRow?.label}>
+            ✎ {refRow?.label || 'Annotate'}
           </span>
           <div className="h-4 w-px bg-gray-600 mx-1" />
-          <button
-            onClick={() => setMode('draw')}
-            className={`px-2.5 py-1 rounded text-xs ${mode === 'draw' ? 'bg-rose-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
-          >
-            ✎ Draw
-          </button>
-          <button
-            onClick={() => setMode('erase')}
-            className={`px-2.5 py-1 rounded text-xs ${mode === 'erase' ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
-          >
-            ⌫ Erase
-          </button>
-          {mode === 'draw' && (
-            <>
-              {['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#a855f7', '#000000', '#ffffff'].map(c => (
-                <button key={c}
-                  onClick={() => setColor(c)}
-                  title={c}
-                  className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-gray-600'}`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-              <select
-                value={width}
-                onChange={e => setWidth(parseInt(e.target.value))}
-                className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white"
-              >
-                {[1, 2, 3, 4, 6, 10, 16].map(w => <option key={w} value={w}>{w} px</option>)}
-              </select>
-            </>
-          )}
+
+          {/* Tool picker */}
+          {TOOLS.map(t => (
+            <button key={t.id}
+              onClick={() => pickTool(t.id)}
+              title={t.title}
+              className={`w-8 h-7 rounded text-sm flex items-center justify-center ${
+                tool === t.id ? 'bg-indigo-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+              }`}>
+              {t.label}
+            </button>
+          ))}
+
           <div className="h-4 w-px bg-gray-600 mx-1" />
+
+          {/* Colors */}
+          {COLORS.map(c => (
+            <button key={c}
+              onClick={() => setColor(c)}
+              title={c}
+              className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-gray-600'}`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+
+          {/* Width */}
+          {tool !== 'text' && tool !== 'select' && tool !== 'erase' && (
+            <select
+              value={width}
+              onChange={e => setWidth(parseInt(e.target.value))}
+              className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white ml-1"
+              title="Stroke width"
+            >
+              {WIDTHS.map(w => <option key={w} value={w}>{w} px</option>)}
+            </select>
+          )}
+
+          {/* Font size — only for text tool */}
+          {tool === 'text' && (
+            <select
+              value={fontSize}
+              onChange={e => setFontSize(parseInt(e.target.value))}
+              className="px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-[11px] text-white ml-1"
+              title="Font size"
+            >
+              {[12, 16, 20, 24, 32, 48, 64].map(s => <option key={s} value={s}>{s}pt</option>)}
+            </select>
+          )}
+
+          <div className="h-4 w-px bg-gray-600 mx-1" />
+
+          {/* Rotate */}
+          <button onClick={() => rotateBy(-90)}
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+            title="Rotate 90° left">↺</button>
+          <button onClick={() => rotateBy(90)}
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+            title="Rotate 90° right">↻</button>
+
+          <div className="h-4 w-px bg-gray-600 mx-1" />
+
+          {/* Undo / redo */}
           <button onClick={doUndo}
             disabled={historyRef.current.past.length === 0}
-            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-gray-200 rounded text-xs" title="Undo (Ctrl+Z)">
-            ↩ Undo
-          </button>
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-gray-200 rounded text-xs"
+            title="Undo (Ctrl+Z)">↩</button>
           <button onClick={doRedo}
             disabled={historyRef.current.future.length === 0}
-            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-gray-200 rounded text-xs" title="Redo (Ctrl+Shift+Z)">
-            ↪ Redo
-          </button>
-          {strokeCount > 0 && (
+            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-gray-200 rounded text-xs"
+            title="Redo (Ctrl+Shift+Z)">↪</button>
+
+          {objectCount > 0 && (
             <button onClick={handleClearAll}
               className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs">
-              Clear All
+              Clear
             </button>
           )}
           <span className="text-[10px] text-gray-500 ml-1">
-            {strokeCount} stroke{strokeCount === 1 ? '' : 's'}
+            {objectCount} item{objectCount === 1 ? '' : 's'}
           </span>
 
           <div className="flex-1" />
 
           <button onClick={handleFlattenExport}
             className="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
-            title="Download a flattened PNG of image + annotations">
-            ⬇ Flatten &amp; Export
+            title="Download flattened PNG">
+            ⬇ Export
           </button>
           <button onClick={() => setAnnotatingRefId(null)}
             className="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs">
@@ -440,7 +682,7 @@ export default function AnnotateImageModal() {
           </div>
         )}
 
-        {/* Image + canvas overlay. */}
+        {/* Canvas area */}
         <div ref={wrapperRef}
           className="flex-1 relative bg-gray-950 overflow-hidden"
           style={{ touchAction: 'none' }}>
@@ -456,10 +698,11 @@ export default function AnnotateImageModal() {
               alt=""
               onLoad={handleImgLoad}
               className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+              style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 120ms' }}
               draggable={false}
             />
           )}
-          <canvas ref={canvasElRef} />
+          <canvas ref={canvasElRef} style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 120ms' }} />
         </div>
       </div>
     </div>
@@ -468,61 +711,132 @@ export default function AnnotateImageModal() {
 
 // ---------- helpers ----------
 
-function countStrokes(fc) {
-  return fc.getObjects().filter(o => o.name === 'stroke').length
+function countAnno(fc) {
+  return fc.getObjects().filter(o => o.name === 'anno').length
 }
 
-// Snapshot / restore for undo — captures the strokes as-is in the current
-// display coord space; undo/redo doesn't cross re-inits.
-function snapshot(fc) {
-  const strokes = []
-  for (const o of fc.getObjects().filter(o => o.name === 'stroke')) {
-    strokes.push({
-      path: structuredClone(o.path),
-      left: o.left, top: o.top,
-      stroke: o.stroke, strokeWidth: o.strokeWidth,
-    })
+function configureBrush(fc, tool, color, width) {
+  if (tool === 'draw') {
+    const b = new fabric.PencilBrush(fc)
+    b.color = color
+    b.width = width
+    fc.freeDrawingBrush = b
+    fc.isDrawingMode = true
+  } else if (tool === 'highlight') {
+    const b = new fabric.PencilBrush(fc)
+    // Use a semi-transparent color for the highlighter effect
+    b.color = hexWithAlpha(color, 0.4)
+    b.width = width
+    fc.freeDrawingBrush = b
+    fc.isDrawingMode = true
+  } else {
+    fc.isDrawingMode = false
   }
-  return strokes
+}
+
+function hexWithAlpha(hex, alpha) {
+  const h = hex.replace('#', '')
+  if (h.length !== 6) return hex
+  const a = Math.round(alpha * 255).toString(16).padStart(2, '0')
+  return `#${h}${a}`
+}
+
+// Build the SVG path array for a straight line, plus optional arrowhead
+function buildLineOrArrowPath(x1, y1, x2, y2, arrow, strokeWidth) {
+  const parts = [`M ${x1} ${y1} L ${x2} ${y2}`]
+  if (arrow) {
+    const angle = Math.atan2(y2 - y1, x2 - x1)
+    const headLen = Math.max(12, strokeWidth * 4)
+    const headWidth = Math.PI / 7
+    const hx1 = x2 - headLen * Math.cos(angle - headWidth)
+    const hy1 = y2 - headLen * Math.sin(angle - headWidth)
+    const hx2 = x2 - headLen * Math.cos(angle + headWidth)
+    const hy2 = y2 - headLen * Math.sin(angle + headWidth)
+    parts.push(`M ${hx1} ${hy1} L ${x2} ${y2} L ${hx2} ${hy2}`)
+  }
+  return parts.join(' ')
+}
+
+// Undo/redo: full serialized-object snapshot of the annotation layer
+function snapshot(fc) {
+  return fc.getObjects()
+    .filter(o => o.name === 'anno')
+    .map(o => o.toObject(['name', 'opacity']))
 }
 function restoreSnapshot(fc, snap) {
-  for (const o of fc.getObjects().filter(o => o.name === 'stroke')) fc.remove(o)
-  for (const s of snap) {
-    const p = new fabric.Path(s.path, {
-      left: s.left, top: s.top,
-      stroke: s.stroke, strokeWidth: s.strokeWidth, fill: null,
-      strokeLineCap: 'round', strokeLineJoin: 'round',
-      selectable: false, evented: false,
-      name: 'stroke',
-    })
-    fc.add(p)
-  }
-  fc.requestRenderAll()
+  for (const o of fc.getObjects().filter(o => o.name === 'anno')) fc.remove(o)
+  fabric.util.enlivenObjects(snap).then((objs) => {
+    for (const o of objs) {
+      o.set({ name: 'anno' })
+      fc.add(o)
+    }
+    fc.requestRenderAll()
+  })
 }
 
-// Convert a display-space fabric.Path back to native pixel coords for
-// persistence. Strokes are captured by the brush at display resolution
-// (canvas is sized to img rendered size); on save we scale to native so
-// the annotation survives any future viewport size.
-export function collectStrokesInNative(fc, disp) {
+// Serialize annotation layer at NATIVE image pixel coords for persistence.
+// Uses fabric's toObject() then scales left/top/dimensions by native/display.
+export function collectObjectsInNative(fc, disp) {
   const scale = disp.natW / disp.dispW
-  return fc.getObjects().filter(o => o.name === 'stroke').map(o => ({
-    path: (o.path || []).map(cmd => cmd.map((v, i) => i === 0 ? v : v * scale)),
-    left: (o.left || 0) * scale,
-    top: (o.top || 0) * scale,
-    color: o.stroke || '#ef4444',
-    width: (o.strokeWidth || 3) * scale,
-  }))
+  return fc.getObjects()
+    .filter(o => o.name === 'anno')
+    .map(o => scaleObject(o.toObject(['name', 'opacity']), scale))
 }
 
-// Add a native-space stroke to the display-space fabric canvas.
-function addNativeStrokeToDisplay(fc, s, nativeToDisplay) {
-  const scaledPath = (s.path || []).map(cmd => cmd.map((v, i) => i === 0 ? v : v * nativeToDisplay))
-  const p = new fabric.Path(scaledPath, {
-    left: (s.left || 0) * nativeToDisplay,
-    top: (s.top || 0) * nativeToDisplay,
-    stroke: s.color || '#ef4444',
-    strokeWidth: (s.width || 3) * nativeToDisplay,
+// Pull annotation objects out of a saved annotations_json blob. Supports
+// both the v2 format ({version:2, objects: [...], rotation}) and the old
+// v1 format ({strokes: [...]}) for backward compat.
+export function extractObjectsFromSaved(saved) {
+  if (!saved) return []
+  if (Array.isArray(saved.objects)) return saved.objects
+  if (Array.isArray(saved.strokes)) {
+    // v1 → v2: strokes were fabric.Path shapes stored as {path,left,top,color,width}
+    return saved.strokes.map(s => ({
+      type: 'Path', // fabric v6+ enliven accepts capitalized type
+      path: s.path,
+      left: s.left || 0,
+      top: s.top || 0,
+      stroke: s.color || '#ef4444',
+      strokeWidth: s.width || 3,
+      fill: null,
+      strokeLineCap: 'round', strokeLineJoin: 'round',
+      name: 'anno',
+    }))
+  }
+  return []
+}
+
+// Scale a serialized fabric object's positions/dimensions by `s`. Works
+// across every shape type we produce here (Path, Rect, Ellipse, IText,
+// Line). Ignores `scaleX`/`scaleY` — we bake the scale into the primary
+// dimensions so display parameters are always meaningful.
+export function scaleObject(o, s) {
+  const out = { ...o }
+  if (out.left != null) out.left = out.left * s
+  if (out.top != null) out.top = out.top * s
+  if (out.strokeWidth != null) out.strokeWidth = out.strokeWidth * s
+  if (out.width != null) out.width = out.width * s
+  if (out.height != null) out.height = out.height * s
+  if (out.radius != null) out.radius = out.radius * s
+  if (out.rx != null) out.rx = out.rx * s
+  if (out.ry != null) out.ry = out.ry * s
+  if (out.fontSize != null) out.fontSize = out.fontSize * s
+  if (out.x1 != null) { out.x1 *= s; out.y1 *= s; out.x2 *= s; out.y2 *= s }
+  if (Array.isArray(out.path)) {
+    out.path = out.path.map(cmd => cmd.map((v, i) => i === 0 ? v : v * s))
+  }
+  return out
+}
+
+// Legacy shim kept for ReferenceSheetModal's print composite. Adds a
+// single native-space "stroke" (old v1 shape) to a fabric canvas that's
+// already sized to image-native.
+export function addStrokeToCanvas(fc, stroke) {
+  const p = new fabric.Path(stroke.path, {
+    left: stroke.left || 0,
+    top: stroke.top || 0,
+    stroke: stroke.color || '#ef4444',
+    strokeWidth: stroke.width || 3,
     fill: null,
     strokeLineCap: 'round', strokeLineJoin: 'round',
     selectable: false, evented: false,
@@ -531,41 +845,10 @@ function addNativeStrokeToDisplay(fc, s, nativeToDisplay) {
   fc.add(p)
 }
 
-// Composite render helper — draws a native-space stroke onto a plain
-// canvas 2D context (used by print sheet + Flatten & Export). Path
-// commands are absolute in native pixels; we translate by left/top.
-function drawStrokeOnCtx(ctx, s) {
-  ctx.save()
-  ctx.translate(s.left || 0, s.top || 0)
-  ctx.strokeStyle = s.color || '#ef4444'
-  ctx.lineWidth = s.width || 3
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  ctx.beginPath()
-  for (const cmd of (s.path || [])) {
-    const op = cmd[0]
-    if (op === 'M' || op === 'm') ctx.moveTo(cmd[1], cmd[2])
-    else if (op === 'L' || op === 'l') ctx.lineTo(cmd[1], cmd[2])
-    else if (op === 'Q' || op === 'q') ctx.quadraticCurveTo(cmd[1], cmd[2], cmd[3], cmd[4])
-    else if (op === 'C' || op === 'c') ctx.bezierCurveTo(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6])
-    else if (op === 'Z' || op === 'z') ctx.closePath()
-  }
-  ctx.stroke()
-  ctx.restore()
-}
-
-// Legacy export kept for ReferenceSheetModal's print composite path.
-// Takes a native-space stroke and pushes it into a fabric canvas at
-// scale 1 — used when the target fabric canvas is sized to image-native.
-export function addStrokeToCanvas(fc, s) {
-  addNativeStrokeToDisplay(fc, s, 1)
-}
-
-// Legacy export kept in case future consumers want native-space strokes
-// directly from a fabric canvas that's already at native size.
+// Legacy export kept for symmetry with pre-v2 external callers.
 export function collectStrokes(fc) {
-  return fc.getObjects().filter(o => o.name === 'stroke').map(o => ({
-    path: structuredClone(o.path),
+  return fc.getObjects().filter(o => o.name === 'stroke' || o.name === 'anno').map(o => ({
+    path: o.path ? structuredClone(o.path) : [],
     left: o.left || 0,
     top: o.top || 0,
     color: o.stroke || '#ef4444',
