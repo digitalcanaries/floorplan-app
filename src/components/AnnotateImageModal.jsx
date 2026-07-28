@@ -1,34 +1,34 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
 
 // Draw-on-image editor. Same PencilBrush + eraser stack as the artboard's
-// Annotate mode, but the canvas background is an uploaded image (from a
-// document ref). Strokes are stored non-destructively as annotations_json
-// on the ref itself, so the user can re-edit or clear them later without
-// touching the original file.
+// Annotate mode, but the canvas overlays a rendered <img> element instead
+// of trying to fit the image inside a fabric canvas. The browser handles
+// image display via CSS object-fit: contain, so the WHOLE image is always
+// visible; we position the fabric overlay canvas exactly on top of the
+// rendered image area and translate stroke coords to/from image-native
+// pixels on save/load.
 //
 // UX contract:
 //   - Open via ReferenceSheetModal's "✎ Annotate" button on an image thumb
-//     (sets store.annotatingRefId to the ref id)
 //   - Escape closes without saving
-//   - Save persists strokes to the server; existing strokes for that ref
-//     are replaced wholesale (simplest model — undo/redo happens inside
-//     the modal via a local history stack)
-//   - Flatten & Export writes the composite (image + strokes) as a PNG and
-//     downloads it, so the user can share/print the flattened version
+//   - Save persists strokes to the server
+//   - Flatten & Export downloads a PNG composite (image + strokes)
 export default function AnnotateImageModal() {
   const annotatingRefId = useStore(s => s.annotatingRefId)
   const setAnnotatingRefId = useStore(s => s.setAnnotatingRefId)
   const getRef = useStore(s => s.getRef)
   const updateRef = useStore(s => s.updateRef)
 
-  const canvasElRef = useRef(null)
   const wrapperRef = useRef(null)
+  const imgRef = useRef(null)
+  const canvasElRef = useRef(null)
   const fcRef = useRef(null)
-  const bgImageRef = useRef(null)
+  const displayRef = useRef(null) // { natW, natH, dispW, dispH, dispLeft, dispTop, objectUrl }
 
   const [refRow, setRefRow] = useState(null)
+  const [imgUrl, setImgUrl] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -36,16 +36,20 @@ export default function AnnotateImageModal() {
   const [color, setColor] = useState('#ef4444')
   const [width, setWidth] = useState(4)
   const [strokeCount, setStrokeCount] = useState(0)
-  // Local undo/redo stacks — snapshots of stroke JSON arrays
+  // Local undo/redo stacks — snapshots of stroke JSON
   const historyRef = useRef({ past: [], future: [] })
+  // Bump this to re-init the fabric overlay after a resize
+  const [layoutTick, setLayoutTick] = useState(0)
 
-  // ----- Load the ref (image URL + saved annotations) -----
+  // ----- 1. Load the ref (image URL + saved annotations) -----
   useEffect(() => {
-    if (!annotatingRefId) { setRefRow(null); return }
+    if (!annotatingRefId) { setRefRow(null); setImgUrl(null); return }
     setLoading(true)
     setError(null)
+    let cancelled = false
     getRef(annotatingRefId)
-      .then(r => {
+      .then(async (r) => {
+        if (cancelled) return
         if (!r) { setError('Reference not found'); setLoading(false); return }
         if (!r.file_id) { setError('This reference has no image to annotate'); setLoading(false); return }
         if (!(r.file_mime_type || '').startsWith('image/')) {
@@ -53,116 +57,168 @@ export default function AnnotateImageModal() {
           setLoading(false)
           return
         }
-        setRefRow(r)
+        // Auth-fetch the file as a blob so <img src> doesn't need a token.
+        const token = localStorage.getItem('floorplan-token')
+        try {
+          const resp = await fetch(`/api/files/${r.file_id}/raw`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          })
+          if (!resp.ok) throw new Error('Fetch image failed: ' + resp.status)
+          const blob = await resp.blob()
+          if (cancelled) return
+          const url = URL.createObjectURL(blob)
+          setRefRow(r)
+          setImgUrl(url)
+        } catch (e) {
+          setError(e.message); setLoading(false)
+        }
       })
-      .catch(e => { setError(e.message); setLoading(false) })
+      .catch(e => { if (!cancelled) { setError(e.message); setLoading(false) } })
+    return () => { cancelled = true }
   }, [annotatingRefId, getRef])
 
-  // ----- Boot the fabric canvas once the ref + image are ready -----
+  // ----- 2. Init fabric overlay after the <img> renders + on resize -----
+  //
+  // We wait for the <img>'s onLoad to fire, then measure its rendered size
+  // and position within the wrapper. The fabric canvas is sized to match
+  // the rendered image bounds (not the wrapper — so it doesn't cover the
+  // letterbox), and positioned on top via absolute CSS. This guarantees
+  // the whole image is always visible and the drawing surface exactly
+  // aligns with the pixels the user sees.
+  const initFabricOverlay = useCallback(() => {
+    const img = imgRef.current
+    const wrapper = wrapperRef.current
+    const canvasEl = canvasElRef.current
+    if (!img || !wrapper || !canvasEl || !imgUrl || !refRow) return
+    if (!img.complete || img.naturalWidth === 0) return
+
+    // Dispose any prior fabric canvas before creating a new one (handles
+    // resize + image switch cleanly).
+    if (fcRef.current) { fcRef.current.dispose(); fcRef.current = null }
+
+    // Layout has settled by the time img.onload fires + rAF has run.
+    const imgRect = img.getBoundingClientRect()
+    const wrapperRect = wrapper.getBoundingClientRect()
+    const dispW = Math.max(1, Math.round(imgRect.width))
+    const dispH = Math.max(1, Math.round(imgRect.height))
+    const dispLeft = imgRect.left - wrapperRect.left
+    const dispTop = imgRect.top - wrapperRect.top
+    const natW = img.naturalWidth
+    const natH = img.naturalHeight
+
+    // Position the canvas exactly over the rendered image.
+    canvasEl.style.position = 'absolute'
+    canvasEl.style.left = `${dispLeft}px`
+    canvasEl.style.top = `${dispTop}px`
+
+    const fc = new fabric.Canvas(canvasEl, {
+      width: dispW, height: dispH,
+      selection: false,
+      backgroundColor: 'transparent',
+    })
+
+    // Also style the fabric-generated wrapper element so the overlay
+    // stays aligned to the image (fabric wraps our canvas in a
+    // canvas-container div and moves the CSS positioning onto that).
+    const fcWrapper = fc.wrapperEl || canvasEl.parentElement
+    if (fcWrapper && fcWrapper !== wrapper) {
+      fcWrapper.style.position = 'absolute'
+      fcWrapper.style.left = `${dispLeft}px`
+      fcWrapper.style.top = `${dispTop}px`
+      fcWrapper.style.pointerEvents = 'auto'
+    }
+
+    // Convert native-pixel stroke → display-pixel fabric.Path
+    const nativeToDisplay = dispW / natW
+
+    // Restore prior strokes stored in native image pixels.
+    let prior = []
+    if (refRow.annotations_json) {
+      try { prior = JSON.parse(refRow.annotations_json)?.strokes || [] } catch {}
+    }
+    for (const s of prior) addNativeStrokeToDisplay(fc, s, nativeToDisplay)
+    setStrokeCount(prior.length)
+
+    // Brush width is in display pixels — matches what the user picked.
+    const brush = new fabric.PencilBrush(fc)
+    brush.color = color
+    brush.width = width
+    fc.freeDrawingBrush = brush
+    fc.isDrawingMode = mode === 'draw'
+    fc.defaultCursor = 'crosshair'
+    fc.hoverCursor = 'crosshair'
+
+    fc.on('path:created', (opt) => {
+      const path = opt?.path
+      if (!path) return
+      pushHistorySnapshot(fc)
+      path.set({ name: 'stroke', selectable: false, evented: mode === 'erase' })
+      fc.requestRenderAll()
+      setStrokeCount(countStrokes(fc))
+    })
+
+    fcRef.current = fc
+    displayRef.current = { natW, natH, dispW, dispH, dispLeft, dispTop }
+    setLoading(false)
+  }, [imgUrl, refRow, color, width, mode])
+
+  // Wire <img> onLoad → initFabricOverlay (with rAF so layout has settled)
+  const handleImgLoad = () => {
+    // Small delay to let CSS layout finish after the load event fires.
+    requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
+  }
+
+  // Handle viewport resize — re-measure + re-init the overlay
   useEffect(() => {
-    if (!refRow || !canvasElRef.current || !wrapperRef.current) return
-
-    let cancelled = false
-    const token = localStorage.getItem('floorplan-token')
-
-    ;(async () => {
-      // Auth-fetch the file as a blob → object URL so fabric.Image doesn't
-      // need to send an Authorization header.
-      let objectUrl
-      try {
-        const resp = await fetch(`/api/files/${refRow.file_id}/raw`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        })
-        if (!resp.ok) throw new Error('Fetch image failed: ' + resp.status)
-        const blob = await resp.blob()
-        objectUrl = URL.createObjectURL(blob)
-      } catch (e) {
-        if (!cancelled) { setError(e.message); setLoading(false) }
-        return
-      }
-
-      const fImg = await fabric.FabricImage.fromURL(objectUrl)
-      if (cancelled) { URL.revokeObjectURL(objectUrl); return }
-
-      const iw = fImg.width || fImg._element?.naturalWidth || 1
-      const ih = fImg.height || fImg._element?.naturalHeight || 1
-
-      // Canvas fills the wrapper. Fallback to window size if the wrapper
-      // hasn't laid out yet (happens intermittently on iPad Safari when
-      // the modal just mounted). Fabric owns retina scaling internally.
-      const rect = wrapperRef.current.getBoundingClientRect()
-      const cw = Math.max(300, Math.round((rect.width || window.innerWidth) - 8))
-      const ch = Math.max(300, Math.round((rect.height || window.innerHeight - 60) - 8))
-
-      const fc = new fabric.Canvas(canvasElRef.current, {
-        width: cw, height: ch, backgroundColor: '#1a1a2e', selection: false,
+    if (!imgUrl) return
+    let raf = null
+    const onResize = () => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = null
+        // Preserve current strokes across the re-init: pull them out in
+        // native coords, re-init, then addNativeStrokeToDisplay puts them
+        // back in the new display space.
+        const fc = fcRef.current
+        const disp = displayRef.current
+        if (fc && disp) {
+          const strokesNative = collectStrokesInNative(fc, disp)
+          // Stash on refRow.annotations_json shape so init picks them up
+          setRefRow(r => r ? { ...r, annotations_json: JSON.stringify({ strokes: strokesNative }) } : r)
+        }
+        setLayoutTick(t => t + 1)
       })
-
-      // Image at NATIVE resolution, no per-object scaling. The fit-and-
-      // center is done via viewportTransform so drawing coords map 1:1 to
-      // image-native pixels — strokes save as-is with no scaling math.
-      fImg.set({ left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false })
-      fc.add(fImg)
-      fc.sendObjectToBack(fImg)
-
-      const fitScale = Math.min(cw / iw, ch / ih, 1)
-      const offsetX = (cw - iw * fitScale) / 2
-      const offsetY = (ch - ih * fitScale) / 2
-      fc.setViewportTransform([fitScale, 0, 0, fitScale, offsetX, offsetY])
-
-      // Restore prior strokes — stored in image-native pixel space.
-      let prior = []
-      if (refRow.annotations_json) {
-        try { prior = JSON.parse(refRow.annotations_json)?.strokes || [] } catch {}
-      }
-      for (const s of prior) addStrokeToCanvas(fc, s)
-      setStrokeCount(prior.length)
-
-      // Brush stroke widths are in canvas-CSS pixels by default. With our
-      // viewport transform (scale < 1), a 4-px brush would produce a very
-      // thin visible line. Divide by fitScale so what the user sees on
-      // screen matches the width they picked.
-      const brush = new fabric.PencilBrush(fc)
-      brush.color = color
-      brush.width = width / fitScale
-      fc.freeDrawingBrush = brush
-      fc.isDrawingMode = mode === 'draw'
-      fc.defaultCursor = 'crosshair'
-      fc.hoverCursor = 'crosshair'
-
-      fc.on('path:created', (opt) => {
-        const path = opt?.path
-        if (!path) return
-        pushHistorySnapshot(fc)
-        path.set({ name: 'stroke', selectable: false, evented: mode === 'erase' })
-        fc.requestRenderAll()
-        setStrokeCount(countStrokes(fc))
-      })
-
-      fcRef.current = fc
-      bgImageRef.current = { fImg, imageWidth: iw, imageHeight: ih, fitScale, offsetX, offsetY, cw, ch, objectUrl }
-      setLoading(false)
-    })()
-
+    }
+    window.addEventListener('resize', onResize)
     return () => {
-      cancelled = true
+      window.removeEventListener('resize', onResize)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [imgUrl])
+
+  // Re-run overlay init when layoutTick bumps
+  useEffect(() => {
+    if (layoutTick > 0) initFabricOverlay()
+  }, [layoutTick, initFabricOverlay])
+
+  // Cleanup fabric + object URL on modal close / ref switch
+  useEffect(() => {
+    return () => {
       if (fcRef.current) { fcRef.current.dispose(); fcRef.current = null }
-      if (bgImageRef.current?.objectUrl) URL.revokeObjectURL(bgImageRef.current.objectUrl)
-      bgImageRef.current = null
+      if (imgUrl) URL.revokeObjectURL(imgUrl)
+      displayRef.current = null
       historyRef.current = { past: [], future: [] }
     }
-  }, [refRow])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- imgUrl in deps would revoke a URL we're still using
+  }, [annotatingRefId])
 
   // ----- Sync brush + mode to fabric when they change -----
   useEffect(() => {
     const fc = fcRef.current
     if (!fc) return
-    const fitScale = bgImageRef.current?.fitScale || 1
     if (fc.freeDrawingBrush) {
       fc.freeDrawingBrush.color = color
-      // Brush width is in canvas-CSS pixels; divide by fitScale so the
-      // visible line matches the picked width regardless of zoom.
-      fc.freeDrawingBrush.width = width / fitScale
+      fc.freeDrawingBrush.width = width
     }
     fc.isDrawingMode = mode === 'draw'
     for (const o of fc.getObjects()) {
@@ -203,13 +259,12 @@ export default function AnnotateImageModal() {
 
   const handleSave = async () => {
     const fc = fcRef.current
-    if (!fc) return
+    const disp = displayRef.current
+    if (!fc || !disp) return
     setSaving(true)
     setError(null)
     try {
-      // Strokes are already in image-native coords (viewport transform handles
-      // display fit), so we can store them without any scaling conversion.
-      const strokes = collectStrokes(fc)
+      const strokes = collectStrokesInNative(fc, disp)
       await updateRef(annotatingRefId, {
         annotations_json: JSON.stringify({ strokes, updated_at: new Date().toISOString() }),
       })
@@ -232,30 +287,41 @@ export default function AnnotateImageModal() {
   }
 
   const handleFlattenExport = async () => {
+    const disp = displayRef.current
     const fc = fcRef.current
-    const bg = bgImageRef.current
-    if (!fc || !bg) return
-    // Export at native image resolution. Everything on the canvas is
-    // already in native coords; we just need to counteract the fit-scale
-    // that viewportTransform is applying for display, and pin the export
-    // region to the image's native bounds so we don't include the
-    // letterbox around it.
-    const multiplier = 1 / (bg.fitScale || 1)
-    const dataUrl = fc.toDataURL({
-      format: 'png',
-      multiplier,
-      left: bg.offsetX,
-      top: bg.offsetY,
-      width: bg.imageWidth * bg.fitScale,
-      height: bg.imageHeight * bg.fitScale,
-    })
-    const filename = `${(refRow?.label || 'annotated').replace(/[^a-z0-9_.-]+/gi, '_')}_annotated.png`
-    const a = document.createElement('a')
-    a.href = dataUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    if (!disp || !fc || !imgUrl) return
+    // Render at native resolution. Draw the original image + the strokes
+    // (scaled from display → native) onto an off-screen canvas.
+    try {
+      const img = new Image()
+      img.src = imgUrl
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej })
+      const out = document.createElement('canvas')
+      out.width = disp.natW
+      out.height = disp.natH
+      const ctx = out.getContext('2d')
+      ctx.drawImage(img, 0, 0, disp.natW, disp.natH)
+      // Draw fabric contents scaled up to native
+      const scale = disp.natW / disp.dispW
+      const strokes = collectStrokesInNative(fc, disp)
+      for (const s of strokes) drawStrokeOnCtx(ctx, s)
+      // Note: strokes are already in native, scale variable unused here.
+      void scale
+      out.toBlob((blob) => {
+        if (!blob) return
+        const url = URL.createObjectURL(blob)
+        const filename = `${(refRow?.label || 'annotated').replace(/[^a-z0-9_.-]+/gi, '_')}_annotated.png`
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        setTimeout(() => URL.revokeObjectURL(url), 5000)
+      }, 'image/png')
+    } catch (e) {
+      setError(e.message)
+    }
   }
 
   const doUndo = () => {
@@ -266,7 +332,7 @@ export default function AnnotateImageModal() {
     const current = snapshot(fc)
     const prev = hist.past.pop()
     hist.future.unshift(current)
-    restoreSnapshot(fc, prev, bgImageRef.current)
+    restoreSnapshot(fc, prev)
     setStrokeCount(countStrokes(fc))
   }
   const doRedo = () => {
@@ -277,7 +343,7 @@ export default function AnnotateImageModal() {
     const current = snapshot(fc)
     const next = hist.future.shift()
     hist.past.push(current)
-    restoreSnapshot(fc, next, bgImageRef.current)
+    restoreSnapshot(fc, next)
     setStrokeCount(countStrokes(fc))
   }
   const pushHistorySnapshot = (fc) => {
@@ -374,11 +440,29 @@ export default function AnnotateImageModal() {
           </div>
         )}
 
-        {/* Canvas area */}
+        {/* Image + canvas overlay. The wrapper is positioned relative so
+            the fabric canvas can be absolute-inside it. The <img> uses
+            object-fit: contain to fill the wrapper while keeping the
+            whole picture visible; the overlay canvas is sized + placed
+            after onLoad to exactly cover the rendered image area. */}
         <div ref={wrapperRef}
-          className="flex-1 flex items-center justify-center bg-gray-950 overflow-hidden"
+          className="flex-1 relative bg-gray-950 overflow-hidden"
           style={{ touchAction: 'none' }}>
-          {loading && <div className="text-gray-500 text-sm">Loading image…</div>}
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm">
+              Loading image…
+            </div>
+          )}
+          {imgUrl && (
+            <img
+              ref={imgRef}
+              src={imgUrl}
+              alt=""
+              onLoad={handleImgLoad}
+              className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+              draggable={false}
+            />
+          )}
           <canvas ref={canvasElRef} />
         </div>
       </div>
@@ -392,7 +476,8 @@ function countStrokes(fc) {
   return fc.getObjects().filter(o => o.name === 'stroke').length
 }
 
-// Snapshot / restore for undo — serialize just the stroke paths, not the bg
+// Snapshot / restore for undo — captures the strokes as-is in the current
+// display coord space; undo/redo doesn't cross re-inits.
 function snapshot(fc) {
   const strokes = []
   for (const o of fc.getObjects().filter(o => o.name === 'stroke')) {
@@ -404,7 +489,7 @@ function snapshot(fc) {
   }
   return strokes
 }
-function restoreSnapshot(fc, snap, bg) {
+function restoreSnapshot(fc, snap) {
   for (const o of fc.getObjects().filter(o => o.name === 'stroke')) fc.remove(o)
   for (const s of snap) {
     const p = new fabric.Path(s.path, {
@@ -419,18 +504,29 @@ function restoreSnapshot(fc, snap, bg) {
   fc.requestRenderAll()
 }
 
-// Add a persisted stroke to a fabric canvas at image-native coords.
-// All display fit/zoom is handled via viewportTransform on the parent
-// canvas — the stroke itself is placed at scale 1 in scene coords.
-// Works for the annotate editor (viewportTransform scales to fit) and
-// the print composite (viewportTransform identity, canvas sized to
-// image-native).
-export function addStrokeToCanvas(fc, s) {
-  const p = new fabric.Path(s.path, {
-    left: s.left || 0,
-    top: s.top || 0,
+// Convert a display-space fabric.Path back to native pixel coords for
+// persistence. Strokes are captured by the brush at display resolution
+// (canvas is sized to img rendered size); on save we scale to native so
+// the annotation survives any future viewport size.
+export function collectStrokesInNative(fc, disp) {
+  const scale = disp.natW / disp.dispW
+  return fc.getObjects().filter(o => o.name === 'stroke').map(o => ({
+    path: (o.path || []).map(cmd => cmd.map((v, i) => i === 0 ? v : v * scale)),
+    left: (o.left || 0) * scale,
+    top: (o.top || 0) * scale,
+    color: o.stroke || '#ef4444',
+    width: (o.strokeWidth || 3) * scale,
+  }))
+}
+
+// Add a native-space stroke to the display-space fabric canvas.
+function addNativeStrokeToDisplay(fc, s, nativeToDisplay) {
+  const scaledPath = (s.path || []).map(cmd => cmd.map((v, i) => i === 0 ? v : v * nativeToDisplay))
+  const p = new fabric.Path(scaledPath, {
+    left: (s.left || 0) * nativeToDisplay,
+    top: (s.top || 0) * nativeToDisplay,
     stroke: s.color || '#ef4444',
-    strokeWidth: s.width || 3,
+    strokeWidth: (s.width || 3) * nativeToDisplay,
     fill: null,
     strokeLineCap: 'round', strokeLineJoin: 'round',
     selectable: false, evented: false,
@@ -439,9 +535,38 @@ export function addStrokeToCanvas(fc, s) {
   fc.add(p)
 }
 
-// Serialize strokes for persistence. PencilBrush captures pointer events
-// in scene coords (viewportTransform is applied on the way in), so the
-// stroke's path/left/top/width are already in image-native pixels.
+// Composite render helper — draws a native-space stroke onto a plain
+// canvas 2D context (used by print sheet + Flatten & Export). Path
+// commands are absolute in native pixels; we translate by left/top.
+function drawStrokeOnCtx(ctx, s) {
+  ctx.save()
+  ctx.translate(s.left || 0, s.top || 0)
+  ctx.strokeStyle = s.color || '#ef4444'
+  ctx.lineWidth = s.width || 3
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.beginPath()
+  for (const cmd of (s.path || [])) {
+    const op = cmd[0]
+    if (op === 'M' || op === 'm') ctx.moveTo(cmd[1], cmd[2])
+    else if (op === 'L' || op === 'l') ctx.lineTo(cmd[1], cmd[2])
+    else if (op === 'Q' || op === 'q') ctx.quadraticCurveTo(cmd[1], cmd[2], cmd[3], cmd[4])
+    else if (op === 'C' || op === 'c') ctx.bezierCurveTo(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6])
+    else if (op === 'Z' || op === 'z') ctx.closePath()
+  }
+  ctx.stroke()
+  ctx.restore()
+}
+
+// Legacy export kept for ReferenceSheetModal's print composite path.
+// Takes a native-space stroke and pushes it into a fabric canvas at
+// scale 1 — used when the target fabric canvas is sized to image-native.
+export function addStrokeToCanvas(fc, s) {
+  addNativeStrokeToDisplay(fc, s, 1)
+}
+
+// Legacy export kept in case future consumers want native-space strokes
+// directly from a fabric canvas that's already at native size.
 export function collectStrokes(fc) {
   return fc.getObjects().filter(o => o.name === 'stroke').map(o => ({
     path: structuredClone(o.path),
