@@ -440,11 +440,7 @@ export default function AnnotateImageModal() {
           </div>
         )}
 
-        {/* Image + canvas overlay. The wrapper is positioned relative so
-            the fabric canvas can be absolute-inside it. The <img> uses
-            object-fit: contain to fill the wrapper while keeping the
-            whole picture visible; the overlay canvas is sized + placed
-            after onLoad to exactly cover the rendered image area. */}
+        {/* Image + canvas overlay. */}
         <div ref={wrapperRef}
           className="flex-1 relative bg-gray-950 overflow-hidden"
           style={{ touchAction: 'none' }}>
@@ -464,6 +460,19 @@ export default function AnnotateImageModal() {
             />
           )}
           <canvas ref={canvasElRef} />
+
+          {/* Temporary diagnostic overlay — remove after the display bug
+              is confirmed fixed. Shows what the modal thinks the sizes
+              are so we can tell whether the img is drawing correctly and
+              the fabric overlay is aligned on top of it. */}
+          {displayRef.current && (
+            <div className="absolute top-1 left-1 px-2 py-1 bg-black/70 text-[10px] text-lime-300 rounded font-mono pointer-events-none leading-tight">
+              wrap: {wrapperRef.current?.getBoundingClientRect().width|0}×{wrapperRef.current?.getBoundingClientRect().height|0}<br/>
+              img native: {displayRef.current.natW}×{displayRef.current.natH}<br/>
+              img shown: {displayRef.current.dispW}×{displayRef.current.dispH} @ ({displayRef.current.dispLeft|0},{displayRef.current.dispTop|0})<br/>
+              canvas: {canvasElRef.current?.width}×{canvasElRef.current?.height} css {canvasElRef.current?.style.width}×{canvasElRef.current?.style.height}
+            </div>
+          )}
         </div>
       </div>
     </div>
