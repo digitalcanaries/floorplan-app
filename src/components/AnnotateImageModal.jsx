@@ -211,21 +211,46 @@ export default function AnnotateImageModal() {
     // tool switches don't re-init the overlay and wipe in-memory edits.
   }, [imgUrl, refRow])
 
-  const handleImgLoad = () => {
-    requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
-  }
-
-  // In addition to the onLoad handler, also re-run init whenever imgUrl or
-  // refRow changes if the img is ALREADY complete. This covers React 19
-  // StrictMode's simulated-unmount-remount cycle: the cleanup effect
-  // disposes fabric, but onLoad doesn't fire again because src didn't
-  // change, so without this the fabric overlay stays torn down.
+  // React's onLoad prop on <img> isn't reliably firing here (production
+  // build + React 19, likely fiber recycling the img element without
+  // reattaching the listener), so attach a native load event listener
+  // ourselves inside a useEffect and also poll img.complete for the case
+  // where the image loaded before the listener attached.
   useEffect(() => {
     if (!imgUrl || !refRow) return
     const img = imgRef.current
     if (!img) return
-    if (img.complete && img.naturalWidth > 0) {
-      requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
+
+    let attempts = 0
+    let pollId = null
+    let cancelled = false
+
+    const tryInit = () => {
+      if (cancelled) return
+      if (img.complete && img.naturalWidth > 0) {
+        requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
+        return true
+      }
+      return false
+    }
+
+    const onNativeLoad = () => tryInit()
+
+    img.addEventListener('load', onNativeLoad)
+
+    // If already complete when this effect runs, fire immediately.
+    if (!tryInit()) {
+      // Otherwise poll for up to 5 s in case the load event was missed.
+      pollId = setInterval(() => {
+        attempts++
+        if (tryInit() || attempts > 50) clearInterval(pollId)
+      }, 100)
+    }
+
+    return () => {
+      cancelled = true
+      img.removeEventListener('load', onNativeLoad)
+      if (pollId) clearInterval(pollId)
     }
   }, [imgUrl, refRow, initFabricOverlay])
 
@@ -940,7 +965,6 @@ export default function AnnotateImageModal() {
                 ref={imgRef}
                 src={imgUrl}
                 alt=""
-                onLoad={handleImgLoad}
                 className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
                 style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 120ms' }}
                 draggable={false}
