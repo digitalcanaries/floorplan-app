@@ -74,6 +74,13 @@ export default function AnnotateImageModal() {
   // ----- Load the ref + image blob -----
   useEffect(() => {
     if (!annotatingRefId) { setRefRow(null); setImgUrl(null); return }
+    // Reset zoom/pan/rotation on every modal open — leftover state from a
+    // prior session was rendering the image at some old zoom while the
+    // fabric overlay initialised at a different scale, producing a broken
+    // display where annotations sit outside the image.
+    setZoom(1)
+    setPanOffset({ x: 0, y: 0 })
+    setRotation(0)
     setLoading(true)
     setError(null)
     let cancelled = false
