@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
+import { drawObjectOnCtx as drawAnnoOnCtx } from '../lib/annoDraw.js'
 
 // Draw-on-image editor. The <img> element handles image display (browser-
 // managed via object-fit: contain so the whole picture is always visible).
@@ -663,14 +664,15 @@ export default function AnnotateImageModal() {
     const fc = fcRef.current
     if (!disp || !fc || !imgUrl) return
     try {
-      // Render at native resolution using a plain 2D context: draw image
-      // (rotated if needed), then overlay the annotation objects rendered
-      // by a headless fabric.StaticCanvas.
+      // Draw everything with plain 2D Canvas ops — no fabric involved in
+      // the composite. Fabric's own render path was producing warped
+      // output here (annotations stretched horizontally, squashed
+      // vertically). The plain-canvas replay renders each object at its
+      // exact saved coords, provably.
       const img = new Image()
       img.src = imgUrl
       await new Promise((res, rej) => { img.onload = res; img.onerror = rej })
 
-      // Rotated native dims for the output canvas
       const swap = rotation % 180 !== 0
       const outW = swap ? disp.natH : disp.natW
       const outH = swap ? disp.natW : disp.natH
@@ -678,33 +680,24 @@ export default function AnnotateImageModal() {
       const out = document.createElement('canvas')
       out.width = outW; out.height = outH
       const ctx = out.getContext('2d')
-      // Rotate the image (draw in original coords + apply rotation transform)
+
+      // Image (rotated if the user rotated it)
       ctx.save()
       ctx.translate(outW / 2, outH / 2)
       ctx.rotate((rotation * Math.PI) / 180)
       ctx.drawImage(img, -disp.natW / 2, -disp.natH / 2, disp.natW, disp.natH)
       ctx.restore()
 
-      // Render annotations via a headless fabric canvas at native size
-      const overlayEl = document.createElement('canvas')
-      overlayEl.width = disp.natW; overlayEl.height = disp.natH
-      const overlayFc = new fabric.StaticCanvas(overlayEl, {
-        width: disp.natW, height: disp.natH,
-        enableRetinaScaling: false,
-        backgroundColor: 'transparent',
-      })
+      // Annotations at absolute native coords
       const nativeObjects = collectObjectsInNative(fc, disp)
-      const enlivened = await fabric.util.enlivenObjects(nativeObjects)
-      for (const o of enlivened) overlayFc.add(o)
-      overlayFc.renderAll()
-
-      // Composite the overlay (rotated) on top
-      ctx.save()
-      ctx.translate(outW / 2, outH / 2)
-      ctx.rotate((rotation * Math.PI) / 180)
-      ctx.drawImage(overlayEl, -disp.natW / 2, -disp.natH / 2)
-      ctx.restore()
-      overlayFc.dispose()
+      if (nativeObjects.length > 0) {
+        ctx.save()
+        ctx.translate(outW / 2, outH / 2)
+        ctx.rotate((rotation * Math.PI) / 180)
+        ctx.translate(-disp.natW / 2, -disp.natH / 2)
+        for (const o of nativeObjects) drawAnnoOnCtx(ctx, o)
+        ctx.restore()
+      }
 
       out.toBlob((blob) => {
         if (!blob) return
