@@ -228,11 +228,19 @@ export default function AnnotateImageModal() {
       if (cancelled) return
       window.__annoInitTrace.push({stage:'tryInit', complete: img.complete, nat: img.naturalWidth})
       if (img.complete && img.naturalWidth > 0) {
-        window.__annoInitTrace.push({stage:'tryInit->rAF scheduled'})
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          window.__annoInitTrace.push({stage:'rAF fired, calling init'})
-          initFabricOverlay()
-        }))
+        window.__annoInitTrace.push({stage:'tryInit->rAF1 scheduled'})
+        requestAnimationFrame(() => {
+          window.__annoInitTrace.push({stage:'rAF1 fired'})
+          requestAnimationFrame(() => {
+            try {
+              window.__annoInitTrace.push({stage:'rAF2 fired, calling init', initFn: typeof initFabricOverlay})
+              initFabricOverlay()
+              window.__annoInitTrace.push({stage:'init returned OK'})
+            } catch (e) {
+              window.__annoInitTrace.push({stage:'init THREW', msg: String(e), stack: e.stack?.slice(0, 200)})
+            }
+          })
+        })
         return true
       }
       return false
