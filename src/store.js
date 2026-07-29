@@ -1816,12 +1816,6 @@ const useStore = create((set, get) => ({
   annotatingRefId: null,
   setAnnotatingRefId: (id) => set({ annotatingRefId: id }),
 
-  // Toast surfaced by App.jsx after an image annotation save so the user
-  // knows where it landed (project-level vs a specific set) and can jump
-  // to it. Shape: { message, target: 'project' | <setId>, refId, at }
-  annotateSavedNotice: null,
-  setAnnotateSavedNotice: (n) => set({ annotateSavedNotice: n }),
-
   addRef: async (payload) => {
     const projectId = loadServerProjectId()
     const token = localStorage.getItem('floorplan-token')
