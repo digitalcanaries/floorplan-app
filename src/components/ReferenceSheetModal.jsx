@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
-import * as fabric from 'fabric'
 import useStore from '../store.js'
-import { extractObjectsFromSaved, scaleObject } from './AnnotateImageModal.jsx'
+import { extractObjectsFromSaved } from './AnnotateImageModal.jsx'
 
 // Modal — per-set or project-level reference sheet. Three tabs:
 // - Documents (photos + PDFs uploaded as files)
@@ -40,14 +39,17 @@ async function fetchAuthedObjectURL(fileId) {
 }
 
 // Composite an image + persisted annotations into a fresh PNG object URL
-// at the image's native resolution. Accepts the parsed `annotations_json`
-// object (supports both v1 {strokes} and v2 {objects, rotation} formats)
-// so every shape type — freehand, highlight, line/arrow, rect, ellipse,
-// text — renders identically to what the user saw at save time.
+// at the image's native resolution. Uses plain 2D Canvas drawing (no fabric)
+// so the rendering is dead-simple and provably correct — each fabric.Path
+// gets replayed as ctx.beginPath() + moveTo/lineTo/quadraticCurveTo, and
+// each fabric.IText becomes a ctx.fillText call. Fabric's own render path
+// was producing warped output in this specific code path (positions
+// stretched wide + squashed vertical) despite the same code working in
+// isolation — likely some canvas/DPR interaction we couldn't isolate.
 async function compositeImageWithAnnotations(imageBlobUrl, saved) {
   return new Promise((resolve) => {
     const probe = new Image()
-    probe.onload = async () => {
+    probe.onload = () => {
       const w = probe.naturalWidth
       const h = probe.naturalHeight
       const rotation = ((saved?.rotation || 0) % 360 + 360) % 360
@@ -66,29 +68,15 @@ async function compositeImageWithAnnotations(imageBlobUrl, saved) {
       ctx.drawImage(probe, -w / 2, -h / 2, w, h)
       ctx.restore()
 
-      // Overlay annotations via a headless fabric.StaticCanvas at native size
+      // Draw annotations directly on the composite (rotated too)
       const objects = extractObjectsFromSaved(saved)
       if (objects.length > 0) {
-        const overlayEl = document.createElement('canvas')
-        overlayEl.width = w; overlayEl.height = h
-        const overlayFc = new fabric.StaticCanvas(overlayEl, {
-          width: w, height: h,
-          enableRetinaScaling: false,
-          backgroundColor: 'transparent',
-        })
-        try {
-          // Objects are already in native coords — enliven and add
-          const enlivened = await fabric.util.enlivenObjects(objects.map(o => scaleObject(o, 1)))
-          for (const o of enlivened) overlayFc.add(o)
-          overlayFc.renderAll()
-          ctx.save()
-          ctx.translate(outW / 2, outH / 2)
-          ctx.rotate((rotation * Math.PI) / 180)
-          ctx.drawImage(overlayEl, -w / 2, -h / 2)
-          ctx.restore()
-        } finally {
-          overlayFc.dispose()
-        }
+        ctx.save()
+        ctx.translate(outW / 2, outH / 2)
+        ctx.rotate((rotation * Math.PI) / 180)
+        ctx.translate(-w / 2, -h / 2)
+        for (const o of objects) drawObjectOnCtx(ctx, o)
+        ctx.restore()
       }
 
       out.toBlob((blob) => {
@@ -99,6 +87,78 @@ async function compositeImageWithAnnotations(imageBlobUrl, saved) {
     probe.onerror = () => resolve(null)
     probe.src = imageBlobUrl
   })
+}
+
+// Draw a serialised fabric object onto a plain 2D canvas context. Objects
+// are expected to be in image-native pixel space with originX='left',
+// originY='top' (see extractObjectsFromSaved which normalises).
+function drawObjectOnCtx(ctx, o) {
+  ctx.save()
+  ctx.globalAlpha = (o.opacity == null ? 1 : o.opacity)
+  ctx.strokeStyle = o.stroke || '#ef4444'
+  ctx.lineWidth = o.strokeWidth || 3
+  ctx.lineCap = o.strokeLineCap || 'round'
+  ctx.lineJoin = o.strokeLineJoin || 'round'
+  ctx.fillStyle = (o.fill && o.fill !== 'transparent' && o.fill !== '') ? o.fill : 'rgba(0,0,0,0)'
+
+  const type = (o.type || '').toLowerCase()
+
+  if (type === 'path' && Array.isArray(o.path)) {
+    // fabric.Path stores commands with absolute coords in local space.
+    // With originX='left', originY='top', fabric renders path as-is (no
+    // pathOffset shift). We draw at those exact coords.
+    ctx.beginPath()
+    for (const cmd of o.path) {
+      const op = cmd[0]
+      if (op === 'M' || op === 'm') ctx.moveTo(cmd[1], cmd[2])
+      else if (op === 'L' || op === 'l') ctx.lineTo(cmd[1], cmd[2])
+      else if (op === 'Q' || op === 'q') ctx.quadraticCurveTo(cmd[1], cmd[2], cmd[3], cmd[4])
+      else if (op === 'C' || op === 'c') ctx.bezierCurveTo(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6])
+      else if (op === 'Z' || op === 'z') ctx.closePath()
+    }
+    if (o.fill && o.fill !== 'transparent' && o.fill !== '') ctx.fill()
+    if (o.stroke) ctx.stroke()
+  } else if (type === 'rect') {
+    const x = o.left || 0, y = o.top || 0, w = o.width || 0, h = o.height || 0
+    if (o.fill && o.fill !== 'transparent' && o.fill !== '') ctx.fillRect(x, y, w, h)
+    if (o.stroke) ctx.strokeRect(x, y, w, h)
+  } else if (type === 'ellipse') {
+    const rx = o.rx || 0, ry = o.ry || 0
+    const cx = (o.left || 0) + rx, cy = (o.top || 0) + ry
+    ctx.beginPath()
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
+    if (o.fill && o.fill !== 'transparent' && o.fill !== '') ctx.fill()
+    if (o.stroke) ctx.stroke()
+  } else if (type === 'line') {
+    // fabric.Line stores x1,y1,x2,y2 in LOCAL coords relative to (left, top)
+    // BUT most fabric shapes end up storing absolute-ish; if left/top are 0
+    // then x1/y1 ARE absolute. Handle both.
+    const x1 = (o.left || 0) + (o.x1 || 0)
+    const y1 = (o.top || 0) + (o.y1 || 0)
+    const x2 = (o.left || 0) + (o.x2 || 0)
+    const y2 = (o.top || 0) + (o.y2 || 0)
+    ctx.beginPath()
+    ctx.moveTo(x1, y1)
+    ctx.lineTo(x2, y2)
+    ctx.stroke()
+  } else if (type === 'i-text' || type === 'itext' || type === 'text' || type === 'textbox') {
+    const fontSize = o.fontSize || 24
+    const fontFamily = o.fontFamily || 'sans-serif'
+    const fontStyle = o.fontStyle || 'normal'
+    const fontWeight = o.fontWeight || 'normal'
+    ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = o.fill || '#000'
+    // fabric IText applies its own line-height + baseline; approximate here
+    const lines = String(o.text || '').split('\n')
+    const lineHeight = fontSize * (o.lineHeight || 1.16)
+    let y = o.top || 0
+    for (const line of lines) {
+      ctx.fillText(line, o.left || 0, y)
+      y += lineHeight
+    }
+  }
+  ctx.restore()
 }
 
 // <AuthedImage> — img backed by an authed fetch + object URL. Used for
