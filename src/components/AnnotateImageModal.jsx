@@ -135,12 +135,21 @@ export default function AnnotateImageModal() {
 
     const imgRect = img.getBoundingClientRect()
     const wrapperRect = wrapper.getBoundingClientRect()
-    const dispW = Math.max(1, Math.round(imgRect.width))
-    const dispH = Math.max(1, Math.round(imgRect.height))
-    const dispLeft = imgRect.left - wrapperRect.left
-    const dispTop = imgRect.top - wrapperRect.top
     const natW = img.naturalWidth
     const natH = img.naturalHeight
+
+    // Size + position the fabric canvas to the ACTUAL rendered image, not
+    // the letterboxed element box. This is the core alignment fix: the
+    // element is object-fit:contain so the image is centered with bars;
+    // sizing the canvas to the element (old behaviour) meant fabric coords
+    // and image pixels diverged by the letterbox amount, corrupting every
+    // saved coordinate. Now fabric coord 0..renderedW maps exactly to
+    // image 0..natW.
+    const cr = getContainedRect(img)
+    const dispW = Math.max(1, Math.round(cr.renderedW))
+    const dispH = Math.max(1, Math.round(cr.renderedH))
+    const dispLeft = (imgRect.left - wrapperRect.left) + cr.offX
+    const dispTop = (imgRect.top - wrapperRect.top) + cr.offY
 
     canvasEl.style.position = 'absolute'
     canvasEl.style.left = `${dispLeft}px`
@@ -175,7 +184,15 @@ export default function AnnotateImageModal() {
     if (refRow.annotations_json) {
       try { saved = JSON.parse(refRow.annotations_json) } catch {}
     }
-    const savedObjects = extractObjectsFromSaved(saved)
+    let savedObjects = extractObjectsFromSaved(saved)
+    // Old data (before imageSpace:true) was stored in element-space with the
+    // letterbox baked in. Migrate it to true image-space using the current
+    // contained-rect params as a proxy for the draw-time viewport. New data
+    // (imageSpace:true) is already correct and skipped.
+    const alreadyImageSpace = saved && saved.imageSpace === true
+    if (!alreadyImageSpace && savedObjects.length > 0) {
+      savedObjects = savedObjects.map(o => migrateElementToImageSpace(o, cr))
+    }
     if (savedObjects.length > 0) {
       const scaledForDisplay = savedObjects.map(o => scaleObject(o, nativeToDisplay))
       fabric.util.enlivenObjects(scaledForDisplay).then((enlivened) => {
@@ -229,7 +246,10 @@ export default function AnnotateImageModal() {
         const disp = displayRef.current
         if (fc && disp) {
           const nativeObjects = collectObjectsInNative(fc, disp)
-          setRefRow(r => r ? { ...r, annotations_json: JSON.stringify({ version: 2, objects: nativeObjects, rotation }) } : r)
+          // collectObjectsInNative now yields true image-space coords, so
+          // mark imageSpace:true — otherwise the re-init would migrate them
+          // again on every resize.
+          setRefRow(r => r ? { ...r, annotations_json: JSON.stringify({ version: 2, imageSpace: true, objects: nativeObjects, rotation }) } : r)
         }
         setLayoutTick(t => t + 1)
       })
@@ -631,7 +651,10 @@ export default function AnnotateImageModal() {
       const objects = collectObjectsInNative(fc, disp)
       await updateRef(annotatingRefId, {
         annotations_json: JSON.stringify({
-          version: 2, objects, rotation, updated_at: new Date().toISOString(),
+          // imageSpace: true marks coords as true image-native (canvas sized
+          // to the contained image rect, letterbox-free). Loaders skip
+          // migration for these.
+          version: 2, imageSpace: true, objects, rotation, updated_at: new Date().toISOString(),
         }),
       })
       // Toast in App.jsx so the user sees where it landed + a jump link.
@@ -1019,6 +1042,57 @@ export function collectObjectsInNative(fc, disp) {
   return fc.getObjects()
     .filter(o => o.name === 'anno')
     .map(o => scaleObject(normalizeOriginToLeftTop(o.toObject(['name', 'opacity'])), scale))
+}
+
+// Compute the actual rendered rectangle of an object-fit:contain <img>.
+// The <img> ELEMENT fills its box (w-full h-full), but the IMAGE inside is
+// letterboxed — so the element's getBoundingClientRect is NOT the image
+// rect. Everything about annotation alignment depends on using THIS rect
+// (the real pixels the user sees), not the element box.
+export function getContainedRect(imgEl) {
+  const natW = imgEl.naturalWidth || 1
+  const natH = imgEl.naturalHeight || 1
+  const box = imgEl.getBoundingClientRect()
+  const scale = Math.min(box.width / natW, box.height / natH)
+  const renderedW = natW * scale
+  const renderedH = natH * scale
+  const offX = (box.width - renderedW) / 2
+  const offY = (box.height - renderedH) / 2
+  return { natW, natH, elementW: box.width, elementH: box.height, renderedW, renderedH, offX, offY }
+}
+
+// Migrate a serialized object stored in the OLD "element-space" coordinate
+// system (fabric canvas was sized to the letterboxed element, single
+// width-scale used for both axes, letterbox offset ignored) into TRUE
+// image-space native coords. Uses the CURRENT contained-rect params as a
+// proxy for the draw-time viewport — exact when the window aspect matches
+// draw time, which it does for the same desktop. Once re-saved it's locked
+// in image-space and never migrated again.
+export function migrateElementToImageSpace(o, P) {
+  const { natW, natH, elementW, renderedW, renderedH, offX, offY } = P
+  // reverse old save (× elementW/natW on both axes) → fabric px, then apply
+  // the correct per-axis contained mapping → image-native px.
+  const mx = (x) => (x * elementW / natW - offX) * natW / renderedW
+  const my = (y) => (y * elementW / natW - offY) * natH / renderedH
+  const s = elementW / renderedW // uniform size-scale (contain preserves aspect)
+  const out = { ...o }
+  if (out.left != null) out.left = mx(out.left)
+  if (out.top != null) out.top = my(out.top)
+  if (out.width != null) out.width *= s
+  if (out.height != null) out.height *= s
+  if (out.rx != null) out.rx *= s
+  if (out.ry != null) out.ry *= s
+  if (out.fontSize != null) out.fontSize *= s
+  if (out.strokeWidth != null) out.strokeWidth *= s
+  if (out.x1 != null) { out.x1 = mx(out.x1); out.y1 = my(out.y1); out.x2 = mx(out.x2); out.y2 = my(out.y2) }
+  if (Array.isArray(out.path)) {
+    out.path = out.path.map(cmd => {
+      const c = cmd.slice()
+      for (let i = 1; i + 1 < c.length; i += 2) { c[i] = mx(c[i]); c[i + 1] = my(c[i + 1]) }
+      return c
+    })
+  }
+  return out
 }
 
 // Force originX='left', originY='top' on a serialized object, shifting
