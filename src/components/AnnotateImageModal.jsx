@@ -1011,12 +1011,31 @@ function restoreSnapshot(fc, snap) {
 }
 
 // Serialize annotation layer at NATIVE image pixel coords for persistence.
-// Uses fabric's toObject() then scales left/top/dimensions by native/display.
+// Uses fabric's toObject(), normalises origin to 'left'/'top' so round-trip
+// reload doesn't get an origin-mismatched position, then scales
+// left/top/dimensions by native/display.
 export function collectObjectsInNative(fc, disp) {
   const scale = disp.natW / disp.dispW
   return fc.getObjects()
     .filter(o => o.name === 'anno')
-    .map(o => scaleObject(o.toObject(['name', 'opacity']), scale))
+    .map(o => scaleObject(normalizeOriginToLeftTop(o.toObject(['name', 'opacity'])), scale))
+}
+
+// Force originX='left', originY='top' on a serialized object, shifting
+// left/top to match. fabric v7 defaults some object types (Path in
+// particular) to origin='center', but PencilBrush and shape drawing
+// don't set it explicitly — the resulting mismatch between authored
+// and reconstructed origin was silently shifting the visual position
+// by half the bbox on every round trip.
+function normalizeOriginToLeftTop(o) {
+  const out = { ...o }
+  const w = out.width || 0
+  const h = out.height || 0
+  if (out.originX === 'center') { out.left = (out.left || 0) - w / 2; out.originX = 'left' }
+  else if (out.originX === 'right') { out.left = (out.left || 0) - w; out.originX = 'left' }
+  if (out.originY === 'center') { out.top = (out.top || 0) - h / 2; out.originY = 'top' }
+  else if (out.originY === 'bottom') { out.top = (out.top || 0) - h; out.originY = 'top' }
+  return out
 }
 
 // Pull annotation objects out of a saved annotations_json blob. Supports
@@ -1024,7 +1043,11 @@ export function collectObjectsInNative(fc, disp) {
 // v1 format ({strokes: [...]}) for backward compat.
 export function extractObjectsFromSaved(saved) {
   if (!saved) return []
-  if (Array.isArray(saved.objects)) return saved.objects
+  if (Array.isArray(saved.objects)) {
+    // Migrate any center-origin objects saved before the origin fix so
+    // existing annotations render at the position the user drew them.
+    return saved.objects.map(normalizeOriginToLeftTop)
+  }
   if (Array.isArray(saved.strokes)) {
     // v1 → v2: strokes were fabric.Path shapes stored as {path,left,top,color,width}
     return saved.strokes.map(s => ({
@@ -1036,6 +1059,7 @@ export function extractObjectsFromSaved(saved) {
       strokeWidth: s.width || 3,
       fill: null,
       strokeLineCap: 'round', strokeLineJoin: 'round',
+      originX: 'left', originY: 'top',
       name: 'anno',
     }))
   }
