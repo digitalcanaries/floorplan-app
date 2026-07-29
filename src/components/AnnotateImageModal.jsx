@@ -211,12 +211,11 @@ export default function AnnotateImageModal() {
     // tool switches don't re-init the overlay and wipe in-memory edits.
   }, [imgUrl, refRow])
 
-  // React's onLoad prop on <img> isn't reliably firing here (production
-  // build + React 19, likely fiber recycling the img element without
-  // reattaching the listener), so attach a native load event listener
-  // ourselves inside a useEffect and also poll img.complete for the case
-  // where the image loaded before the listener attached.
+  // Native load listener + poll fallback, replacing React's onLoad prop
+  // which wasn't reliably firing on the recycled <img> element.
   useEffect(() => {
+    window.__annoInitTrace = window.__annoInitTrace || []
+    window.__annoInitTrace.push({stage:'useEff enter', imgUrl:!!imgUrl, refRow:!!refRow, imgRef:!!imgRef.current})
     if (!imgUrl || !refRow) return
     const img = imgRef.current
     if (!img) return
@@ -227,23 +226,25 @@ export default function AnnotateImageModal() {
 
     const tryInit = () => {
       if (cancelled) return
+      window.__annoInitTrace.push({stage:'tryInit', complete: img.complete, nat: img.naturalWidth})
       if (img.complete && img.naturalWidth > 0) {
-        requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
+        window.__annoInitTrace.push({stage:'tryInit->rAF scheduled'})
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          window.__annoInitTrace.push({stage:'rAF fired, calling init'})
+          initFabricOverlay()
+        }))
         return true
       }
       return false
     }
 
-    const onNativeLoad = () => tryInit()
-
+    const onNativeLoad = () => { window.__annoInitTrace.push({stage:'native load event'}); tryInit() }
     img.addEventListener('load', onNativeLoad)
 
-    // If already complete when this effect runs, fire immediately.
     if (!tryInit()) {
-      // Otherwise poll for up to 5 s in case the load event was missed.
       pollId = setInterval(() => {
         attempts++
-        if (tryInit() || attempts > 50) clearInterval(pollId)
+        if (tryInit() || attempts > 50) { window.__annoInitTrace.push({stage:'poll stop', attempts, fired: attempts <= 50}); clearInterval(pollId) }
       }, 100)
     }
 
@@ -251,6 +252,7 @@ export default function AnnotateImageModal() {
       cancelled = true
       img.removeEventListener('load', onNativeLoad)
       if (pollId) clearInterval(pollId)
+      window.__annoInitTrace.push({stage:'useEff cleanup'})
     }
   }, [imgUrl, refRow, initFabricOverlay])
 
