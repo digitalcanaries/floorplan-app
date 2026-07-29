@@ -117,11 +117,15 @@ export default function AnnotateImageModal() {
 
   // ----- Init fabric overlay after <img> renders -----
   const initFabricOverlay = useCallback(() => {
+    // eslint-disable-next-line no-undef
+    if (typeof window !== 'undefined') { window.__annoInitTrace = (window.__annoInitTrace||[]); window.__annoInitTrace.push({t:Date.now(), stage:'called', hasImg: !!imgRef.current, hasWrapper: !!wrapperRef.current, hasCanvas: !!canvasElRef.current, imgUrl: !!imgUrl, refRow: !!refRow, imgComplete: imgRef.current?.complete, imgNat: imgRef.current?.naturalWidth}) }
     const img = imgRef.current
     const wrapper = wrapperRef.current
     const canvasEl = canvasElRef.current
     if (!img || !wrapper || !canvasEl || !imgUrl || !refRow) return
     if (!img.complete || img.naturalWidth === 0) return
+    // eslint-disable-next-line no-undef
+    if (typeof window !== 'undefined') window.__annoInitTrace.push({t:Date.now(), stage:'creating fabric', dispW: Math.round(img.getBoundingClientRect().width), dispH: Math.round(img.getBoundingClientRect().height)})
 
     if (fcRef.current) { fcRef.current.dispose(); fcRef.current = null }
 
@@ -186,6 +190,8 @@ export default function AnnotateImageModal() {
 
     fcRef.current = fc
     displayRef.current = { natW, natH, dispW, dispH, dispLeft, dispTop }
+    // eslint-disable-next-line no-undef
+    if (typeof window !== 'undefined') window.__annoInitTrace.push({t:Date.now(), stage:'fabric ready', canvasBufW: canvasEl.width, canvasBufH: canvasEl.height, canvasCssW: canvasEl.style.width, canvasCssH: canvasEl.style.height, wrapperParentClass: canvasEl.parentElement?.className?.slice(0, 40) })
 
     // Freehand + highlight: fabric.PencilBrush captures the path itself.
     // Read current tool via toolRef so this reflects what's selected when
