@@ -54,33 +54,40 @@ async function compositeImageWithAnnotations(imageBlobUrl, saved) {
       const w = probe.naturalWidth
       const h = probe.naturalHeight
       const rotation = ((saved?.rotation || 0) % 360 + 360) % 360
-      const swap = rotation % 180 !== 0
-      const outW = swap ? h : w
-      const outH = swap ? w : h
 
-      const out = document.createElement('canvas')
-      out.width = outW; out.height = outH
-      const ctx = out.getContext('2d')
-
-      // Draw original image (rotated if the user rotated it in the annotator)
-      ctx.save()
-      ctx.translate(outW / 2, outH / 2)
-      ctx.rotate((rotation * Math.PI) / 180)
-      ctx.drawImage(probe, -w / 2, -h / 2, w, h)
-      ctx.restore()
-
-      // Draw annotations directly on the composite (rotated too)
+      // 1. image + annotations at native size, unrotated.
+      const base = document.createElement('canvas')
+      base.width = w; base.height = h
+      const bctx = base.getContext('2d')
+      bctx.drawImage(probe, 0, 0, w, h)
       const objects = extractObjectsFromSaved(saved)
-      if (objects.length > 0) {
-        ctx.save()
-        ctx.translate(outW / 2, outH / 2)
-        ctx.rotate((rotation * Math.PI) / 180)
-        ctx.translate(-w / 2, -h / 2)
-        for (const o of objects) drawObjectOnCtx(ctx, o)
-        ctx.restore()
+      for (const o of objects) drawObjectOnCtx(bctx, o)
+
+      // 2. crop
+      const crop = saved?.cropRect
+      let stage = base
+      if (crop && crop.w > 1 && crop.h > 1) {
+        const c = document.createElement('canvas')
+        c.width = Math.round(crop.w); c.height = Math.round(crop.h)
+        c.getContext('2d').drawImage(base, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h)
+        stage = c
       }
 
-      out.toBlob((blob) => {
+      // 3. rotate
+      let finalCanvas = stage
+      if (rotation % 360 !== 0) {
+        const swap = rotation % 180 !== 0
+        const rc = document.createElement('canvas')
+        rc.width = swap ? stage.height : stage.width
+        rc.height = swap ? stage.width : stage.height
+        const rctx = rc.getContext('2d')
+        rctx.translate(rc.width / 2, rc.height / 2)
+        rctx.rotate((rotation * Math.PI) / 180)
+        rctx.drawImage(stage, -stage.width / 2, -stage.height / 2)
+        finalCanvas = rc
+      }
+
+      finalCanvas.toBlob((blob) => {
         if (!blob) return resolve(null)
         resolve(URL.createObjectURL(blob))
       }, 'image/png')

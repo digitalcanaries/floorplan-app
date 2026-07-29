@@ -19,6 +19,7 @@ const TOOLS = [
   { id: 'text',      label: 'T',   title: 'Text label' },
   { id: 'select',    label: '↕',   title: 'Select / move / resize existing annotation' },
   { id: 'erase',     label: '⌫',   title: 'Erase — tap an annotation to delete it' },
+  { id: 'crop',      label: '✂',   title: 'Crop — drag a rectangle; export/print output just that region' },
 ]
 
 const COLORS = ['#ef4444', '#facc15', '#22c55e', '#3b82f6', '#a855f7', '#000000', '#ffffff']
@@ -75,6 +76,10 @@ export default function AnnotateImageModal() {
   const [zoom, setZoom] = useState(1)
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
   const [objectCount, setObjectCount] = useState(0)
+  // Non-destructive crop region in image-native pixels ({x,y,w,h}) or null.
+  // The editor keeps the full image; export/print output only this region.
+  const [cropRect, setCropRect] = useState(null)
+  const cropRectRef = useRef(null)
   const historyRef = useRef({ past: [], future: [] })
   const [layoutTick, setLayoutTick] = useState(0)
 
@@ -87,13 +92,14 @@ export default function AnnotateImageModal() {
     // before the new img is measured.
     migratedCacheRef.current = { refId: null, objects: null }
     setLayoutTick(0)
-    // Reset zoom/pan/rotation on every modal open — leftover state from a
-    // prior session was rendering the image at some old zoom while the
+    // Reset zoom/pan/rotation/crop on every modal open — leftover state from
+    // a prior session was rendering the image at some old zoom while the
     // fabric overlay initialised at a different scale, producing a broken
     // display where annotations sit outside the image.
     setZoom(1)
     setPanOffset({ x: 0, y: 0 })
     setRotation(0)
+    setCropRect(null)
     setLoading(true)
     setError(null)
     let cancelled = false
@@ -117,10 +123,11 @@ export default function AnnotateImageModal() {
           const url = URL.createObjectURL(blob)
           setRefRow(r)
           setImgUrl(url)
-          // Restore rotation if saved
+          // Restore rotation + crop if saved
           try {
             const parsed = r.annotations_json ? JSON.parse(r.annotations_json) : null
             if (parsed?.rotation) setRotation(parsed.rotation)
+            if (parsed?.cropRect) setCropRect(parsed.cropRect)
           } catch {}
         } catch (e) {
           setError(e.message); setLoading(false)
@@ -135,6 +142,29 @@ export default function AnnotateImageModal() {
   useEffect(() => { toolRef.current = tool }, [tool])
   useEffect(() => { colorRef.current = color }, [color])
   useEffect(() => { widthRef.current = width }, [width])
+  useEffect(() => { cropRectRef.current = cropRect }, [cropRect])
+
+  // Draw the crop region as a dashed overlay on the canvas (display coords).
+  // It's tagged 'crop-overlay' (not 'anno') so it's never saved or exported
+  // as an annotation — it only shows the user what the export will contain.
+  useEffect(() => {
+    const fc = fcRef.current
+    const disp = displayRef.current
+    if (!fc || !disp) return
+    fc.getObjects().filter(o => o.name === 'crop-overlay').forEach(o => fc.remove(o))
+    if (cropRect) {
+      const s = disp.dispW / disp.natW
+      const r = new fabric.Rect({
+        left: cropRect.x * s, top: cropRect.y * s,
+        width: cropRect.w * s, height: cropRect.h * s,
+        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2,
+        strokeDashArray: [8, 6], strokeUniform: true,
+        selectable: false, evented: false, name: 'crop-overlay',
+      })
+      fc.add(r)
+    }
+    fc.requestRenderAll()
+  }, [cropRect, layoutTick])
 
   // ----- Init fabric overlay after <img> renders -----
   const initFabricOverlay = useCallback(() => {
@@ -232,6 +262,19 @@ export default function AnnotateImageModal() {
         setObjectCount(countAnno(fc))
         fc.requestRenderAll()
       })
+    }
+
+    // Re-draw the crop overlay on this fresh canvas (from the ref so this
+    // useCallback doesn't need cropRect in deps).
+    if (cropRectRef.current) {
+      const cReg = cropRectRef.current
+      const s = dispW / natW
+      fc.add(new fabric.Rect({
+        left: cReg.x * s, top: cReg.y * s, width: cReg.w * s, height: cReg.h * s,
+        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2,
+        strokeDashArray: [8, 6], strokeUniform: true,
+        selectable: false, evented: false, name: 'crop-overlay',
+      }))
     }
 
     configureBrush(fc, curTool, curColor, curWidth)
@@ -353,7 +396,7 @@ export default function AnnotateImageModal() {
     const fc = fcRef.current
     if (!fc) return
 
-    const isShape = ['rect', 'ellipse', 'line', 'arrow'].includes(tool)
+    const isShape = ['rect', 'ellipse', 'line', 'arrow', 'crop'].includes(tool)
 
     const onDown = (opt) => {
       if (tool === 'text') {
@@ -390,7 +433,16 @@ export default function AnnotateImageModal() {
       const pt = fc.getScenePoint(opt.e)
       shapeDrawStateRef.current.startPt = pt
       let shape
-      if (tool === 'rect') {
+      if (tool === 'crop') {
+        // Remove any existing crop overlay/draft while drawing a new one.
+        fc.getObjects().filter(o => o.name === 'crop-overlay' || o.name === 'crop-draft').forEach(o => fc.remove(o))
+        shape = new fabric.Rect({
+          left: pt.x, top: pt.y, width: 0, height: 0,
+          fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2,
+          strokeDashArray: [8, 6], strokeUniform: true,
+          selectable: false, evented: false, name: 'crop-draft',
+        })
+      } else if (tool === 'rect') {
         shape = new fabric.Rect({
           left: pt.x, top: pt.y, width: 0, height: 0,
           stroke: color, strokeWidth: width, fill: 'transparent',
@@ -426,7 +478,7 @@ export default function AnnotateImageModal() {
       if (!isShape || !st.active || !st.startPt) return
       const pt = fc.getScenePoint(opt.e)
       const s = st.active
-      if (tool === 'rect') {
+      if (tool === 'rect' || tool === 'crop') {
         s.set({
           left: Math.min(st.startPt.x, pt.x),
           top: Math.min(st.startPt.y, pt.y),
@@ -465,6 +517,23 @@ export default function AnnotateImageModal() {
       const st = shapeDrawStateRef.current
       if (!isShape || !st.active) { st.startPt = null; st.active = null; return }
       const s = st.active
+      // Crop: convert the draft rect to a native-pixel crop region, clamp to
+      // the image, then drop the draft (the crop-overlay effect redraws it).
+      if (tool === 'crop') {
+        const disp = displayRef.current
+        fc.remove(s)
+        st.startPt = null; st.active = null
+        if (disp && s.width > 4 && s.height > 4) {
+          const inv = disp.natW / disp.dispW
+          let x = s.left * inv, y = s.top * inv, w = s.width * inv, h = s.height * inv
+          x = Math.max(0, x); y = Math.max(0, y)
+          w = Math.min(w, disp.natW - x); h = Math.min(h, disp.natH - y)
+          setCropRect({ x, y, w, h })
+          setTool('draw') // return to drawing after setting the crop
+        }
+        fc.requestRenderAll()
+        return
+      }
       // Discard zero-size shapes (user just clicked, didn't drag)
       let keep = true
       if (tool === 'rect' && (s.width < 2 || s.height < 2)) keep = false
@@ -700,7 +769,7 @@ export default function AnnotateImageModal() {
           // imageSpace: true marks coords as true image-native (canvas sized
           // to the contained image rect, letterbox-free). Loaders skip
           // migration for these.
-          version: 2, imageSpace: true, objects, rotation, updated_at: new Date().toISOString(),
+          version: 2, imageSpace: true, objects, rotation, cropRect, updated_at: new Date().toISOString(),
         }),
       })
       // Toast in App.jsx so the user sees where it landed + a jump link.
@@ -740,42 +809,44 @@ export default function AnnotateImageModal() {
     const fc = fcRef.current
     if (!disp || !fc || !imgUrl) return
     try {
-      // Draw everything with plain 2D Canvas ops — no fabric involved in
-      // the composite. Fabric's own render path was producing warped
-      // output here (annotations stretched horizontally, squashed
-      // vertically). The plain-canvas replay renders each object at its
-      // exact saved coords, provably.
       const img = new Image()
       img.src = imgUrl
       await new Promise((res, rej) => { img.onload = res; img.onerror = rej })
 
-      const swap = rotation % 180 !== 0
-      const outW = swap ? disp.natH : disp.natW
-      const outH = swap ? disp.natW : disp.natH
-
-      const out = document.createElement('canvas')
-      out.width = outW; out.height = outH
-      const ctx = out.getContext('2d')
-
-      // Image (rotated if the user rotated it)
-      ctx.save()
-      ctx.translate(outW / 2, outH / 2)
-      ctx.rotate((rotation * Math.PI) / 180)
-      ctx.drawImage(img, -disp.natW / 2, -disp.natH / 2, disp.natW, disp.natH)
-      ctx.restore()
-
-      // Annotations at absolute native coords
+      // 1. Render image + annotations at native size, UNROTATED, with plain
+      // 2D canvas ops (each object drawn at its exact saved coords).
+      const base = document.createElement('canvas')
+      base.width = disp.natW; base.height = disp.natH
+      const bctx = base.getContext('2d')
+      bctx.drawImage(img, 0, 0, disp.natW, disp.natH)
       const nativeObjects = collectObjectsInNative(fc, disp)
-      if (nativeObjects.length > 0) {
-        ctx.save()
-        ctx.translate(outW / 2, outH / 2)
-        ctx.rotate((rotation * Math.PI) / 180)
-        ctx.translate(-disp.natW / 2, -disp.natH / 2)
-        for (const o of nativeObjects) drawAnnoOnCtx(ctx, o)
-        ctx.restore()
+      for (const o of nativeObjects) drawAnnoOnCtx(bctx, o)
+
+      // 2. Crop (raster-crop the composite so annotation offsets are handled
+      // automatically).
+      let stage = base
+      if (cropRect && cropRect.w > 1 && cropRect.h > 1) {
+        const c = document.createElement('canvas')
+        c.width = Math.round(cropRect.w); c.height = Math.round(cropRect.h)
+        c.getContext('2d').drawImage(base, cropRect.x, cropRect.y, cropRect.w, cropRect.h, 0, 0, cropRect.w, cropRect.h)
+        stage = c
       }
 
-      out.toBlob((blob) => {
+      // 3. Rotate the (possibly cropped) result.
+      let finalCanvas = stage
+      if (rotation % 360 !== 0) {
+        const swap = rotation % 180 !== 0
+        const rc = document.createElement('canvas')
+        rc.width = swap ? stage.height : stage.width
+        rc.height = swap ? stage.width : stage.height
+        const rctx = rc.getContext('2d')
+        rctx.translate(rc.width / 2, rc.height / 2)
+        rctx.rotate((rotation * Math.PI) / 180)
+        rctx.drawImage(stage, -stage.width / 2, -stage.height / 2)
+        finalCanvas = rc
+      }
+
+      finalCanvas.toBlob((blob) => {
         if (!blob) return
         const url = URL.createObjectURL(blob)
         const filename = `${(refRow?.label || 'annotated').replace(/[^a-z0-9_.-]+/gi, '_')}_annotated.png`
@@ -854,8 +925,8 @@ export default function AnnotateImageModal() {
 
           <div className="h-4 w-px bg-gray-600 mx-1" />
 
-          {/* Colors */}
-          {COLORS.map(c => (
+          {/* Colors — not for crop (region tool, no color) */}
+          {tool !== 'crop' && COLORS.map(c => (
             <button key={c}
               onClick={() => setColor(c)}
               title={c}
@@ -863,9 +934,12 @@ export default function AnnotateImageModal() {
               style={{ backgroundColor: c }}
             />
           ))}
+          {tool === 'crop' && (
+            <span className="text-[11px] text-cyan-300 px-1">Drag a rectangle to set the export region</span>
+          )}
 
           {/* Width */}
-          {tool !== 'text' && tool !== 'select' && tool !== 'erase' && (
+          {tool !== 'text' && tool !== 'select' && tool !== 'erase' && tool !== 'crop' && (
             <select
               value={width}
               onChange={e => setWidth(parseInt(e.target.value))}
@@ -897,6 +971,20 @@ export default function AnnotateImageModal() {
           <button onClick={() => rotateBy(90)}
             className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
             title="Rotate 90° right">↻</button>
+
+          {/* Crop indicator + reset — shown once a crop region is set */}
+          {cropRect && (
+            <>
+              <span className="text-[10px] text-cyan-300 ml-1" title="Export & print output only this region">
+                ✂ {Math.round(cropRect.w)}×{Math.round(cropRect.h)}
+              </span>
+              <button onClick={() => setCropRect(null)}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+                title="Clear crop — export the full image again">
+                Reset Crop
+              </button>
+            </>
+          )}
 
           <div className="h-4 w-px bg-gray-600 mx-1" />
 
