@@ -209,6 +209,20 @@ export default function AnnotateImageModal() {
     requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
   }
 
+  // In addition to the onLoad handler, also re-run init whenever imgUrl or
+  // refRow changes if the img is ALREADY complete. This covers React 19
+  // StrictMode's simulated-unmount-remount cycle: the cleanup effect
+  // disposes fabric, but onLoad doesn't fire again because src didn't
+  // change, so without this the fabric overlay stays torn down.
+  useEffect(() => {
+    if (!imgUrl || !refRow) return
+    const img = imgRef.current
+    if (!img) return
+    if (img.complete && img.naturalWidth > 0) {
+      requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
+    }
+  }, [imgUrl, refRow, initFabricOverlay])
+
   // Resize handler — re-init overlay while preserving annotations
   useEffect(() => {
     if (!imgUrl) return
