@@ -42,6 +42,14 @@ export default function AnnotateImageModal() {
   const spaceHeldRef = useRef(false)       // desktop: space bar = temporary pan mode
   const panStateRef = useRef({ active: false, sx: 0, sy: 0, sPan: null })
   const touchPanRef = useRef({ active: false, ids: [], startCentroid: null, startDist: null, startPan: null, startZoom: null })
+  // Latest tool / color / width kept in refs so initFabricOverlay can read
+  // them without listing them in its deps. Otherwise every tool switch
+  // would recreate initFabricOverlay + retrigger the layoutTick useEffect,
+  // reloading the overlay from stale refRow.annotations_json and reviving
+  // any annotations the user just deleted.
+  const toolRef = useRef(tool)
+  const colorRef = useRef(color)
+  const widthRef = useRef(width)
 
   const [refRow, setRefRow] = useState(null)
   const [imgUrl, setImgUrl] = useState(null)
@@ -98,6 +106,12 @@ export default function AnnotateImageModal() {
     return () => { cancelled = true }
   }, [annotatingRefId, getRef])
 
+  // Keep the tool refs in sync with state so initFabricOverlay reads the
+  // latest without needing them in its deps.
+  useEffect(() => { toolRef.current = tool }, [tool])
+  useEffect(() => { colorRef.current = color }, [color])
+  useEffect(() => { widthRef.current = width }, [width])
+
   // ----- Init fabric overlay after <img> renders -----
   const initFabricOverlay = useCallback(() => {
     const img = imgRef.current
@@ -121,9 +135,13 @@ export default function AnnotateImageModal() {
     canvasEl.style.left = `${dispLeft}px`
     canvasEl.style.top = `${dispTop}px`
 
+    const curTool = toolRef.current
+    const curColor = colorRef.current
+    const curWidth = widthRef.current
+
     const fc = new fabric.Canvas(canvasEl, {
       width: dispW, height: dispH,
-      selection: tool === 'select',
+      selection: curTool === 'select',
       backgroundColor: 'transparent',
       preserveObjectStacking: true,
     })
@@ -147,7 +165,7 @@ export default function AnnotateImageModal() {
       const scaledForDisplay = savedObjects.map(o => scaleObject(o, nativeToDisplay))
       fabric.util.enlivenObjects(scaledForDisplay).then((enlivened) => {
         for (const o of enlivened) {
-          o.set({ name: 'anno', selectable: tool === 'select', evented: tool === 'select' || tool === 'erase' })
+          o.set({ name: 'anno', selectable: toolRef.current === 'select', evented: toolRef.current === 'select' || toolRef.current === 'erase' })
           fc.add(o)
         }
         setObjectCount(countAnno(fc))
@@ -155,27 +173,31 @@ export default function AnnotateImageModal() {
       })
     }
 
-    configureBrush(fc, tool, color, width)
-    fc.defaultCursor = tool === 'text' ? 'text' : 'crosshair'
-    fc.hoverCursor = tool === 'select' ? 'move' : (tool === 'text' ? 'text' : 'crosshair')
+    configureBrush(fc, curTool, curColor, curWidth)
+    fc.defaultCursor = curTool === 'text' ? 'text' : 'crosshair'
+    fc.hoverCursor = curTool === 'select' ? 'move' : (curTool === 'text' ? 'text' : 'crosshair')
 
     fcRef.current = fc
     displayRef.current = { natW, natH, dispW, dispH, dispLeft, dispTop }
 
     // Freehand + highlight: fabric.PencilBrush captures the path itself.
+    // Read the CURRENT tool at capture time via toolRef so the flag reflects
+    // what the user has selected right now, not what was selected when the
+    // canvas was initialised.
     fc.on('path:created', (opt) => {
       const path = opt?.path
       if (!path) return
       pushHistorySnapshot(fc)
-      path.set({ name: 'anno', selectable: false, evented: tool === 'erase' })
-      // For highlighter: reduce opacity of the finished path
-      if (tool === 'highlight') path.set({ opacity: 0.4 })
+      path.set({ name: 'anno', selectable: false, evented: toolRef.current === 'erase' })
+      if (toolRef.current === 'highlight') path.set({ opacity: 0.4 })
       fc.requestRenderAll()
       setObjectCount(countAnno(fc))
     })
 
     setLoading(false)
-  }, [imgUrl, refRow, tool, color, width])
+    // NOTE: tool/color/width intentionally not in deps — kept out via refs
+    // so tool switches don't re-init the overlay and wipe in-memory edits.
+  }, [imgUrl, refRow])
 
   const handleImgLoad = () => {
     requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
@@ -209,8 +231,19 @@ export default function AnnotateImageModal() {
     if (layoutTick > 0) initFabricOverlay()
   }, [layoutTick, initFabricOverlay])
 
-  // Also re-init when rotation changes (so overlay lands on the rotated img)
+  // Re-init when rotation changes so overlay lands on the rotated img.
+  // Preserve the current on-canvas state first — otherwise the re-init
+  // would restore from refRow.annotations_json (last saved) and revive
+  // any objects the user just deleted / added in this session.
+  const firstRotationRef = useRef(true)
   useEffect(() => {
+    if (firstRotationRef.current) { firstRotationRef.current = false; return }
+    const fc = fcRef.current
+    const disp = displayRef.current
+    if (fc && disp) {
+      const nativeObjects = collectObjectsInNative(fc, disp)
+      setRefRow(r => r ? { ...r, annotations_json: JSON.stringify({ version: 2, objects: nativeObjects, rotation }) } : r)
+    }
     setLayoutTick(t => t + 1)
   }, [rotation])
 
@@ -597,6 +630,21 @@ export default function AnnotateImageModal() {
         annotations_json: JSON.stringify({
           version: 2, objects, rotation, updated_at: new Date().toISOString(),
         }),
+      })
+      // Fire a toast in App.jsx telling the user where it landed + a
+      // "View" jump-link. Project-level refs land in 'project'; per-set
+      // refs land in the owning set's references panel.
+      const setId = refRow?.set_id || null
+      let targetLabel = 'Project References'
+      if (setId) {
+        const st = useStore.getState().sets.find(s => s.id === setId)
+        targetLabel = st ? `“${st.name}”` : 'set references'
+      }
+      useStore.getState().setAnnotateSavedNotice({
+        message: `Saved to ${targetLabel}`,
+        target: setId || 'project',
+        refId: annotatingRefId,
+        at: Date.now(),
       })
       setAnnotatingRefId(null)
     } catch (e) {
