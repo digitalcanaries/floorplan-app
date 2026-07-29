@@ -117,15 +117,11 @@ export default function AnnotateImageModal() {
 
   // ----- Init fabric overlay after <img> renders -----
   const initFabricOverlay = useCallback(() => {
-    // eslint-disable-next-line no-undef
-    if (typeof window !== 'undefined') { window.__annoInitTrace = (window.__annoInitTrace||[]); window.__annoInitTrace.push({t:Date.now(), stage:'called', hasImg: !!imgRef.current, hasWrapper: !!wrapperRef.current, hasCanvas: !!canvasElRef.current, imgUrl: !!imgUrl, refRow: !!refRow, imgComplete: imgRef.current?.complete, imgNat: imgRef.current?.naturalWidth}) }
     const img = imgRef.current
     const wrapper = wrapperRef.current
     const canvasEl = canvasElRef.current
     if (!img || !wrapper || !canvasEl || !imgUrl || !refRow) return
     if (!img.complete || img.naturalWidth === 0) return
-    // eslint-disable-next-line no-undef
-    if (typeof window !== 'undefined') window.__annoInitTrace.push({t:Date.now(), stage:'creating fabric', dispW: Math.round(img.getBoundingClientRect().width), dispH: Math.round(img.getBoundingClientRect().height)})
 
     if (fcRef.current) { fcRef.current.dispose(); fcRef.current = null }
 
@@ -190,8 +186,6 @@ export default function AnnotateImageModal() {
 
     fcRef.current = fc
     displayRef.current = { natW, natH, dispW, dispH, dispLeft, dispTop }
-    // eslint-disable-next-line no-undef
-    if (typeof window !== 'undefined') window.__annoInitTrace.push({t:Date.now(), stage:'fabric ready', canvasBufW: canvasEl.width, canvasBufH: canvasEl.height, canvasCssW: canvasEl.style.width, canvasCssH: canvasEl.style.height, wrapperParentClass: canvasEl.parentElement?.className?.slice(0, 40) })
 
     // Freehand + highlight: fabric.PencilBrush captures the path itself.
     // Read current tool via toolRef so this reflects what's selected when
@@ -211,54 +205,9 @@ export default function AnnotateImageModal() {
     // tool switches don't re-init the overlay and wipe in-memory edits.
   }, [imgUrl, refRow])
 
-  // Native load listener + poll fallback, replacing React's onLoad prop
-  // which wasn't reliably firing on the recycled <img> element.
-  useEffect(() => {
-    window.__annoInitTrace = window.__annoInitTrace || []
-    window.__annoInitTrace.push({stage:'useEff enter', imgUrl:!!imgUrl, refRow:!!refRow, imgRef:!!imgRef.current})
-    if (!imgUrl || !refRow) return
-    const img = imgRef.current
-    if (!img) return
-
-    let attempts = 0
-    let pollId = null
-    let cancelled = false
-
-    const tryInit = () => {
-      if (cancelled) return
-      window.__annoInitTrace.push({stage:'tryInit', complete: img.complete, nat: img.naturalWidth})
-      if (img.complete && img.naturalWidth > 0) {
-        // Call init directly — no rAF needed since a load event means the
-        // image is decoded and getBoundingClientRect is accurate.
-        try {
-          window.__annoInitTrace.push({stage:'calling init direct', initFn: typeof initFabricOverlay})
-          initFabricOverlay()
-          window.__annoInitTrace.push({stage:'init returned OK'})
-        } catch (e) {
-          window.__annoInitTrace.push({stage:'init THREW', msg: String(e), stack: e.stack?.slice(0, 300)})
-        }
-        return true
-      }
-      return false
-    }
-
-    const onNativeLoad = () => { window.__annoInitTrace.push({stage:'native load event'}); tryInit() }
-    img.addEventListener('load', onNativeLoad)
-
-    if (!tryInit()) {
-      pollId = setInterval(() => {
-        attempts++
-        if (tryInit() || attempts > 50) { window.__annoInitTrace.push({stage:'poll stop', attempts, fired: attempts <= 50}); clearInterval(pollId) }
-      }, 100)
-    }
-
-    return () => {
-      cancelled = true
-      img.removeEventListener('load', onNativeLoad)
-      if (pollId) clearInterval(pollId)
-      window.__annoInitTrace.push({stage:'useEff cleanup'})
-    }
-  }, [imgUrl, refRow, initFabricOverlay])
+  const handleImgLoad = () => {
+    requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
+  }
 
   // Resize handler — re-init overlay while preserving annotations
   useEffect(() => {
@@ -971,6 +920,7 @@ export default function AnnotateImageModal() {
                 ref={imgRef}
                 src={imgUrl}
                 alt=""
+                onLoad={handleImgLoad}
                 className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
                 style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 120ms' }}
                 draggable={false}
