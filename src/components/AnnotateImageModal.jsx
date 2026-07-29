@@ -54,6 +54,13 @@ export default function AnnotateImageModal() {
   const toolRef = useRef(null)
   const colorRef = useRef(null)
   const widthRef = useRef(null)
+  // Migration cache: old element-space data is migrated to image-space ONCE
+  // per modal session and reused on every re-init. Without this, each
+  // re-init (layout settle, resize, tool switch) re-measured the window and
+  // re-migrated to a slightly different result — so an export could catch a
+  // different migration than the subsequent save, corrupting the saved
+  // coords. Keyed by ref id; cleared when the modal opens a different ref.
+  const migratedCacheRef = useRef({ refId: null, objects: null })
 
   const [refRow, setRefRow] = useState(null)
   const [imgUrl, setImgUrl] = useState(null)
@@ -74,6 +81,12 @@ export default function AnnotateImageModal() {
   // ----- Load the ref + image blob -----
   useEffect(() => {
     if (!annotatingRefId) { setRefRow(null); setImgUrl(null); return }
+    // Fresh session: drop any migration cache from a previous ref so this
+    // ref migrates cleanly against its own saved data. Reset the layout
+    // counter too so a stale value from a prior session can't fire an init
+    // before the new img is measured.
+    migratedCacheRef.current = { refId: null, objects: null }
+    setLayoutTick(0)
     // Reset zoom/pan/rotation on every modal open — leftover state from a
     // prior session was rendering the image at some old zoom while the
     // fabric overlay initialised at a different scale, producing a broken
@@ -146,6 +159,11 @@ export default function AnnotateImageModal() {
     // saved coordinate. Now fabric coord 0..renderedW maps exactly to
     // image 0..natW.
     const cr = getContainedRect(img)
+    // Bail if the layout hasn't settled (container collapsed / img not yet
+    // sized). A ResizeObserver fire will retry with a real measurement.
+    // Without this, an early degenerate measure would mis-size the canvas
+    // and shift the annotations.
+    if (cr.renderedW < 20 || cr.renderedH < 20) return
     const dispW = Math.max(1, Math.round(cr.renderedW))
     const dispH = Math.max(1, Math.round(cr.renderedH))
     const dispLeft = (imgRect.left - wrapperRect.left) + cr.offX
@@ -189,9 +207,20 @@ export default function AnnotateImageModal() {
     // letterbox baked in. Migrate it to true image-space using the current
     // contained-rect params as a proxy for the draw-time viewport. New data
     // (imageSpace:true) is already correct and skipped.
+    //
+    // CRITICAL: migrate ONCE per session and cache. Re-inits must reuse the
+    // exact same migrated objects, otherwise a later re-init (measuring the
+    // window a hair differently) yields a different migration than the one an
+    // export or save already captured — which is exactly what corrupted the
+    // saved coords on the first round-trip.
     const alreadyImageSpace = saved && saved.imageSpace === true
     if (!alreadyImageSpace && savedObjects.length > 0) {
-      savedObjects = savedObjects.map(o => migrateElementToImageSpace(o, cr))
+      if (migratedCacheRef.current.refId === annotatingRefId && migratedCacheRef.current.objects) {
+        savedObjects = migratedCacheRef.current.objects
+      } else {
+        savedObjects = savedObjects.map(o => migrateElementToImageSpace(o, cr))
+        migratedCacheRef.current = { refId: annotatingRefId, objects: savedObjects }
+      }
     }
     if (savedObjects.length > 0) {
       const scaledForDisplay = savedObjects.map(o => scaleObject(o, nativeToDisplay))
@@ -234,11 +263,20 @@ export default function AnnotateImageModal() {
     requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
   }
 
-  // Resize handler — re-init overlay while preserving annotations
+  // Re-init overlay whenever the container settles or resizes. A
+  // ResizeObserver (not just window.resize) is essential: on modal open /
+  // reopen the flex layout gives the canvas area its real size a frame or
+  // two AFTER the img load event, so a load-time measurement can be wrong —
+  // which mis-sized the canvas and made a correctly-saved annotation appear
+  // shifted on reopen. The observer fires once the size is real, forcing a
+  // correct re-measure.
   useEffect(() => {
     if (!imgUrl) return
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
     let raf = null
-    const onResize = () => {
+    let lastW = 0, lastH = 0
+    const reinit = () => {
       if (raf) cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
         raf = null
@@ -246,17 +284,25 @@ export default function AnnotateImageModal() {
         const disp = displayRef.current
         if (fc && disp) {
           const nativeObjects = collectObjectsInNative(fc, disp)
-          // collectObjectsInNative now yields true image-space coords, so
-          // mark imageSpace:true — otherwise the re-init would migrate them
-          // again on every resize.
+          // Already image-space; flag it so re-init never re-migrates.
           setRefRow(r => r ? { ...r, annotations_json: JSON.stringify({ version: 2, imageSpace: true, objects: nativeObjects, rotation }) } : r)
         }
         setLayoutTick(t => t + 1)
       })
     }
-    window.addEventListener('resize', onResize)
+    const ro = new ResizeObserver((entries) => {
+      const e = entries[0]
+      if (!e) return
+      const { width, height } = e.contentRect
+      if (Math.abs(width - lastW) < 1 && Math.abs(height - lastH) < 1) return
+      lastW = width; lastH = height
+      reinit()
+    })
+    ro.observe(wrapper)
+    window.addEventListener('resize', reinit)
     return () => {
-      window.removeEventListener('resize', onResize)
+      ro.disconnect()
+      window.removeEventListener('resize', reinit)
       if (raf) cancelAnimationFrame(raf)
     }
   }, [imgUrl, rotation])
