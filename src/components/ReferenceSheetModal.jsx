@@ -564,6 +564,37 @@ ${refs.length === 0 ? '<div class="empty">No references on this sheet.</div>' : 
 // ── Documents tab ──
 function DocumentsTab({ refs, onUpload, onUpdate, onDelete, onOpen, uploading }) {
   const setAnnotatingRefId = useStore(s => s.setAnnotatingRefId)
+  const getRef = useStore(s => s.getRef)
+  const [exportingId, setExportingId] = useState(null)
+
+  // Export directly from the SAVED server data — bypasses the annotate
+  // modal's display→native reload path (which has a coord bug that
+  // misaligns strokes). Renders at the image's native resolution using
+  // the same compositeImageWithAnnotations helper the print sheet uses.
+  const handleExportSaved = async (ref) => {
+    setExportingId(ref.id)
+    try {
+      const full = await getRef(ref.id)
+      if (!full) throw new Error('Ref not found')
+      let saved = null
+      try { saved = full.annotations_json ? JSON.parse(full.annotations_json) : null } catch {}
+      const imgUrl = await fetchAuthedObjectURL(ref.file_id)
+      const composited = await compositeImageWithAnnotations(imgUrl, saved)
+      URL.revokeObjectURL(imgUrl)
+      if (!composited) throw new Error('Composite failed')
+      const filename = `${(ref.label || 'annotated').replace(/[^a-z0-9_.-]+/gi, '_')}_annotated.png`
+      const a = document.createElement('a')
+      a.href = composited
+      a.download = filename
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(composited), 10000)
+    } catch (e) {
+      alert('Export failed: ' + (e?.message || e))
+    } finally {
+      setExportingId(null)
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
@@ -624,6 +655,16 @@ function DocumentsTab({ refs, onUpload, onUpdate, onDelete, onOpen, uploading })
                           title="Draw / annotate on this image"
                         >
                           ✎ Annotate
+                        </button>
+                      )}
+                      {isImage && r.has_annotations && (
+                        <button
+                          onClick={() => handleExportSaved(r)}
+                          disabled={exportingId === r.id}
+                          className="text-emerald-300 hover:text-emerald-200 disabled:opacity-50 text-[10px]"
+                          title="Download image + saved annotations as a flat PNG (uses server data directly — no reload)"
+                        >
+                          {exportingId === r.id ? '…' : '⬇ PNG'}
                         </button>
                       )}
                       <button
