@@ -26,10 +26,19 @@ function App() {
   const projectName = useStore(s => s.projectName)
   const lastSaved = useStore(s => s.lastSaved)
   const setReferencesPanelTarget = useStore(s => s.setReferencesPanelTarget)
+  const annotateSavedNotice = useStore(s => s.annotateSavedNotice)
+  const setAnnotateSavedNotice = useStore(s => s.setAnnotateSavedNotice)
   const [canvasSize, setCanvasSize] = useState({ w: 1200, h: 800 })
   const [bootStatus, setBootStatus] = useState('idle') // 'idle' | 'loading' | 'ready' | 'empty' | 'failed'
   const [bootMessage, setBootMessage] = useState(null)
   const bootLoadRan = useRef(false)
+
+  // Auto-dismiss the annotate-saved toast after 5s
+  useEffect(() => {
+    if (!annotateSavedNotice) return
+    const t = setTimeout(() => setAnnotateSavedNotice(null), 5000)
+    return () => clearTimeout(t)
+  }, [annotateSavedNotice, setAnnotateSavedNotice])
 
   // On login, fetch the user's most-recently-updated project from the server
   // and populate the (initially empty) Zustand store with it. The store no
@@ -167,6 +176,33 @@ function App() {
       </div>
       <EditSetModal />
       <AnnotateImageModal />
+
+      {/* Annotate-saved toast — appears after Save in the image annotator. */}
+      {annotateSavedNotice && (
+        <div className="fixed top-4 right-4 z-[80] max-w-[92vw] flex items-center gap-3 px-4 py-2.5 bg-emerald-800/95 border border-emerald-500 text-white rounded-lg shadow-xl">
+          <span className="text-emerald-300 text-lg leading-none">✓</span>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-medium">{annotateSavedNotice.message}</span>
+            <span className="text-[10px] text-emerald-200/80">Tap View to open the list</span>
+          </div>
+          <button
+            onClick={() => {
+              setReferencesPanelTarget(annotateSavedNotice.target)
+              setAnnotateSavedNotice(null)
+            }}
+            className="ml-2 px-2.5 py-1 bg-white/15 hover:bg-white/25 rounded text-xs font-medium"
+          >
+            View
+          </button>
+          <button
+            onClick={() => setAnnotateSavedNotice(null)}
+            className="text-white/60 hover:text-white text-lg leading-none px-1"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
       <ReferenceSheetModal />
     </div>
   )
