@@ -1116,6 +1116,34 @@ export default function AnnotateImageModal() {
               style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 120ms' }} />
           </div>
 
+          {/* TEMP diagnostic — screenshot this to debug alignment */}
+          <button
+            onClick={() => {
+              const fc = fcRef.current, disp = displayRef.current
+              const img = imgRef.current
+              const bg = fc?.getObjects().find(o => o.name === 'bg-image')
+              const anno = fc?.getObjects().find(o => o.name === 'anno')
+              const vpt = fc?.viewportTransform
+              const info = {
+                imgElRect: img ? `${Math.round(img.getBoundingClientRect().width)}x${Math.round(img.getBoundingClientRect().height)}` : '-',
+                imgNatural: img ? `${img.naturalWidth}x${img.naturalHeight}` : '-',
+                canvasBacking: fc ? `${fc.lowerCanvasEl?.width}x${fc.lowerCanvasEl?.height}` : '-',
+                canvasCss: fc ? `${fc.lowerCanvasEl?.style.width}x${fc.lowerCanvasEl?.style.height}` : '-',
+                fabricWH: fc ? `${fc.width}x${fc.height}` : '-',
+                viewport: vpt ? vpt.map(n => Math.round(n * 100) / 100).join(',') : '-',
+                bgScale: bg ? `${bg.scaleX?.toFixed(3)}` : 'NO BG',
+                bgWH: bg ? `${bg.width}x${bg.height}` : '-',
+                firstAnnoLeftTop: anno ? `${Math.round(anno.left)},${Math.round(anno.top)}` : '-',
+                dispScale: disp ? `${(disp.fit || 0).toFixed(3)}` : '-',
+                objectCount: fc ? fc.getObjects().length : 0,
+              }
+              alert(JSON.stringify(info, null, 2))
+            }}
+            className="absolute top-2 left-2 px-2 py-1 bg-yellow-500 text-black text-[10px] rounded font-mono z-20"
+          >
+            🐞 Debug
+          </button>
+
           {/* Zoom hint overlay (bottom-right) — subtle */}
           {(zoom !== 1 || panOffset.x !== 0 || panOffset.y !== 0) && (
             <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/60 text-[10px] text-gray-300 rounded font-mono pointer-events-none">
