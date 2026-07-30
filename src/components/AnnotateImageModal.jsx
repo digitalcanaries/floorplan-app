@@ -62,6 +62,10 @@ export default function AnnotateImageModal() {
   // different migration than the subsequent save, corrupting the saved
   // coords. Keyed by ref id; cleared when the modal opens a different ref.
   const migratedCacheRef = useRef({ refId: null, objects: null })
+  // Current viewport fit scale (native→display). Brush/shape/text sizes are
+  // divided by it so they render at the picked on-screen size even though
+  // the scene is in native image pixels.
+  const fitRef = useRef(1)
 
   const [refRow, setRefRow] = useState(null)
   const [imgUrl, setImgUrl] = useState(null)
@@ -153,12 +157,12 @@ export default function AnnotateImageModal() {
     if (!fc || !disp) return
     fc.getObjects().filter(o => o.name === 'crop-overlay').forEach(o => fc.remove(o))
     if (cropRect) {
-      const s = disp.dispW / disp.natW
+      const cs = 2 / (fitRef.current || 1)
       const r = new fabric.Rect({
-        left: cropRect.x * s, top: cropRect.y * s,
-        width: cropRect.w * s, height: cropRect.h * s,
-        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2,
-        strokeDashArray: [8, 6], strokeUniform: true,
+        left: cropRect.x, top: cropRect.y,
+        width: cropRect.w, height: cropRect.h,
+        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: cs,
+        strokeDashArray: [4 * cs, 3 * cs], strokeUniform: true,
         selectable: false, evented: false, name: 'crop-overlay',
       })
       fc.add(r)
@@ -191,28 +195,30 @@ export default function AnnotateImageModal() {
     const cr = getContainedRect(img)
     // Bail if the layout hasn't settled (container collapsed / img not yet
     // sized). A ResizeObserver fire will retry with a real measurement.
-    // Without this, an early degenerate measure would mis-size the canvas
-    // and shift the annotations.
     if (cr.renderedW < 20 || cr.renderedH < 20) return
-    const dispW = Math.max(1, Math.round(cr.renderedW))
-    const dispH = Math.max(1, Math.round(cr.renderedH))
-    const dispLeft = (imgRect.left - wrapperRect.left) + cr.offX
-    const dispTop = (imgRect.top - wrapperRect.top) + cr.offY
+
+    // === SCENE = NATIVE IMAGE PIXELS ===
+    // The canvas fills the whole container; the image is added at native
+    // size (scale 1) and the annotations at native coords — then a single
+    // fabric VIEWPORT TRANSFORM fits everything into view. Because image and
+    // annotations share one native coordinate space and one transform, they
+    // cannot be at different scales (the v0.1.46 bug) or drift apart. No
+    // per-object scaling to get wrong.
+    const canvasW = Math.max(1, Math.round(cr.elementW))
+    const canvasH = Math.max(1, Math.round(cr.elementH))
+    const dispLeft = imgRect.left - wrapperRect.left
+    const dispTop = imgRect.top - wrapperRect.top
 
     canvasEl.style.position = 'absolute'
     canvasEl.style.left = `${dispLeft}px`
     canvasEl.style.top = `${dispTop}px`
 
-    // Read current tool/color/width via refs so this useCallback doesn't
-    // list them as deps (that would recreate the callback on every tool
-    // switch and re-trigger the layoutTick useEffect, wiping in-memory
-    // deletions).
     const curTool = toolRef.current
     const curColor = colorRef.current
     const curWidth = widthRef.current
 
     const fc = new fabric.Canvas(canvasEl, {
-      width: dispW, height: dispH,
+      width: canvasW, height: canvasH,
       selection: curTool === 'select',
       backgroundColor: 'transparent',
       preserveObjectStacking: true,
@@ -226,23 +232,20 @@ export default function AnnotateImageModal() {
       fcWrapper.style.pointerEvents = 'auto'
     }
 
-    // Load saved annotations (mixed types) — scale native → display
-    const nativeToDisplay = dispW / natW
+    // Fit the native image into the canvas (contain) via the viewport.
+    const fit = Math.min(canvasW / natW, canvasH / natH)
+    const vOffX = (canvasW - natW * fit) / 2
+    const vOffY = (canvasH - natH * fit) / 2
+    fc.setViewportTransform([fit, 0, 0, fit, vOffX, vOffY])
+
     let saved = null
     if (refRow.annotations_json) {
       try { saved = JSON.parse(refRow.annotations_json) } catch {}
     }
     let savedObjects = extractObjectsFromSaved(saved)
-    // Old data (before imageSpace:true) was stored in element-space with the
-    // letterbox baked in. Migrate it to true image-space using the current
-    // contained-rect params as a proxy for the draw-time viewport. New data
-    // (imageSpace:true) is already correct and skipped.
-    //
-    // CRITICAL: migrate ONCE per session and cache. Re-inits must reuse the
-    // exact same migrated objects, otherwise a later re-init (measuring the
-    // window a hair differently) yields a different migration than the one an
-    // export or save already captured — which is exactly what corrupted the
-    // saved coords on the first round-trip.
+    // Old data (element-space) → migrate to image-space once per session and
+    // cache so re-inits reuse the exact same result. New data (imageSpace)
+    // is already native and skipped.
     const alreadyImageSpace = saved && saved.imageSpace === true
     if (!alreadyImageSpace && savedObjects.length > 0) {
       if (migratedCacheRef.current.refId === annotatingRefId && migratedCacheRef.current.objects) {
@@ -252,32 +255,24 @@ export default function AnnotateImageModal() {
         migratedCacheRef.current = { refId: annotatingRefId, objects: savedObjects }
       }
     }
-    // Put the IMAGE inside the fabric canvas as a background object. This is
-    // the alignment fix: image and annotations now live in ONE canvas layer,
-    // so they can never drift apart on screen no matter how the canvas is
-    // measured/positioned. The separate <img> element is kept only for
-    // loading the blob + measuring natural size (it's rendered invisible).
+
+    // Image at native size (scene coords 0..natW × 0..natH).
     fabric.FabricImage.fromURL(imgUrl).then((bg) => {
-      if (fcRef.current !== fc) return // superseded by a newer init
-      bg.set({
-        left: 0, top: 0,
-        scaleX: dispW / natW, scaleY: dispH / natH,
-        selectable: false, evented: false, name: 'bg-image',
-      })
+      if (fcRef.current !== fc) return
+      bg.set({ left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false, name: 'bg-image' })
       fc.add(bg)
       fc.sendObjectToBack(bg)
       fc.requestRenderAll()
     }).catch(() => {})
 
+    // Annotations at native coords — NO scaling (scene IS native).
     if (savedObjects.length > 0) {
-      const scaledForDisplay = savedObjects.map(o => scaleObject(o, nativeToDisplay))
-      fabric.util.enlivenObjects(scaledForDisplay).then((enlivened) => {
+      fabric.util.enlivenObjects(savedObjects).then((enlivened) => {
         if (fcRef.current !== fc) return
         for (const o of enlivened) {
           o.set({ name: 'anno', selectable: toolRef.current === 'select', evented: toolRef.current === 'select' || toolRef.current === 'erase' })
           fc.add(o)
         }
-        // Keep the background image behind everything.
         const bg = fc.getObjects().find(o => o.name === 'bg-image')
         if (bg) fc.sendObjectToBack(bg)
         setObjectCount(countAnno(fc))
@@ -289,21 +284,24 @@ export default function AnnotateImageModal() {
     // useCallback doesn't need cropRect in deps).
     if (cropRectRef.current) {
       const cReg = cropRectRef.current
-      const s = dispW / natW
+      // Crop rect is in native scene coords; strokeUniform keeps the dashes a
+      // constant on-screen thickness regardless of the viewport scale.
       fc.add(new fabric.Rect({
-        left: cReg.x * s, top: cReg.y * s, width: cReg.w * s, height: cReg.h * s,
-        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2,
-        strokeDashArray: [8, 6], strokeUniform: true,
+        left: cReg.x, top: cReg.y, width: cReg.w, height: cReg.h,
+        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2 / fit,
+        strokeDashArray: [8 / fit, 6 / fit], strokeUniform: true,
         selectable: false, evented: false, name: 'crop-overlay',
       }))
     }
 
-    configureBrush(fc, curTool, curColor, curWidth)
+    fitRef.current = fit
+    configureBrush(fc, curTool, curColor, curWidth, fit)
     fc.defaultCursor = curTool === 'text' ? 'text' : 'crosshair'
     fc.hoverCursor = curTool === 'select' ? 'move' : (curTool === 'text' ? 'text' : 'crosshair')
 
     fcRef.current = fc
-    displayRef.current = { natW, natH, dispW, dispH, dispLeft, dispTop }
+    // Scene is native, so save reads coords at scale 1 (dispW = natW).
+    displayRef.current = { natW, natH, dispW: natW, dispH: natH, dispLeft, dispTop, fit }
 
     // Freehand + highlight: fabric.PencilBrush captures the path itself.
     // Read current tool via toolRef so this reflects what's selected when
@@ -395,7 +393,7 @@ export default function AnnotateImageModal() {
   useEffect(() => {
     const fc = fcRef.current
     if (!fc) return
-    configureBrush(fc, tool, color, width)
+    configureBrush(fc, tool, color, width, fitRef.current)
     fc.selection = tool === 'select'
     fc.defaultCursor = tool === 'text' ? 'text' : 'crosshair'
     fc.hoverCursor = tool === 'select' ? 'move' : (tool === 'text' ? 'text' : 'crosshair')
@@ -419,13 +417,19 @@ export default function AnnotateImageModal() {
 
     const isShape = ['rect', 'ellipse', 'line', 'arrow', 'crop'].includes(tool)
 
+    // Scene is native pixels; divide picked sizes by fit so they look the
+    // chosen on-screen size.
+    const nw = width / (fitRef.current || 1)
+    const nfs = fontSize / (fitRef.current || 1)
+    const cropStroke = 2 / (fitRef.current || 1)
+
     const onDown = (opt) => {
       if (tool === 'text') {
         const pt = fc.getScenePoint(opt.e)
         pushHistorySnapshot(fc)
         const t = new fabric.IText('Text', {
           left: pt.x, top: pt.y,
-          fontSize: fontSize, fill: color,
+          fontSize: nfs, fill: color,
           fontFamily: 'sans-serif',
           editable: true,
           name: 'anno',
@@ -459,20 +463,20 @@ export default function AnnotateImageModal() {
         fc.getObjects().filter(o => o.name === 'crop-overlay' || o.name === 'crop-draft').forEach(o => fc.remove(o))
         shape = new fabric.Rect({
           left: pt.x, top: pt.y, width: 0, height: 0,
-          fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2,
-          strokeDashArray: [8, 6], strokeUniform: true,
+          fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: cropStroke,
+          strokeDashArray: [8 * cropStroke / 2, 6 * cropStroke / 2], strokeUniform: true,
           selectable: false, evented: false, name: 'crop-draft',
         })
       } else if (tool === 'rect') {
         shape = new fabric.Rect({
           left: pt.x, top: pt.y, width: 0, height: 0,
-          stroke: color, strokeWidth: width, fill: 'transparent',
+          stroke: color, strokeWidth: nw, fill: 'transparent',
           selectable: false, evented: false, name: 'anno',
         })
       } else if (tool === 'ellipse') {
         shape = new fabric.Ellipse({
           left: pt.x, top: pt.y, rx: 0, ry: 0,
-          stroke: color, strokeWidth: width, fill: 'transparent',
+          stroke: color, strokeWidth: nw, fill: 'transparent',
           selectable: false, evented: false, name: 'anno',
         })
       } else if (tool === 'line' || tool === 'arrow') {
@@ -480,7 +484,7 @@ export default function AnnotateImageModal() {
         // arrowhead lines from the endpoint. Two commands to start:
         // move-to (x1,y1), line-to (x1,y1) (will grow with mouse move)
         shape = new fabric.Path(`M ${pt.x} ${pt.y} L ${pt.x} ${pt.y}`, {
-          stroke: color, strokeWidth: width, fill: '',
+          stroke: color, strokeWidth: nw, fill: '',
           strokeLineCap: 'round', strokeLineJoin: 'round',
           selectable: false, evented: false, name: 'anno',
           objectCaching: false,
@@ -518,9 +522,9 @@ export default function AnnotateImageModal() {
         // Rebuild the path from start to current pointer
         const x1 = st.startPt.x, y1 = st.startPt.y
         const x2 = pt.x, y2 = pt.y
-        const cmds = buildLineOrArrowPath(x1, y1, x2, y2, tool === 'arrow', width)
+        const cmds = buildLineOrArrowPath(x1, y1, x2, y2, tool === 'arrow', nw)
         const newPath = new fabric.Path(cmds, {
-          stroke: color, strokeWidth: width, fill: '',
+          stroke: color, strokeWidth: nw, fill: '',
           strokeLineCap: 'round', strokeLineJoin: 'round',
           selectable: false, evented: false, name: 'anno',
           objectCaching: false,
@@ -1133,18 +1137,20 @@ function countAnno(fc) {
 
 function clampZoom(z) { return Math.max(0.1, Math.min(10, z)) }
 
-function configureBrush(fc, tool, color, width) {
+function configureBrush(fc, tool, color, width, fit = 1) {
+  // Divide by fit: PencilBrush captures the path in SCENE (native) coords, so
+  // to draw a line that looks `width` px on screen we need width/fit native.
+  const nativeWidth = width / (fit || 1)
   if (tool === 'draw') {
     const b = new fabric.PencilBrush(fc)
     b.color = color
-    b.width = width
+    b.width = nativeWidth
     fc.freeDrawingBrush = b
     fc.isDrawingMode = true
   } else if (tool === 'highlight') {
     const b = new fabric.PencilBrush(fc)
-    // Use a semi-transparent color for the highlighter effect
     b.color = hexWithAlpha(color, 0.4)
-    b.width = width
+    b.width = nativeWidth
     fc.freeDrawingBrush = b
     fc.isDrawingMode = true
   } else {
