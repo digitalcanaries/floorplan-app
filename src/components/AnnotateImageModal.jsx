@@ -1126,14 +1126,20 @@ export default function AnnotateImageModal() {
               const anno = fc?.getObjects().find(o => o.name === 'anno')
               const vpt = fc?.viewportTransform
               const r = img?.getBoundingClientRect()
+              const wrap = wrapperRef.current
+              const nCanvas = wrap ? wrap.querySelectorAll('canvas').length : 0
+              const nContainer = wrap ? wrap.querySelectorAll('.canvas-container').length : 0
+              const bgScreen = bg ? bg.getBoundingRect() : null
               setDebugInfo({
+                DOM_canvases: nCanvas,
+                DOM_containers: nContainer,
                 imgElRect: r ? `${Math.round(r.width)}x${Math.round(r.height)}` : '-',
                 imgNatural: img ? `${img.naturalWidth}x${img.naturalHeight}` : '-',
                 canvasBacking: fc ? `${fc.lowerCanvasEl?.width}x${fc.lowerCanvasEl?.height}` : '-',
-                canvasCss: fc ? `${fc.lowerCanvasEl?.style.width}x${fc.lowerCanvasEl?.style.height}` : '-',
                 fabricWH: fc ? `${fc.width}x${fc.height}` : '-',
                 viewport: vpt ? vpt.map(n => Math.round(n * 100) / 100).join(',') : '-',
                 bg: bg ? `scale ${bg.scaleX?.toFixed(3)} · ${bg.width}x${bg.height}` : 'NO BG IMAGE',
+                bgScreenRect: bgScreen ? `${Math.round(bgScreen.width)}x${Math.round(bgScreen.height)} @${Math.round(bgScreen.left)},${Math.round(bgScreen.top)}` : '-',
                 firstAnno: anno ? `${Math.round(anno.left)},${Math.round(anno.top)}` : '-',
                 fit: disp ? `${(disp.fit || 0).toFixed(3)}` : '-',
                 objects: fc ? fc.getObjects().length : 0,
