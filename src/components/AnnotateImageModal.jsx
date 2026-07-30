@@ -252,13 +252,34 @@ export default function AnnotateImageModal() {
         migratedCacheRef.current = { refId: annotatingRefId, objects: savedObjects }
       }
     }
+    // Put the IMAGE inside the fabric canvas as a background object. This is
+    // the alignment fix: image and annotations now live in ONE canvas layer,
+    // so they can never drift apart on screen no matter how the canvas is
+    // measured/positioned. The separate <img> element is kept only for
+    // loading the blob + measuring natural size (it's rendered invisible).
+    fabric.FabricImage.fromURL(imgUrl).then((bg) => {
+      if (fcRef.current !== fc) return // superseded by a newer init
+      bg.set({
+        left: 0, top: 0,
+        scaleX: dispW / natW, scaleY: dispH / natH,
+        selectable: false, evented: false, name: 'bg-image',
+      })
+      fc.add(bg)
+      fc.sendObjectToBack(bg)
+      fc.requestRenderAll()
+    }).catch(() => {})
+
     if (savedObjects.length > 0) {
       const scaledForDisplay = savedObjects.map(o => scaleObject(o, nativeToDisplay))
       fabric.util.enlivenObjects(scaledForDisplay).then((enlivened) => {
+        if (fcRef.current !== fc) return
         for (const o of enlivened) {
           o.set({ name: 'anno', selectable: toolRef.current === 'select', evented: toolRef.current === 'select' || toolRef.current === 'erase' })
           fc.add(o)
         }
+        // Keep the background image behind everything.
+        const bg = fc.getObjects().find(o => o.name === 'bg-image')
+        if (bg) fc.sendObjectToBack(bg)
         setObjectCount(countAnno(fc))
         fc.requestRenderAll()
       })
@@ -1073,13 +1094,17 @@ export default function AnnotateImageModal() {
             }}
           >
             {imgUrl && (
+              // Kept only for loading the blob + measuring natural/contained
+              // size. Rendered invisible: the actual image the user sees is
+              // the fabric.Image inside the canvas, so image + annotations
+              // are one layer and can't drift apart.
               <img
                 ref={imgRef}
                 src={imgUrl}
                 alt=""
                 onLoad={handleImgLoad}
                 className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-                style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 120ms' }}
+                style={{ opacity: 0 }}
                 draggable={false}
               />
             )}
