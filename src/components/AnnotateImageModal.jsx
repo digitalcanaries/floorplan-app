@@ -160,10 +160,21 @@ export default function AnnotateImageModal() {
     const fc = fcRef.current
     const disp = displayRef.current
     if (!fc || !disp) return
+    // Reset the CSS zoom/pan layer to identity. The wrapper is transformed
+    // with translate(pan) scale(zoom); fabric's pointer hit-testing can't see
+    // that translate, so with a non-zero pan a click on the crop rectangle
+    // missed its handles entirely — you couldn't grab them, and a "resize"
+    // drag was interpreted as drawing a NEW rectangle in the wrong spot.
+    // Identity CSS + a full-fit fabric viewport keeps pointer math exact so
+    // the handles are grabbable and land where you expect.
+    setZoom(1); setPanOffset({ x: 0, y: 0 })
     const cw = fc.width, ch = fc.height
     const fit = Math.min(cw / disp.natW, ch / disp.natH)
     fc.setViewportTransform([fit, 0, 0, fit, (cw - disp.natW * fit) / 2, (ch - disp.natH * fit) / 2])
     fitRef.current = fit
+    // Recompute every object's control coords for the new viewport, else the
+    // crop overlay's handles/hit-area stay cached at the old transform.
+    fc.getObjects().forEach(o => o.setCoords && o.setCoords())
     setCropViewActive(false)
     fc.requestRenderAll()
   }, [tool, layoutTick])
@@ -588,7 +599,19 @@ export default function AnnotateImageModal() {
 
     const onUp = () => {
       const st = shapeDrawStateRef.current
-      if (!isShape || !st.active) { st.startPt = null; st.active = null; return }
+      if (!isShape || !st.active) {
+        // No draft in progress. In crop mode this means the user just
+        // moved/resized the EXISTING crop box via its handles (onDown bailed
+        // out for the overlay, so no draft was created). Commit the box's live
+        // geometry straight to cropRect — this is the reliable path; relying on
+        // fabric's object:modified alone let a resize silently not stick, so
+        // Apply cropped the original size (the reported bug).
+        if (tool === 'crop') {
+          const live = readCropOverlayNative(fcRef.current, displayRef.current)
+          if (live && live.w > 4 && live.h > 4) setCropRect(live)
+        }
+        st.startPt = null; st.active = null; return
+      }
       const s = st.active
       // Crop: convert the draft rect to a native-pixel crop region, clamp to
       // the image, then drop the draft (the crop-overlay effect redraws it).
@@ -984,6 +1007,7 @@ export default function AnnotateImageModal() {
     const offY = (ch - rect.h * fit) / 2 - rect.y * fit
     fc.setViewportTransform([fit, 0, 0, fit, offX, offY])
     fitRef.current = fit
+    fc.getObjects().forEach(o => o.setCoords && o.setCoords())
     setCropViewActive(true)
     setTool('select') // exit crop-edit so the overlay becomes a passive guide
     fc.requestRenderAll()
@@ -994,12 +1018,14 @@ export default function AnnotateImageModal() {
     const fc = fcRef.current
     const disp = displayRef.current
     if (!fc || !disp) return
+    setZoom(1); setPanOffset({ x: 0, y: 0 })
     const cw = fc.width, ch = fc.height
     const fit = Math.min(cw / disp.natW, ch / disp.natH)
     const offX = (cw - disp.natW * fit) / 2
     const offY = (ch - disp.natH * fit) / 2
     fc.setViewportTransform([fit, 0, 0, fit, offX, offY])
     fitRef.current = fit
+    fc.getObjects().forEach(o => o.setCoords && o.setCoords())
     fc.requestRenderAll()
     setCropViewActive(false)
   }
@@ -1267,6 +1293,9 @@ function addCropOverlay(fc, cropRect, fit = 1, interactive = false) {
   })
   if (interactive && r.setControlsVisibility) r.setControlsVisibility({ mtr: false })
   fc.add(r)
+  // Cache control/hit coords against the CURRENT viewport so the handles are
+  // drawn (and hit-tested) where the rectangle actually is.
+  r.setCoords()
   return r
 }
 
