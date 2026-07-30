@@ -150,6 +150,24 @@ export default function AnnotateImageModal() {
   useEffect(() => { widthRef.current = width }, [width])
   useEffect(() => { cropRectRef.current = cropRect }, [cropRect])
 
+  // Entering the Crop tool always snaps back to the full-image view. The crop
+  // rectangle is then guaranteed smaller than the canvas, so its move/resize
+  // handles sit INSIDE the viewport where they can be grabbed. (Editing the
+  // crop while zoomed into the crop region pushed the handles onto/past the
+  // canvas edge — that was the "opens off screen, can't grab" bug.)
+  useEffect(() => {
+    if (tool !== 'crop') return
+    const fc = fcRef.current
+    const disp = displayRef.current
+    if (!fc || !disp) return
+    const cw = fc.width, ch = fc.height
+    const fit = Math.min(cw / disp.natW, ch / disp.natH)
+    fc.setViewportTransform([fit, 0, 0, fit, (cw - disp.natW * fit) / 2, (ch - disp.natH * fit) / 2])
+    fitRef.current = fit
+    setCropViewActive(false)
+    fc.requestRenderAll()
+  }, [tool, layoutTick])
+
   // Draw the crop region as a dashed overlay. When the Crop tool is active
   // it becomes an interactive rectangle with move/resize handles; otherwise
   // it's a passive dashed guide. Tagged 'crop-overlay' (not 'anno') so it's
@@ -426,7 +444,13 @@ export default function AnnotateImageModal() {
         })
       }
     }
-    if (tool !== 'select') fc.discardActiveObject()
+    // Keep the crop overlay selected in crop mode so its handles show without
+    // an extra click; only clear selection for the pure drawing tools.
+    if (tool !== 'select' && tool !== 'crop') fc.discardActiveObject()
+    if (tool === 'crop') {
+      const ov = fc.getObjects().find(o => o.name === 'crop-overlay')
+      if (ov) fc.setActiveObject(ov)
+    }
     fc.requestRenderAll()
   }, [tool, color, width])
 
@@ -941,19 +965,28 @@ export default function AnnotateImageModal() {
     setRotation(r => (((r + delta) % 360) + 360) % 360)
   }
 
-  // Zoom the editor viewport to show just the crop region (visual "apply").
-  // Export uses the crop regardless; this is a live preview of the result.
+  // Apply: commit the crop and zoom the editor to preview just that region.
+  // Reads the overlay's LIVE geometry off the canvas (not React state) so a
+  // resize done a moment earlier is always honoured — the fix for "resized
+  // with handles but Apply used the original size". Then leaves crop mode so
+  // the (now passive) region isn't edge-to-edge with ungrabbable handles.
   const applyCropView = () => {
     const fc = fcRef.current
-    if (!fc || !cropRect) return
+    if (!fc) return
+    const disp = displayRef.current
+    const rect = readCropOverlayNative(fc, disp) || cropRect
+    if (!rect || rect.w < 1 || rect.h < 1) return
+    setCropRect(rect)
     const cw = fc.width, ch = fc.height
-    const fit = Math.min(cw / cropRect.w, ch / cropRect.h)
-    const offX = (cw - cropRect.w * fit) / 2 - cropRect.x * fit
-    const offY = (ch - cropRect.h * fit) / 2 - cropRect.y * fit
+    const margin = 0.92 // breathing room so the preview reads as a preview
+    const fit = Math.min(cw / rect.w, ch / rect.h) * margin
+    const offX = (cw - rect.w * fit) / 2 - rect.x * fit
+    const offY = (ch - rect.h * fit) / 2 - rect.y * fit
     fc.setViewportTransform([fit, 0, 0, fit, offX, offY])
     fitRef.current = fit
-    fc.requestRenderAll()
     setCropViewActive(true)
+    setTool('select') // exit crop-edit so the overlay becomes a passive guide
+    fc.requestRenderAll()
   }
 
   // Restore the full-image fit view (crop stays set).
@@ -1015,7 +1048,7 @@ export default function AnnotateImageModal() {
             />
           ))}
           {tool === 'crop' && (
-            <span className="text-[11px] text-cyan-300 px-1">Drag to set the crop region · then drag its handles to adjust</span>
+            <span className="text-[11px] text-cyan-300 px-1">Drag to set the region · drag its handles to resize · then ✓ Apply &amp; Preview</span>
           )}
 
           {/* Width */}
@@ -1058,11 +1091,19 @@ export default function AnnotateImageModal() {
               <span className="text-[10px] text-cyan-300 ml-1" title="Export & print output only this region">
                 ✂ {Math.round(cropRect.w)}×{Math.round(cropRect.h)}
               </span>
-              <button onClick={applyCropView}
-                className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-xs"
-                title="Apply — zoom the editor to just the crop region (export uses it either way)">
-                ✓ Apply Crop
-              </button>
+              {tool === 'crop' ? (
+                <button onClick={applyCropView}
+                  className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-xs"
+                  title="Apply the crop and preview just that region (export uses it either way)">
+                  ✓ Apply &amp; Preview
+                </button>
+              ) : (
+                <button onClick={() => setTool('crop')}
+                  className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-xs"
+                  title="Edit the crop region — full image + drag handles">
+                  ✎ Edit Crop
+                </button>
+              )}
               {cropViewActive && (
                 <button onClick={showFullView}
                   className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
@@ -1227,6 +1268,23 @@ function addCropOverlay(fc, cropRect, fit = 1, interactive = false) {
   if (interactive && r.setControlsVisibility) r.setControlsVisibility({ mtr: false })
   fc.add(r)
   return r
+}
+
+// Read the crop-overlay's CURRENT geometry straight off the canvas (native
+// scene pixels), baking any handle-drag scale into width/height and clamping
+// to the image. This is the source of truth after the user drags handles —
+// reading it directly (instead of React state) avoids any stale-state race
+// when the user hits Apply immediately after resizing.
+function readCropOverlayNative(fc, disp) {
+  const ov = fc?.getObjects().find(o => o.name === 'crop-overlay')
+  if (!ov) return null
+  const w = ov.width * (ov.scaleX || 1)
+  const h = ov.height * (ov.scaleY || 1)
+  let x = ov.left, y = ov.top
+  x = Math.max(0, x); y = Math.max(0, y)
+  const natW = disp?.natW ?? (x + w)
+  const natH = disp?.natH ?? (y + h)
+  return { x, y, w: Math.min(w, natW - x), h: Math.min(h, natH - y) }
 }
 
 function configureBrush(fc, tool, color, width, fit = 1) {
