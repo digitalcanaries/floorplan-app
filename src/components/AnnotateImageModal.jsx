@@ -84,6 +84,10 @@ export default function AnnotateImageModal() {
   // The editor keeps the full image; export/print output only this region.
   const [cropRect, setCropRect] = useState(null)
   const cropRectRef = useRef(null)
+  // Rendered-image geometry (in viewportRef CSS px, pre zoom/pan) used to
+  // position the DOM crop overlay so it tracks the image exactly:
+  // { imgLeft, imgTop, fit, natW, natH }.
+  const [viewGeom, setViewGeom] = useState(null)
   const historyRef = useRef({ past: [], future: [] })
   const [layoutTick, setLayoutTick] = useState(0)
 
@@ -104,6 +108,7 @@ export default function AnnotateImageModal() {
     setPanOffset({ x: 0, y: 0 })
     setRotation(0)
     setCropRect(null)
+    setViewGeom(null)
     setLoading(true)
     setError(null)
     let cancelled = false
@@ -165,62 +170,22 @@ export default function AnnotateImageModal() {
     // drag was interpreted as drawing a NEW rectangle in the wrong spot.
     // Identity CSS + a full-fit fabric viewport keeps pointer math exact so
     // the handles are grabbable and land where you expect.
+    // Reset the CSS zoom/pan layer to identity so the DOM crop overlay's
+    // pointer math (screen delta ÷ fit) is exact and the whole image is
+    // visible while cropping.
     setZoom(1); setPanOffset({ x: 0, y: 0 })
     const cw = fc.width, ch = fc.height
     const fit = Math.min(cw / disp.natW, ch / disp.natH)
     fc.setViewportTransform([fit, 0, 0, fit, (cw - disp.natW * fit) / 2, (ch - disp.natH * fit) / 2])
     fitRef.current = fit
-    // Recompute every object's control coords for the new viewport, else the
-    // crop overlay's handles/hit-area stay cached at the old transform.
-    fc.getObjects().forEach(o => o.setCoords && o.setCoords())
     fc.requestRenderAll()
   }, [tool, layoutTick])
 
-  // Draw the crop region: a dark mask dims everything OUTSIDE the region so
-  // you can see exactly what will be kept (standard crop UX — no viewport
-  // zoom needed), plus a dashed rectangle. When the Crop tool is active the
-  // rectangle is interactive with move/resize handles; otherwise it's a
-  // passive guide. Tagged 'crop-mask'/'crop-overlay' (not 'anno') so they're
-  // never saved or exported as annotations.
-  useEffect(() => {
-    const fc = fcRef.current
-    if (!fc) return
-    fc.getObjects().filter(o => o.name === 'crop-overlay' || o.name === 'crop-mask').forEach(o => fc.remove(o))
-    if (cropRect) {
-      addCropMask(fc, cropRect, displayRef.current)
-      const interactive = tool === 'crop'
-      const ov = addCropOverlay(fc, cropRect, fitRef.current || 1, interactive)
-      fc.bringObjectToFront(ov) // keep the dashed box + handles above the mask
-      if (interactive) fc.setActiveObject(ov)
-    }
-    fc.requestRenderAll()
-  }, [cropRect, layoutTick, tool])
-
-  // When the crop overlay is moved/resized via its handles, write the new
-  // geometry back into cropRect (in native scene coords).
-  useEffect(() => {
-    const fc = fcRef.current
-    if (!fc) return
-    const onModified = (opt) => {
-      const t = opt?.target
-      if (!t || t.name !== 'crop-overlay') return
-      const x = t.left, y = t.top
-      const w = t.width * (t.scaleX || 1)
-      const h = t.height * (t.scaleY || 1)
-      // bake scale back into width/height so it stays consistent
-      t.set({ width: w, height: h, scaleX: 1, scaleY: 1 })
-      const nat = displayRef.current
-      const clampX = Math.max(0, Math.min(x, (nat?.natW || x)))
-      const clampY = Math.max(0, Math.min(y, (nat?.natH || y)))
-      setCropRect({
-        x: clampX, y: clampY,
-        w: Math.min(w, (nat?.natW || w) - clampX),
-        h: Math.min(h, (nat?.natH || h) - clampY),
-      })
-    }
-    fc.on('object:modified', onModified)
-    return () => fc.off('object:modified', onModified)
-  }, [layoutTick])
+  // The crop region is drawn/edited as a DOM overlay (CropOverlayDOM /
+  // CropDrawCatcher, rendered inside viewportRef) — NOT as fabric objects.
+  // Fabric interactive objects under the viewport transform proved
+  // unreliable (resize/move didn't commit, handles mis-hit). The DOM overlay
+  // is positioned from viewGeom and updates cropRect live on every drag.
 
   // ----- Init fabric overlay after <img> renders -----
   const initFabricOverlay = useCallback(() => {
@@ -289,6 +254,11 @@ export default function AnnotateImageModal() {
     const vOffX = (canvasW - natW * fit) / 2
     const vOffY = (canvasH - natH * fit) / 2
     fc.setViewportTransform([fit, 0, 0, fit, vOffX, vOffY])
+    // Rendered-image rectangle in viewportRef CSS px (canvas sits at
+    // dispLeft/dispTop; the image is centred inside it at vOffX/vOffY). The
+    // DOM crop overlay lives in the same transformed space, so it tracks the
+    // image at any zoom/pan.
+    setViewGeom({ imgLeft: dispLeft + vOffX, imgTop: dispTop + vOffY, fit, natW, natH })
 
     let saved = null
     if (refRow.annotations_json) {
@@ -331,23 +301,11 @@ export default function AnnotateImageModal() {
         }
         const bg = fc.getObjects().find(o => o.name === 'bg-image')
         if (bg) fc.sendObjectToBack(bg)
-        // Annotations were just added on top; keep the crop mask + dashed box
-        // above them so the dim + region stay visible.
-        fc.getObjects().filter(o => o.name === 'crop-mask').forEach(m => fc.bringObjectToFront(m))
-        const ov2 = fc.getObjects().find(o => o.name === 'crop-overlay')
-        if (ov2) fc.bringObjectToFront(ov2)
         setObjectCount(countAnno(fc))
         fc.requestRenderAll()
       })
     }
-
-    // Re-draw the crop mask + overlay on this fresh canvas (from the ref so
-    // this useCallback doesn't need cropRect in deps).
-    if (cropRectRef.current) {
-      addCropMask(fc, cropRectRef.current, { natW, natH })
-      const ov = addCropOverlay(fc, cropRectRef.current, fit, toolRef.current === 'crop')
-      fc.bringObjectToFront(ov)
-    }
+    // (The crop region is a DOM overlay now — nothing to draw on the canvas.)
 
     fitRef.current = fit
     configureBrush(fc, curTool, curColor, curWidth, fit)
@@ -460,13 +418,7 @@ export default function AnnotateImageModal() {
         })
       }
     }
-    // Keep the crop overlay selected in crop mode so its handles show without
-    // an extra click; only clear selection for the pure drawing tools.
-    if (tool !== 'select' && tool !== 'crop') fc.discardActiveObject()
-    if (tool === 'crop') {
-      const ov = fc.getObjects().find(o => o.name === 'crop-overlay')
-      if (ov) fc.setActiveObject(ov)
-    }
+    if (tool !== 'select') fc.discardActiveObject()
     fc.requestRenderAll()
   }, [tool, color, width])
 
@@ -476,13 +428,14 @@ export default function AnnotateImageModal() {
     const fc = fcRef.current
     if (!fc) return
 
-    const isShape = ['rect', 'ellipse', 'line', 'arrow', 'crop'].includes(tool)
+    // 'crop' is NOT here — the crop region is a DOM overlay, so fabric must
+    // stay out of the pointer path when the crop tool is active.
+    const isShape = ['rect', 'ellipse', 'line', 'arrow'].includes(tool)
 
     // Scene is native pixels; divide picked sizes by fit so they look the
     // chosen on-screen size.
     const nw = width / (fitRef.current || 1)
     const nfs = fontSize / (fitRef.current || 1)
-    const cropStroke = 2 / (fitRef.current || 1)
 
     const onDown = (opt) => {
       if (tool === 'text') {
@@ -516,22 +469,10 @@ export default function AnnotateImageModal() {
         return
       }
       if (!isShape) return
-      // In crop mode, clicking the existing crop rectangle (or its handles)
-      // should move/resize it — let fabric handle that, don't draw a new one.
-      if (tool === 'crop' && opt?.target && opt.target.name === 'crop-overlay') return
       const pt = fc.getScenePoint(opt.e)
       shapeDrawStateRef.current.startPt = pt
       let shape
-      if (tool === 'crop') {
-        // Remove any existing crop overlay/draft while drawing a new one.
-        fc.getObjects().filter(o => o.name === 'crop-overlay' || o.name === 'crop-draft').forEach(o => fc.remove(o))
-        shape = new fabric.Rect({
-          left: pt.x, top: pt.y, width: 0, height: 0,
-          fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: cropStroke,
-          strokeDashArray: [8 * cropStroke / 2, 6 * cropStroke / 2], strokeUniform: true,
-          selectable: false, evented: false, name: 'crop-draft',
-        })
-      } else if (tool === 'rect') {
+      if (tool === 'rect') {
         shape = new fabric.Rect({
           left: pt.x, top: pt.y, width: 0, height: 0,
           stroke: color, strokeWidth: nw, fill: 'transparent',
@@ -567,7 +508,7 @@ export default function AnnotateImageModal() {
       if (!isShape || !st.active || !st.startPt) return
       const pt = fc.getScenePoint(opt.e)
       const s = st.active
-      if (tool === 'rect' || tool === 'crop') {
+      if (tool === 'rect') {
         s.set({
           left: Math.min(st.startPt.x, pt.x),
           top: Math.min(st.startPt.y, pt.y),
@@ -604,38 +545,8 @@ export default function AnnotateImageModal() {
 
     const onUp = () => {
       const st = shapeDrawStateRef.current
-      if (!isShape || !st.active) {
-        // No draft in progress. In crop mode this means the user just
-        // moved/resized the EXISTING crop box via its handles (onDown bailed
-        // out for the overlay, so no draft was created). Commit the box's live
-        // geometry straight to cropRect — this is the reliable path; relying on
-        // fabric's object:modified alone let a resize silently not stick, so
-        // Apply cropped the original size (the reported bug).
-        if (tool === 'crop') {
-          const live = readCropOverlayNative(fcRef.current, displayRef.current)
-          if (live && live.w > 4 && live.h > 4) setCropRect(live)
-        }
-        st.startPt = null; st.active = null; return
-      }
+      if (!isShape || !st.active) { st.startPt = null; st.active = null; return }
       const s = st.active
-      // Crop: convert the draft rect to a native-pixel crop region, clamp to
-      // the image, then drop the draft (the crop-overlay effect redraws it).
-      if (tool === 'crop') {
-        const disp = displayRef.current
-        fc.remove(s)
-        st.startPt = null; st.active = null
-        if (disp && s.width > 4 && s.height > 4) {
-          const inv = disp.natW / disp.dispW
-          let x = s.left * inv, y = s.top * inv, w = s.width * inv, h = s.height * inv
-          x = Math.max(0, x); y = Math.max(0, y)
-          w = Math.min(w, disp.natW - x); h = Math.min(h, disp.natH - y)
-          setCropRect({ x, y, w, h })
-          // Stay in crop mode so the user can immediately drag the handles to
-          // fine-tune, hit Apply Crop, or switch tools when happy.
-        }
-        fc.requestRenderAll()
-        return
-      }
       // Discard zero-size shapes (user just clicked, didn't drag)
       let keep = true
       if (tool === 'rect' && (s.width < 2 || s.height < 2)) keep = false
@@ -1222,6 +1133,20 @@ export default function AnnotateImageModal() {
             )}
             <canvas ref={canvasElRef}
               style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 120ms' }} />
+
+            {/* DOM crop overlay — box + handles + dark mask, positioned from
+                the rendered-image geometry. Lives inside viewportRef so it
+                tracks the image through zoom/pan. Only shown when unrotated
+                (rotation is a fabric/CSS transform the box can't follow). */}
+            {viewGeom && rotation === 0 && cropRect && (
+              <CropOverlayDOM
+                geom={viewGeom} cropRect={cropRect} interactive={tool === 'crop'}
+                zoom={zoom} onChange={setCropRect}
+              />
+            )}
+            {viewGeom && rotation === 0 && tool === 'crop' && !cropRect && (
+              <CropDrawCatcher geom={viewGeom} zoom={zoom} onCreate={setCropRect} />
+            )}
           </div>
 
           {/* Zoom hint overlay (bottom-right) — subtle */}
@@ -1245,72 +1170,138 @@ function countAnno(fc) {
 
 function clampZoom(z) { return Math.max(0.1, Math.min(10, z)) }
 
-// Add the crop-region rectangle to the canvas. When `interactive`, it gets
-// move/resize handles (so the user can fine-tune the region); otherwise it's
-// a passive dashed guide. Coords are native scene pixels.
-function addCropOverlay(fc, cropRect, fit = 1, interactive = false) {
-  const cs = 2 / (fit || 1)
-  const r = new fabric.Rect({
-    left: cropRect.x, top: cropRect.y,
-    width: cropRect.w, height: cropRect.h,
-    // A faint fill makes the interior clickable/draggable in crop mode and
-    // gently highlights the kept region.
-    fill: interactive ? 'rgba(34,211,238,0.10)' : 'rgba(0,0,0,0)',
-    stroke: '#22d3ee', strokeWidth: cs,
-    strokeDashArray: [8 * cs / 2, 6 * cs / 2], strokeUniform: true,
-    selectable: interactive, evented: interactive,
-    hasControls: interactive, hasBorders: interactive,
-    lockRotation: true,
-    cornerColor: '#22d3ee', cornerStyle: 'circle', transparentCorners: false,
-    cornerSize: 12, borderColor: '#22d3ee',
-    name: 'crop-overlay',
-  })
-  if (interactive && r.setControlsVisibility) r.setControlsVisibility({ mtr: false })
-  fc.add(r)
-  // Cache control/hit coords against the CURRENT viewport so the handles are
-  // drawn (and hit-tested) where the rectangle actually is.
-  r.setCoords()
-  return r
-}
+// ---------- DOM crop overlay ----------
+// The crop region is a plain-DOM overlay (not a fabric object). It lives
+// inside viewportRef, so it inherits the same translate(pan)/scale(zoom) as
+// the canvas and stays glued to the image. Coordinates:
+//   geom = { imgLeft, imgTop, fit, natW, natH }  (rendered-image rect in
+//   viewportRef CSS px). A native point (nx,ny) is at
+//   imgLeft + nx*fit, imgTop + ny*fit.
+// A drag moves cropRect live (screen delta ÷ (fit*zoom) = native delta), so
+// the size readout, mask, and export all update immediately.
+function CropOverlayDOM({ geom, cropRect, interactive, zoom, onChange }) {
+  const drag = useRef(null)
+  const { imgLeft, imgTop, fit, natW, natH } = geom
+  const imgW = natW * fit, imgH = natH * fit
+  const boxL = imgLeft + cropRect.x * fit
+  const boxT = imgTop + cropRect.y * fit
+  const boxW = cropRect.w * fit
+  const boxH = cropRect.h * fit
+  const MIN = 12 // min native size
 
-// Read the crop-overlay's CURRENT geometry straight off the canvas (native
-// scene pixels), baking any handle-drag scale into width/height and clamping
-// to the image. This is the source of truth after the user drags handles —
-// reading it directly (instead of React state) avoids any stale-state race
-// when the user hits Apply immediately after resizing.
-function readCropOverlayNative(fc, disp) {
-  const ov = fc?.getObjects().find(o => o.name === 'crop-overlay')
-  if (!ov) return null
-  const w = ov.width * (ov.scaleX || 1)
-  const h = ov.height * (ov.scaleY || 1)
-  let x = ov.left, y = ov.top
-  x = Math.max(0, x); y = Math.max(0, y)
-  const natW = disp?.natW ?? (x + w)
-  const natH = disp?.natH ?? (y + h)
-  return { x, y, w: Math.min(w, natW - x), h: Math.min(h, natH - y) }
-}
-
-// Dim everything outside the crop region with four dark rectangles (native
-// scene coords). This shows the kept area directly on the full image — a
-// standard, robust crop preview that needs no viewport zoom.
-function addCropMask(fc, cropRect, disp) {
-  const natW = disp?.natW, natH = disp?.natH
-  if (!natW || !natH) return
-  const { x, y, w, h } = cropRect
-  const bands = [
-    { left: 0, top: 0, width: natW, height: y },                         // above
-    { left: 0, top: y + h, width: natW, height: natH - (y + h) },        // below
-    { left: 0, top: y, width: x, height: h },                            // left
-    { left: x + w, top: y, width: natW - (x + w), height: h },           // right
-  ]
-  for (const b of bands) {
-    if (b.width <= 0 || b.height <= 0) continue
-    fc.add(new fabric.Rect({
-      ...b, fill: 'rgba(0,0,0,0.55)',
-      selectable: false, evented: false, hasControls: false, hasBorders: false,
-      objectCaching: false, name: 'crop-mask',
-    }))
+  const begin = (mode) => (e) => {
+    if (!interactive) return
+    e.preventDefault(); e.stopPropagation()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* ok */ }
+    drag.current = { mode, sx: e.clientX, sy: e.clientY, rect: { ...cropRect } }
   }
+  const move = (e) => {
+    const d = drag.current; if (!d) return
+    const s = fit * (zoom || 1)
+    const dx = (e.clientX - d.sx) / s
+    const dy = (e.clientY - d.sy) / s
+    let { x, y, w, h } = d.rect
+    const m = d.mode
+    if (m === 'move') { x += dx; y += dy }
+    else {
+      if (m.includes('w')) { x += dx; w -= dx }
+      if (m.includes('e')) { w += dx }
+      if (m.includes('n')) { y += dy; h -= dy }
+      if (m.includes('s')) { h += dy }
+    }
+    if (w < MIN) { if (m.includes('w')) x = d.rect.x + d.rect.w - MIN; w = MIN }
+    if (h < MIN) { if (m.includes('n')) y = d.rect.y + d.rect.h - MIN; h = MIN }
+    // clamp inside the image
+    x = Math.max(0, Math.min(x, natW - w))
+    y = Math.max(0, Math.min(y, natH - h))
+    w = Math.min(w, natW - x)
+    h = Math.min(h, natH - y)
+    onChange({ x, y, w, h })
+  }
+  const end = (e) => {
+    if (!drag.current) return
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* ok */ }
+    drag.current = null
+  }
+
+  const hs = 16 / (zoom || 1) // handle size — constant on screen
+  const mask = (l, t, w, h, key) => (w > 0.5 && h > 0.5)
+    ? <div key={key} style={{ position: 'absolute', left: l, top: t, width: w, height: h, background: 'rgba(0,0,0,0.55)', pointerEvents: 'none' }} />
+    : null
+  const handle = (mode, cx, cy, cursor) => (
+    <div key={mode} onPointerDown={begin(mode)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+      style={{
+        position: 'absolute', left: cx - hs / 2, top: cy - hs / 2, width: hs, height: hs,
+        background: '#22d3ee', border: `${2 / (zoom || 1)}px solid #0e7490`, borderRadius: hs,
+        cursor, touchAction: 'none', pointerEvents: 'auto', zIndex: 3,
+      }} />
+  )
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 6, pointerEvents: 'none' }}>
+      {mask(imgLeft, imgTop, imgW, cropRect.y * fit, 'top')}
+      {mask(imgLeft, boxT + boxH, imgW, imgH - (cropRect.y + cropRect.h) * fit, 'bot')}
+      {mask(imgLeft, boxT, cropRect.x * fit, boxH, 'left')}
+      {mask(boxL + boxW, boxT, imgW - (cropRect.x + cropRect.w) * fit, boxH, 'right')}
+      <div
+        onPointerDown={begin('move')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+        style={{
+          position: 'absolute', left: boxL, top: boxT, width: boxW, height: boxH, boxSizing: 'border-box',
+          border: `${2 / (zoom || 1)}px dashed #22d3ee`,
+          cursor: interactive ? 'move' : 'default',
+          pointerEvents: interactive ? 'auto' : 'none', touchAction: 'none', zIndex: 2,
+        }} />
+      {interactive && [
+        handle('nw', boxL, boxT, 'nwse-resize'),
+        handle('n', boxL + boxW / 2, boxT, 'ns-resize'),
+        handle('ne', boxL + boxW, boxT, 'nesw-resize'),
+        handle('e', boxL + boxW, boxT + boxH / 2, 'ew-resize'),
+        handle('se', boxL + boxW, boxT + boxH, 'nwse-resize'),
+        handle('s', boxL + boxW / 2, boxT + boxH, 'ns-resize'),
+        handle('sw', boxL, boxT + boxH, 'nesw-resize'),
+        handle('w', boxL, boxT + boxH / 2, 'ew-resize'),
+      ]}
+    </div>
+  )
+}
+
+// Full-image drag-catcher used when the Crop tool is active but no region is
+// set yet: drag to rubber-band the first crop region.
+function CropDrawCatcher({ geom, zoom, onCreate }) {
+  const drag = useRef(null)
+  const { imgLeft, imgTop, fit, natW, natH } = geom
+  const nativeAt = (e, el) => {
+    const r = el.getBoundingClientRect()
+    const s = fit * (zoom || 1)
+    return {
+      x: Math.max(0, Math.min((e.clientX - r.left) / s, natW)),
+      y: Math.max(0, Math.min((e.clientY - r.top) / s, natH)),
+    }
+  }
+  const down = (e) => {
+    e.preventDefault()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* ok */ }
+    const p = nativeAt(e, e.currentTarget)
+    drag.current = { x0: p.x, y0: p.y }
+    onCreate({ x: p.x, y: p.y, w: 0, h: 0 })
+  }
+  const move = (e) => {
+    const d = drag.current; if (!d) return
+    const p = nativeAt(e, e.currentTarget)
+    onCreate({ x: Math.min(d.x0, p.x), y: Math.min(d.y0, p.y), w: Math.abs(p.x - d.x0), h: Math.abs(p.y - d.y0) })
+  }
+  const up = (e) => {
+    if (!drag.current) return
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* ok */ }
+    drag.current = null
+  }
+  return (
+    <div onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+      style={{
+        position: 'absolute', left: imgLeft, top: imgTop, width: natW * fit, height: natH * fit,
+        cursor: 'crosshair', touchAction: 'none', pointerEvents: 'auto', zIndex: 6,
+      }} />
+  )
 }
 
 function configureBrush(fc, tool, color, width, fit = 1) {
