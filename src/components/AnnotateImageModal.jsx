@@ -1133,21 +1133,35 @@ export default function AnnotateImageModal() {
             )}
             <canvas ref={canvasElRef}
               style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 120ms' }} />
-
-            {/* DOM crop overlay — box + handles + dark mask, positioned from
-                the rendered-image geometry. Lives inside viewportRef so it
-                tracks the image through zoom/pan. Only shown when unrotated
-                (rotation is a fabric/CSS transform the box can't follow). */}
-            {viewGeom && rotation === 0 && cropRect && (
-              <CropOverlayDOM
-                geom={viewGeom} cropRect={cropRect} interactive={tool === 'crop'}
-                zoom={zoom} onChange={setCropRect}
-              />
-            )}
-            {viewGeom && rotation === 0 && tool === 'crop' && !cropRect && (
-              <CropDrawCatcher geom={viewGeom} zoom={zoom} onCreate={setCropRect} />
-            )}
           </div>
+
+          {/* DOM crop overlay — box + handles + dark mask, positioned from the
+              rendered-image geometry. Kept in its OWN layer (sibling of
+              viewportRef) with the SAME translate/scale so it tracks the image
+              through zoom/pan, WITHOUT being tangled in the <canvas> that
+              fabric rewraps into its own container (React vs fabric DOM).
+              Only shown unrotated (a rotated image is a transform the axis-
+              aligned box can't follow). */}
+          {viewGeom && rotation === 0 && (cropRect || tool === 'crop') && (
+            <div
+              className="absolute inset-0"
+              style={{
+                transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
+                transformOrigin: '0 0',
+                pointerEvents: 'none',
+                transition: panStateRef.current.active || touchPanRef.current.active ? 'none' : 'transform 60ms',
+              }}
+            >
+              {cropRect ? (
+                <CropOverlayDOM
+                  geom={viewGeom} cropRect={cropRect} interactive={tool === 'crop'}
+                  zoom={zoom} onChange={setCropRect}
+                />
+              ) : (
+                <CropDrawCatcher geom={viewGeom} zoom={zoom} onCreate={setCropRect} />
+              )}
+            </div>
+          )}
 
           {/* Zoom hint overlay (bottom-right) — subtle */}
           {(zoom !== 1 || panOffset.x !== 0 || panOffset.y !== 0) && (
