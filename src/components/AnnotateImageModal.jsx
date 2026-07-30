@@ -84,7 +84,6 @@ export default function AnnotateImageModal() {
   // The editor keeps the full image; export/print output only this region.
   const [cropRect, setCropRect] = useState(null)
   const cropRectRef = useRef(null)
-  const [cropViewActive, setCropViewActive] = useState(false)
   const historyRef = useRef({ past: [], future: [] })
   const [layoutTick, setLayoutTick] = useState(0)
 
@@ -105,7 +104,6 @@ export default function AnnotateImageModal() {
     setPanOffset({ x: 0, y: 0 })
     setRotation(0)
     setCropRect(null)
-    setCropViewActive(false)
     setLoading(true)
     setError(null)
     let cancelled = false
@@ -175,25 +173,25 @@ export default function AnnotateImageModal() {
     // Recompute every object's control coords for the new viewport, else the
     // crop overlay's handles/hit-area stay cached at the old transform.
     fc.getObjects().forEach(o => o.setCoords && o.setCoords())
-    setCropViewActive(false)
     fc.requestRenderAll()
   }, [tool, layoutTick])
 
-  // Draw the crop region as a dashed overlay. When the Crop tool is active
-  // it becomes an interactive rectangle with move/resize handles; otherwise
-  // it's a passive dashed guide. Tagged 'crop-overlay' (not 'anno') so it's
-  // never saved or exported as an annotation.
+  // Draw the crop region: a dark mask dims everything OUTSIDE the region so
+  // you can see exactly what will be kept (standard crop UX — no viewport
+  // zoom needed), plus a dashed rectangle. When the Crop tool is active the
+  // rectangle is interactive with move/resize handles; otherwise it's a
+  // passive guide. Tagged 'crop-mask'/'crop-overlay' (not 'anno') so they're
+  // never saved or exported as annotations.
   useEffect(() => {
     const fc = fcRef.current
     if (!fc) return
-    fc.getObjects().filter(o => o.name === 'crop-overlay').forEach(o => fc.remove(o))
+    fc.getObjects().filter(o => o.name === 'crop-overlay' || o.name === 'crop-mask').forEach(o => fc.remove(o))
     if (cropRect) {
+      addCropMask(fc, cropRect, displayRef.current)
       const interactive = tool === 'crop'
-      addCropOverlay(fc, cropRect, fitRef.current || 1, interactive)
-      if (interactive) {
-        const ov = fc.getObjects().find(o => o.name === 'crop-overlay')
-        if (ov) fc.setActiveObject(ov)
-      }
+      const ov = addCropOverlay(fc, cropRect, fitRef.current || 1, interactive)
+      fc.bringObjectToFront(ov) // keep the dashed box + handles above the mask
+      if (interactive) fc.setActiveObject(ov)
     }
     fc.requestRenderAll()
   }, [cropRect, layoutTick, tool])
@@ -333,15 +331,22 @@ export default function AnnotateImageModal() {
         }
         const bg = fc.getObjects().find(o => o.name === 'bg-image')
         if (bg) fc.sendObjectToBack(bg)
+        // Annotations were just added on top; keep the crop mask + dashed box
+        // above them so the dim + region stay visible.
+        fc.getObjects().filter(o => o.name === 'crop-mask').forEach(m => fc.bringObjectToFront(m))
+        const ov2 = fc.getObjects().find(o => o.name === 'crop-overlay')
+        if (ov2) fc.bringObjectToFront(ov2)
         setObjectCount(countAnno(fc))
         fc.requestRenderAll()
       })
     }
 
-    // Re-draw the crop overlay on this fresh canvas (from the ref so this
-    // useCallback doesn't need cropRect in deps).
+    // Re-draw the crop mask + overlay on this fresh canvas (from the ref so
+    // this useCallback doesn't need cropRect in deps).
     if (cropRectRef.current) {
-      addCropOverlay(fc, cropRectRef.current, fit, toolRef.current === 'crop')
+      addCropMask(fc, cropRectRef.current, { natW, natH })
+      const ov = addCropOverlay(fc, cropRectRef.current, fit, toolRef.current === 'crop')
+      fc.bringObjectToFront(ov)
     }
 
     fitRef.current = fit
@@ -988,32 +993,8 @@ export default function AnnotateImageModal() {
     setRotation(r => (((r + delta) % 360) + 360) % 360)
   }
 
-  // Apply: commit the crop and zoom the editor to preview just that region.
-  // Reads the overlay's LIVE geometry off the canvas (not React state) so a
-  // resize done a moment earlier is always honoured — the fix for "resized
-  // with handles but Apply used the original size". Then leaves crop mode so
-  // the (now passive) region isn't edge-to-edge with ungrabbable handles.
-  const applyCropView = () => {
-    const fc = fcRef.current
-    if (!fc) return
-    const disp = displayRef.current
-    const rect = readCropOverlayNative(fc, disp) || cropRect
-    if (!rect || rect.w < 1 || rect.h < 1) return
-    setCropRect(rect)
-    const cw = fc.width, ch = fc.height
-    const margin = 0.92 // breathing room so the preview reads as a preview
-    const fit = Math.min(cw / rect.w, ch / rect.h) * margin
-    const offX = (cw - rect.w * fit) / 2 - rect.x * fit
-    const offY = (ch - rect.h * fit) / 2 - rect.y * fit
-    fc.setViewportTransform([fit, 0, 0, fit, offX, offY])
-    fitRef.current = fit
-    fc.getObjects().forEach(o => o.setCoords && o.setCoords())
-    setCropViewActive(true)
-    setTool('select') // exit crop-edit so the overlay becomes a passive guide
-    fc.requestRenderAll()
-  }
-
-  // Restore the full-image fit view (crop stays set).
+  // Reset to the full-image fit view (identity zoom/pan). Used after clearing
+  // a crop so the whole image is shown cleanly.
   const showFullView = () => {
     const fc = fcRef.current
     const disp = displayRef.current
@@ -1027,7 +1008,6 @@ export default function AnnotateImageModal() {
     fitRef.current = fit
     fc.getObjects().forEach(o => o.setCoords && o.setCoords())
     fc.requestRenderAll()
-    setCropViewActive(false)
   }
 
   // Set tool with a nice UX: pick a good default width if user hasn't tuned it
@@ -1074,7 +1054,7 @@ export default function AnnotateImageModal() {
             />
           ))}
           {tool === 'crop' && (
-            <span className="text-[11px] text-cyan-300 px-1">Drag to set the region · drag its handles to resize · then ✓ Apply &amp; Preview</span>
+            <span className="text-[11px] text-cyan-300 px-1">Drag to set the region · drag its handles to resize · everything dimmed is cropped away</span>
           )}
 
           {/* Width */}
@@ -1111,30 +1091,24 @@ export default function AnnotateImageModal() {
             className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
             title="Rotate 90° right">↻</button>
 
-          {/* Crop controls — shown once a crop region is set */}
+          {/* Crop controls — shown once a crop region is set. The dark mask
+              outside the box IS the preview, so no zoom buttons are needed. */}
           {cropRect && (
             <>
-              <span className="text-[10px] text-cyan-300 ml-1" title="Export & print output only this region">
+              <span className="text-[10px] text-cyan-300 ml-1" title="Export & print output only this bright region">
                 ✂ {Math.round(cropRect.w)}×{Math.round(cropRect.h)}
               </span>
               {tool === 'crop' ? (
-                <button onClick={applyCropView}
+                <button onClick={() => setTool('select')}
                   className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-xs"
-                  title="Apply the crop and preview just that region (export uses it either way)">
-                  ✓ Apply &amp; Preview
+                  title="Done adjusting — keep this crop (export/print use the bright region)">
+                  ✓ Done
                 </button>
               ) : (
                 <button onClick={() => setTool('crop')}
                   className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-xs"
-                  title="Edit the crop region — full image + drag handles">
+                  title="Adjust the crop region — drag the box or its handles">
                   ✎ Edit Crop
-                </button>
-              )}
-              {cropViewActive && (
-                <button onClick={showFullView}
-                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
-                  title="Show the full image again (crop stays set)">
-                  Show Full
                 </button>
               )}
               <button onClick={() => { setCropRect(null); showFullView() }}
@@ -1314,6 +1288,29 @@ function readCropOverlayNative(fc, disp) {
   const natW = disp?.natW ?? (x + w)
   const natH = disp?.natH ?? (y + h)
   return { x, y, w: Math.min(w, natW - x), h: Math.min(h, natH - y) }
+}
+
+// Dim everything outside the crop region with four dark rectangles (native
+// scene coords). This shows the kept area directly on the full image — a
+// standard, robust crop preview that needs no viewport zoom.
+function addCropMask(fc, cropRect, disp) {
+  const natW = disp?.natW, natH = disp?.natH
+  if (!natW || !natH) return
+  const { x, y, w, h } = cropRect
+  const bands = [
+    { left: 0, top: 0, width: natW, height: y },                         // above
+    { left: 0, top: y + h, width: natW, height: natH - (y + h) },        // below
+    { left: 0, top: y, width: x, height: h },                            // left
+    { left: x + w, top: y, width: natW - (x + w), height: h },           // right
+  ]
+  for (const b of bands) {
+    if (b.width <= 0 || b.height <= 0) continue
+    fc.add(new fabric.Rect({
+      ...b, fill: 'rgba(0,0,0,0.55)',
+      selectable: false, evented: false, hasControls: false, hasBorders: false,
+      objectCaching: false, name: 'crop-mask',
+    }))
+  }
 }
 
 function configureBrush(fc, tool, color, width, fit = 1) {
