@@ -86,6 +86,7 @@ export default function AnnotateImageModal() {
   const cropRectRef = useRef(null)
   const historyRef = useRef({ past: [], future: [] })
   const [layoutTick, setLayoutTick] = useState(0)
+  const [debugInfo, setDebugInfo] = useState(null)
 
   // ----- Load the ref + image blob -----
   useEffect(() => {
@@ -1124,25 +1125,34 @@ export default function AnnotateImageModal() {
               const bg = fc?.getObjects().find(o => o.name === 'bg-image')
               const anno = fc?.getObjects().find(o => o.name === 'anno')
               const vpt = fc?.viewportTransform
-              const info = {
-                imgElRect: img ? `${Math.round(img.getBoundingClientRect().width)}x${Math.round(img.getBoundingClientRect().height)}` : '-',
+              const r = img?.getBoundingClientRect()
+              setDebugInfo({
+                imgElRect: r ? `${Math.round(r.width)}x${Math.round(r.height)}` : '-',
                 imgNatural: img ? `${img.naturalWidth}x${img.naturalHeight}` : '-',
                 canvasBacking: fc ? `${fc.lowerCanvasEl?.width}x${fc.lowerCanvasEl?.height}` : '-',
                 canvasCss: fc ? `${fc.lowerCanvasEl?.style.width}x${fc.lowerCanvasEl?.style.height}` : '-',
                 fabricWH: fc ? `${fc.width}x${fc.height}` : '-',
                 viewport: vpt ? vpt.map(n => Math.round(n * 100) / 100).join(',') : '-',
-                bgScale: bg ? `${bg.scaleX?.toFixed(3)}` : 'NO BG',
-                bgWH: bg ? `${bg.width}x${bg.height}` : '-',
-                firstAnnoLeftTop: anno ? `${Math.round(anno.left)},${Math.round(anno.top)}` : '-',
-                dispScale: disp ? `${(disp.fit || 0).toFixed(3)}` : '-',
-                objectCount: fc ? fc.getObjects().length : 0,
-              }
-              alert(JSON.stringify(info, null, 2))
+                bg: bg ? `scale ${bg.scaleX?.toFixed(3)} · ${bg.width}x${bg.height}` : 'NO BG IMAGE',
+                firstAnno: anno ? `${Math.round(anno.left)},${Math.round(anno.top)}` : '-',
+                fit: disp ? `${(disp.fit || 0).toFixed(3)}` : '-',
+                objects: fc ? fc.getObjects().length : 0,
+                zoom: `${Math.round(zoom * 100)}% pan ${Math.round(panOffset.x)},${Math.round(panOffset.y)}`,
+              })
             }}
-            className="absolute top-2 left-2 px-2 py-1 bg-yellow-500 text-black text-[10px] rounded font-mono z-20"
+            className="absolute top-2 left-2 px-2 py-1 bg-yellow-500 text-black text-[11px] rounded font-mono z-20"
           >
             🐞 Debug
           </button>
+          {debugInfo && (
+            <div className="absolute top-2 left-2 right-2 bg-black/90 text-lime-300 text-[13px] leading-relaxed rounded p-3 font-mono z-30"
+              onClick={() => setDebugInfo(null)}>
+              <div className="text-yellow-300 mb-1">DEBUG (tap to close) — screenshot this:</div>
+              {Object.entries(debugInfo).map(([k, v]) => (
+                <div key={k}><span className="text-gray-400">{k}:</span> {String(v)}</div>
+              ))}
+            </div>
+          )}
 
           {/* Zoom hint overlay (bottom-right) — subtle */}
           {(zoom !== 1 || panOffset.x !== 0 || panOffset.y !== 0) && (
