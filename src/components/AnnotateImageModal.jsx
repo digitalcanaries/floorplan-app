@@ -257,10 +257,14 @@ export default function AnnotateImageModal() {
       }
     }
 
-    // Image at native size (scene coords 0..natW × 0..natH).
+    // Image at native size (scene coords 0..natW × 0..natH). originX/Y MUST
+    // be 'left'/'top' — fabric.Image defaults to CENTER origin, which would
+    // place left:0,top:0 as the image's CENTER at the scene origin, pushing
+    // half the image into negative coords and offsetting it from the
+    // top-left-origin annotations by half the image size (the alignment bug).
     fabric.FabricImage.fromURL(imgUrl).then((bg) => {
       if (fcRef.current !== fc) return
-      bg.set({ left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false, name: 'bg-image' })
+      bg.set({ originX: 'left', originY: 'top', left: 0, top: 0, scaleX: 1, scaleY: 1, selectable: false, evented: false, name: 'bg-image' })
       fc.add(bg)
       fc.sendObjectToBack(bg)
       fc.requestRenderAll()
