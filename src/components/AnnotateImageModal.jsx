@@ -84,6 +84,7 @@ export default function AnnotateImageModal() {
   // The editor keeps the full image; export/print output only this region.
   const [cropRect, setCropRect] = useState(null)
   const cropRectRef = useRef(null)
+  const [cropViewActive, setCropViewActive] = useState(false)
   const historyRef = useRef({ past: [], future: [] })
   const [layoutTick, setLayoutTick] = useState(0)
 
@@ -104,6 +105,7 @@ export default function AnnotateImageModal() {
     setPanOffset({ x: 0, y: 0 })
     setRotation(0)
     setCropRect(null)
+    setCropViewActive(false)
     setLoading(true)
     setError(null)
     let cancelled = false
@@ -148,27 +150,50 @@ export default function AnnotateImageModal() {
   useEffect(() => { widthRef.current = width }, [width])
   useEffect(() => { cropRectRef.current = cropRect }, [cropRect])
 
-  // Draw the crop region as a dashed overlay on the canvas (display coords).
-  // It's tagged 'crop-overlay' (not 'anno') so it's never saved or exported
-  // as an annotation — it only shows the user what the export will contain.
+  // Draw the crop region as a dashed overlay. When the Crop tool is active
+  // it becomes an interactive rectangle with move/resize handles; otherwise
+  // it's a passive dashed guide. Tagged 'crop-overlay' (not 'anno') so it's
+  // never saved or exported as an annotation.
   useEffect(() => {
     const fc = fcRef.current
-    const disp = displayRef.current
-    if (!fc || !disp) return
+    if (!fc) return
     fc.getObjects().filter(o => o.name === 'crop-overlay').forEach(o => fc.remove(o))
     if (cropRect) {
-      const cs = 2 / (fitRef.current || 1)
-      const r = new fabric.Rect({
-        left: cropRect.x, top: cropRect.y,
-        width: cropRect.w, height: cropRect.h,
-        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: cs,
-        strokeDashArray: [4 * cs, 3 * cs], strokeUniform: true,
-        selectable: false, evented: false, name: 'crop-overlay',
-      })
-      fc.add(r)
+      const interactive = tool === 'crop'
+      addCropOverlay(fc, cropRect, fitRef.current || 1, interactive)
+      if (interactive) {
+        const ov = fc.getObjects().find(o => o.name === 'crop-overlay')
+        if (ov) fc.setActiveObject(ov)
+      }
     }
     fc.requestRenderAll()
-  }, [cropRect, layoutTick])
+  }, [cropRect, layoutTick, tool])
+
+  // When the crop overlay is moved/resized via its handles, write the new
+  // geometry back into cropRect (in native scene coords).
+  useEffect(() => {
+    const fc = fcRef.current
+    if (!fc) return
+    const onModified = (opt) => {
+      const t = opt?.target
+      if (!t || t.name !== 'crop-overlay') return
+      const x = t.left, y = t.top
+      const w = t.width * (t.scaleX || 1)
+      const h = t.height * (t.scaleY || 1)
+      // bake scale back into width/height so it stays consistent
+      t.set({ width: w, height: h, scaleX: 1, scaleY: 1 })
+      const nat = displayRef.current
+      const clampX = Math.max(0, Math.min(x, (nat?.natW || x)))
+      const clampY = Math.max(0, Math.min(y, (nat?.natH || y)))
+      setCropRect({
+        x: clampX, y: clampY,
+        w: Math.min(w, (nat?.natW || w) - clampX),
+        h: Math.min(h, (nat?.natH || h) - clampY),
+      })
+    }
+    fc.on('object:modified', onModified)
+    return () => fc.off('object:modified', onModified)
+  }, [layoutTick])
 
   // ----- Init fabric overlay after <img> renders -----
   const initFabricOverlay = useCallback(() => {
@@ -287,15 +312,7 @@ export default function AnnotateImageModal() {
     // Re-draw the crop overlay on this fresh canvas (from the ref so this
     // useCallback doesn't need cropRect in deps).
     if (cropRectRef.current) {
-      const cReg = cropRectRef.current
-      // Crop rect is in native scene coords; strokeUniform keeps the dashes a
-      // constant on-screen thickness regardless of the viewport scale.
-      fc.add(new fabric.Rect({
-        left: cReg.x, top: cReg.y, width: cReg.w, height: cReg.h,
-        fill: 'rgba(0,0,0,0)', stroke: '#22d3ee', strokeWidth: 2 / fit,
-        strokeDashArray: [8 / fit, 6 / fit], strokeUniform: true,
-        selectable: false, evented: false, name: 'crop-overlay',
-      }))
+      addCropOverlay(fc, cropRectRef.current, fit, toolRef.current === 'crop')
     }
 
     fitRef.current = fit
@@ -459,6 +476,9 @@ export default function AnnotateImageModal() {
         return
       }
       if (!isShape) return
+      // In crop mode, clicking the existing crop rectangle (or its handles)
+      // should move/resize it — let fabric handle that, don't draw a new one.
+      if (tool === 'crop' && opt?.target && opt.target.name === 'crop-overlay') return
       const pt = fc.getScenePoint(opt.e)
       shapeDrawStateRef.current.startPt = pt
       let shape
@@ -558,7 +578,8 @@ export default function AnnotateImageModal() {
           x = Math.max(0, x); y = Math.max(0, y)
           w = Math.min(w, disp.natW - x); h = Math.min(h, disp.natH - y)
           setCropRect({ x, y, w, h })
-          setTool('draw') // return to drawing after setting the crop
+          // Stay in crop mode so the user can immediately drag the handles to
+          // fine-tune, hit Apply Crop, or switch tools when happy.
         }
         fc.requestRenderAll()
         return
@@ -920,6 +941,36 @@ export default function AnnotateImageModal() {
     setRotation(r => (((r + delta) % 360) + 360) % 360)
   }
 
+  // Zoom the editor viewport to show just the crop region (visual "apply").
+  // Export uses the crop regardless; this is a live preview of the result.
+  const applyCropView = () => {
+    const fc = fcRef.current
+    if (!fc || !cropRect) return
+    const cw = fc.width, ch = fc.height
+    const fit = Math.min(cw / cropRect.w, ch / cropRect.h)
+    const offX = (cw - cropRect.w * fit) / 2 - cropRect.x * fit
+    const offY = (ch - cropRect.h * fit) / 2 - cropRect.y * fit
+    fc.setViewportTransform([fit, 0, 0, fit, offX, offY])
+    fitRef.current = fit
+    fc.requestRenderAll()
+    setCropViewActive(true)
+  }
+
+  // Restore the full-image fit view (crop stays set).
+  const showFullView = () => {
+    const fc = fcRef.current
+    const disp = displayRef.current
+    if (!fc || !disp) return
+    const cw = fc.width, ch = fc.height
+    const fit = Math.min(cw / disp.natW, ch / disp.natH)
+    const offX = (cw - disp.natW * fit) / 2
+    const offY = (ch - disp.natH * fit) / 2
+    fc.setViewportTransform([fit, 0, 0, fit, offX, offY])
+    fitRef.current = fit
+    fc.requestRenderAll()
+    setCropViewActive(false)
+  }
+
   // Set tool with a nice UX: pick a good default width if user hasn't tuned it
   const pickTool = (t) => {
     setTool(t)
@@ -964,7 +1015,7 @@ export default function AnnotateImageModal() {
             />
           ))}
           {tool === 'crop' && (
-            <span className="text-[11px] text-cyan-300 px-1">Drag a rectangle to set the export region</span>
+            <span className="text-[11px] text-cyan-300 px-1">Drag to set the crop region · then drag its handles to adjust</span>
           )}
 
           {/* Width */}
@@ -1001,16 +1052,28 @@ export default function AnnotateImageModal() {
             className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
             title="Rotate 90° right">↻</button>
 
-          {/* Crop indicator + reset — shown once a crop region is set */}
+          {/* Crop controls — shown once a crop region is set */}
           {cropRect && (
             <>
               <span className="text-[10px] text-cyan-300 ml-1" title="Export & print output only this region">
                 ✂ {Math.round(cropRect.w)}×{Math.round(cropRect.h)}
               </span>
-              <button onClick={() => setCropRect(null)}
+              <button onClick={applyCropView}
+                className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 text-white rounded text-xs"
+                title="Apply — zoom the editor to just the crop region (export uses it either way)">
+                ✓ Apply Crop
+              </button>
+              {cropViewActive && (
+                <button onClick={showFullView}
+                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+                  title="Show the full image again (crop stays set)">
+                  Show Full
+                </button>
+              )}
+              <button onClick={() => { setCropRect(null); showFullView() }}
                 className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
-                title="Clear crop — export the full image again">
-                Reset Crop
+                title="Remove the crop — export the full image again">
+                ✕ Remove Crop
               </button>
             </>
           )}
@@ -1140,6 +1203,31 @@ function countAnno(fc) {
 }
 
 function clampZoom(z) { return Math.max(0.1, Math.min(10, z)) }
+
+// Add the crop-region rectangle to the canvas. When `interactive`, it gets
+// move/resize handles (so the user can fine-tune the region); otherwise it's
+// a passive dashed guide. Coords are native scene pixels.
+function addCropOverlay(fc, cropRect, fit = 1, interactive = false) {
+  const cs = 2 / (fit || 1)
+  const r = new fabric.Rect({
+    left: cropRect.x, top: cropRect.y,
+    width: cropRect.w, height: cropRect.h,
+    // A faint fill makes the interior clickable/draggable in crop mode and
+    // gently highlights the kept region.
+    fill: interactive ? 'rgba(34,211,238,0.10)' : 'rgba(0,0,0,0)',
+    stroke: '#22d3ee', strokeWidth: cs,
+    strokeDashArray: [8 * cs / 2, 6 * cs / 2], strokeUniform: true,
+    selectable: interactive, evented: interactive,
+    hasControls: interactive, hasBorders: interactive,
+    lockRotation: true,
+    cornerColor: '#22d3ee', cornerStyle: 'circle', transparentCorners: false,
+    cornerSize: 12, borderColor: '#22d3ee',
+    name: 'crop-overlay',
+  })
+  if (interactive && r.setControlsVisibility) r.setControlsVisibility({ mtr: false })
+  fc.add(r)
+  return r
+}
 
 function configureBrush(fc, tool, color, width, fit = 1) {
   // Divide by fit: PencilBrush captures the path in SCENE (native) coords, so
