@@ -1,3 +1,8 @@
+/* eslint-disable react-refresh/only-export-components --
+   This module colocates image-annotation helper functions (coordinate-space
+   math, draw-on-canvas utils) with the editor component because they share the
+   same native/display coordinate logic. They are utilities, not components, so
+   the Fast Refresh caveat does not apply. */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as fabric from 'fabric'
 import useStore from '../store.js'
@@ -27,6 +32,14 @@ const WIDTHS = [1, 2, 3, 4, 6, 10, 16]
 
 // Tool → default stroke width map (highlighter is thick by default)
 const DEFAULT_WIDTH = { draw: 4, highlight: 20, line: 3, arrow: 3, rect: 2, ellipse: 2 }
+
+// Local draft autosave — a stray Escape / refresh must not lose in-progress
+// annotations. Draft is stored per reference in the same imageSpace format as
+// a real save; restored on reopen, cleared once the user hits Save.
+const draftKey = (refId) => `floorplan-anno-draft-${refId}`
+function saveAnnoDraft(refId, data) { try { localStorage.setItem(draftKey(refId), JSON.stringify(data)) } catch { /* quota */ } }
+function loadAnnoDraft(refId) { try { const s = localStorage.getItem(draftKey(refId)); return s ? JSON.parse(s) : null } catch { return null } }
+function clearAnnoDraft(refId) { try { localStorage.removeItem(draftKey(refId)) } catch { /* ignore */ } }
 
 export default function AnnotateImageModal() {
   const annotatingRefId = useStore(s => s.annotatingRefId)
@@ -80,6 +93,9 @@ export default function AnnotateImageModal() {
   const [zoom, setZoom] = useState(1)
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
   const [objectCount, setObjectCount] = useState(0)
+  const [draftRestored, setDraftRestored] = useState(false) // an unsaved draft was loaded
+  const serverAnnoRef = useRef(null) // last server-saved annotations_json, for "discard draft"
+  const dirtyRef = useRef(false) // true once the user actually edits (not just on load)
   // Non-destructive crop region in image-native pixels ({x,y,w,h}) or null.
   // The editor keeps the full image; export/print output only this region.
   const [cropRect, setCropRect] = useState(null)
@@ -99,6 +115,7 @@ export default function AnnotateImageModal() {
     // counter too so a stale value from a prior session can't fire an init
     // before the new img is measured.
     migratedCacheRef.current = { refId: null, objects: null }
+    dirtyRef.current = false
     setLayoutTick(0)
     // Reset zoom/pan/rotation/crop on every modal open — leftover state from
     // a prior session was rendering the image at some old zoom while the
@@ -130,11 +147,23 @@ export default function AnnotateImageModal() {
           const blob = await resp.blob()
           if (cancelled) return
           const url = URL.createObjectURL(blob)
-          setRefRow(r)
+          // Prefer a local draft (unsaved work) over the last server save so a
+          // prior stray Escape / refresh is recoverable. Keep the server data
+          // in a ref so "Discard draft" can revert to it.
+          serverAnnoRef.current = r.annotations_json || null
+          const draft = loadAnnoDraft(annotatingRefId)
+          let effRow = r
+          if (draft && Array.isArray(draft.objects) && draft.objects.length) {
+            effRow = { ...r, annotations_json: JSON.stringify(draft) }
+            setDraftRestored(true)
+          } else {
+            setDraftRestored(false)
+          }
+          setRefRow(effRow)
           setImgUrl(url)
-          // Restore rotation + crop if saved
+          // Restore rotation + crop if saved (or from the draft)
           try {
-            const parsed = r.annotations_json ? JSON.parse(r.annotations_json) : null
+            const parsed = effRow.annotations_json ? JSON.parse(effRow.annotations_json) : null
             if (parsed?.rotation) setRotation(parsed.rotation)
             if (parsed?.cropRect) setCropRect(parsed.cropRect)
           } catch {}
@@ -152,6 +181,23 @@ export default function AnnotateImageModal() {
   useEffect(() => { colorRef.current = color }, [color])
   useEffect(() => { widthRef.current = width }, [width])
   useEffect(() => { cropRectRef.current = cropRect }, [cropRect])
+
+  // Persist the current annotations as a local draft (per ref). Called on every
+  // edit (debounced) and synchronously on close, so a stray Escape / refresh
+  // can't lose in-progress work.
+  const saveDraftNow = useCallback(() => {
+    const fc = fcRef.current, disp = displayRef.current
+    if (!fc || !disp || !annotatingRefId) return
+    if (!dirtyRef.current) return // nothing the user actually changed this session
+    try {
+      const objects = collectObjectsInNative(fc, disp)
+      if (objects && objects.length) {
+        saveAnnoDraft(annotatingRefId, { version: 2, imageSpace: true, objects, rotation, cropRect, at: Date.now() })
+      } else {
+        clearAnnoDraft(annotatingRefId)
+      }
+    } catch { /* ignore */ }
+  }, [annotatingRefId, rotation, cropRect])
 
   // Entering the Crop tool always snaps back to the full-image view. The crop
   // rectangle is then guaranteed smaller than the canvas, so its move/resize
@@ -593,6 +639,26 @@ export default function AnnotateImageModal() {
     return () => fc.off('object:modified', onModified)
   }, [])
 
+  // Continuous local draft autosave — coalesces edits and writes the draft so
+  // closing (even by accident) or a refresh keeps the work.
+  useEffect(() => {
+    const fc = fcRef.current
+    if (!fc || !annotatingRefId) return
+    let t = null
+    const schedule = () => { clearTimeout(t); t = setTimeout(() => saveDraftNow(), 700) }
+    fc.on('object:added', schedule)
+    fc.on('object:removed', schedule)
+    fc.on('object:modified', schedule)
+    fc.on('path:created', schedule)
+    return () => {
+      clearTimeout(t)
+      fc.off('object:added', schedule)
+      fc.off('object:removed', schedule)
+      fc.off('object:modified', schedule)
+      fc.off('path:created', schedule)
+    }
+  }, [annotatingRefId, saveDraftNow, layoutTick])
+
   // ----- Zoom / pan: wheel + mouse (space+drag or middle-click) + 2-finger touch -----
   // All handlers are attached imperatively on the wrapper with capture=true
   // so we can steal events from fabric before they reach the drawing layer.
@@ -747,7 +813,7 @@ export default function AnnotateImageModal() {
       // Avoid capturing shortcuts while typing in text objects
       const active = fcRef.current?.getActiveObject()
       if (active?.isEditing) return
-      if (e.key === 'Escape') { setAnnotatingRefId(null); return }
+      if (e.key === 'Escape') { saveDraftNow(); setAnnotatingRefId(null); return }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doUndo() }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); doRedo() }
       if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
@@ -765,7 +831,7 @@ export default function AnnotateImageModal() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [annotatingRefId, setAnnotatingRefId, tool])
+  }, [annotatingRefId, setAnnotatingRefId, tool, saveDraftNow])
 
   if (!annotatingRefId) return null
 
@@ -798,12 +864,24 @@ export default function AnnotateImageModal() {
         refId: annotatingRefId,
         at: Date.now(),
       })
+      clearAnnoDraft(annotatingRefId) // committed to server — drop the local draft
+      dirtyRef.current = false
+      setDraftRestored(false)
       setAnnotatingRefId(null)
     } catch (e) {
       setError(e.message)
     } finally {
       setSaving(false)
     }
+  }
+
+  const discardDraft = () => {
+    if (!window.confirm('Discard the unsaved draft and revert to the last saved version?')) return
+    clearAnnoDraft(annotatingRefId)
+    dirtyRef.current = false
+    setDraftRestored(false)
+    setRefRow(row => row ? { ...row, annotations_json: serverAnnoRef.current || null } : row)
+    setLayoutTick(t => t + 1) // re-init the overlay from the reverted data
   }
 
   const handleClearAll = () => {
@@ -894,6 +972,7 @@ export default function AnnotateImageModal() {
     setObjectCount(countAnno(fc))
   }
   const pushHistorySnapshot = (fc) => {
+    dirtyRef.current = true // a real user edit happened → drafts should save
     const hist = historyRef.current
     hist.past.push(snapshot(fc))
     if (hist.past.length > 50) hist.past.shift()
@@ -930,7 +1009,7 @@ export default function AnnotateImageModal() {
 
   return (
     <div className="fixed inset-0 bg-black/80 z-[70] flex flex-col p-2"
-      onClick={() => setAnnotatingRefId(null)}>
+      onClick={() => { saveDraftNow(); setAnnotatingRefId(null) }}>
       <div className="bg-gray-900 rounded-lg shadow-2xl w-full h-full flex flex-col border border-gray-700"
         onClick={(e) => e.stopPropagation()}>
 
@@ -1069,6 +1148,13 @@ export default function AnnotateImageModal() {
           <span className="text-[10px] text-gray-500 ml-1">
             {objectCount} item{objectCount === 1 ? '' : 's'}
           </span>
+          {draftRestored && (
+            <span className="flex items-center gap-1 ml-1 text-[10px] text-amber-300 bg-amber-900/40 px-1.5 py-0.5 rounded"
+              title="Unsaved work from your last session was restored. Hit Save to keep it, or Discard to revert to the last saved version.">
+              ● draft
+              <button onClick={discardDraft} className="underline hover:text-amber-100">discard</button>
+            </span>
+          )}
 
           <div className="flex-1" />
 
@@ -1077,7 +1163,7 @@ export default function AnnotateImageModal() {
             title="Download flattened PNG">
             ⬇ Export
           </button>
-          <button onClick={() => setAnnotatingRefId(null)}
+          <button onClick={() => { saveDraftNow(); setAnnotatingRefId(null) }}
             className="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs">
             Cancel
           </button>
