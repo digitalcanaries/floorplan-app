@@ -150,6 +150,15 @@ const ACTION_REGISTRY = {
     },
     getState: (set) => set.noCut,
   },
+  'solid-fill': {
+    label: '■ Solid',
+    title: 'Fill solid (opaque) — a solid mass vs a translucent room',
+    handler: (id, store) => {
+      const set = store.sets.find(s => s.id === id)
+      if (set) store.updateSet(id, { solid: !set.solid })
+    },
+    getState: (set) => set.solid,
+  },
   'bring-forward': {
     label: '▲ Fwd',
     title: 'Bring forward (z-order)',
@@ -174,7 +183,7 @@ const ACTION_REGISTRY = {
 
 const DEFAULT_ACTIONS = [
   'rotate-cw-90', 'rotate-ccw-90', 'rotate-plus-1', 'rotate-minus-1',
-  'edit', 'references', 'add-paint', 'pin-set-to-pdf', 'pin-pdf-to-set', 'duplicate', 'delete',
+  'edit', 'solid-fill', 'references', 'add-paint', 'pin-set-to-pdf', 'pin-pdf-to-set', 'duplicate', 'delete',
 ]
 
 const PREFS_KEY = 'floorplan-quick-actions'

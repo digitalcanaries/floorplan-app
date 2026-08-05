@@ -1455,9 +1455,12 @@ export default function FloorCanvas({ onCanvasSize }) {
       const hasCutouts = allCutouts.length > 0
       const setOpacity = s.opacity ?? 1
 
-      // Compute fill alpha based on opacity and lock state
-      const fillAlpha = isLocked ? Math.round(setOpacity * 0x55).toString(16).padStart(2, '0')
-        : Math.round(setOpacity * 0x40).toString(16).padStart(2, '0')
+      // Compute fill alpha based on opacity, lock state, and the solid flag.
+      // A "solid" set fills opaque (a poché mass); otherwise it's translucent.
+      const fillAlpha = s.solid
+        ? Math.round(setOpacity * 0xff).toString(16).padStart(2, '0')
+        : isLocked ? Math.round(setOpacity * 0x55).toString(16).padStart(2, '0')
+          : Math.round(setOpacity * 0x40).toString(16).padStart(2, '0')
 
       // Always render in non-selected style — selection effect applies highlights
       const baseStroke = showLockVis ? '#f59e0b' : s.lockedToSetId ? '#8B5CF6' : s.color

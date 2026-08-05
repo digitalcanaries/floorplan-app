@@ -752,6 +752,7 @@ const useStore = create((set, get) => ({
       componentProperties: s.componentProperties || null,
       lockedToSetId: s.lockedToSetId ?? null,
       lockedToSetOffset: s.lockedToSetOffset ?? null,
+      solid: s.solid ?? false, // opaque poché fill when true
     }
     set({ sets: [...get().sets, newSet], nextSetId: id + 1, selectedSetId: id })
     get().autosave()
