@@ -94,6 +94,7 @@ export default function AnnotateImageModal() {
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
   const [objectCount, setObjectCount] = useState(0)
   const [hasSelection, setHasSelection] = useState(false) // an anno object is selected (Select tool)
+  const [fillShapes, setFillShapes] = useState(false) // draw rect/ellipse filled (solid) vs hollow
   const [draftRestored, setDraftRestored] = useState(false) // an unsaved draft was loaded
   const serverAnnoRef = useRef(null) // last server-saved annotations_json, for "discard draft"
   const dirtyRef = useRef(false) // true once the user actually edits (not just on load)
@@ -369,7 +370,7 @@ export default function AnnotateImageModal() {
     fc.on('path:created', (opt) => {
       const path = opt?.path
       if (!path) return
-      pushHistorySnapshot(fc)
+      // (History already snapshotted on mouse:down for draw/highlight.)
       path.set({ name: 'anno', selectable: false, evented: toolRef.current === 'erase' })
       if (toolRef.current === 'highlight') path.set({ opacity: 0.4 })
       fc.requestRenderAll()
@@ -383,6 +384,10 @@ export default function AnnotateImageModal() {
 
   const handleImgLoad = () => {
     requestAnimationFrame(() => requestAnimationFrame(initFabricOverlay))
+    // Fallback: rAF is throttled/starved in a backgrounded tab (or a non-
+    // compositing host), which would leave the editor stuck on "Loading
+    // image…". If the canvas still isn't up shortly after load, init directly.
+    setTimeout(() => { if (!fcRef.current) initFabricOverlay() }, 250)
   }
 
   // Re-init overlay whenever the container settles or resizes. A
@@ -485,6 +490,11 @@ export default function AnnotateImageModal() {
     const nfs = fontSize / (fitRef.current || 1)
 
     const onDown = (opt) => {
+      // Freehand + highlighter: snapshot BEFORE the stroke starts so Undo
+      // removes it. (path:created fires AFTER the path is on the canvas, which
+      // is too late — snapshotting there captured the stroke itself, so undo
+      // did nothing. That was the "no undo" bug for drawn marks.)
+      if (tool === 'draw' || tool === 'highlight') pushHistorySnapshot(fc)
       if (tool === 'text') {
         const pt = fc.getScenePoint(opt.e)
         pushHistorySnapshot(fc)
@@ -516,19 +526,24 @@ export default function AnnotateImageModal() {
         return
       }
       if (!isShape) return
+      pushHistorySnapshot(fc) // snapshot pre-shape so Undo removes it
       const pt = fc.getScenePoint(opt.e)
       shapeDrawStateRef.current.startPt = pt
+      // Fill for rect/ellipse: solid current colour when Fill is on, else a
+      // hollow outline. A filled shape's interior is also directly clickable
+      // to select (a hollow shape only selects via its bounding box).
+      const shapeFill = fillShapes ? color : 'transparent'
       let shape
       if (tool === 'rect') {
         shape = new fabric.Rect({
           left: pt.x, top: pt.y, width: 0, height: 0,
-          stroke: color, strokeWidth: nw, fill: 'transparent',
+          stroke: color, strokeWidth: nw, fill: shapeFill,
           selectable: false, evented: false, name: 'anno',
         })
       } else if (tool === 'ellipse') {
         shape = new fabric.Ellipse({
           left: pt.x, top: pt.y, rx: 0, ry: 0,
-          stroke: color, strokeWidth: nw, fill: 'transparent',
+          stroke: color, strokeWidth: nw, fill: shapeFill,
           selectable: false, evented: false, name: 'anno',
         })
       } else if (tool === 'line' || tool === 'arrow') {
@@ -608,10 +623,12 @@ export default function AnnotateImageModal() {
         if (Math.hypot(dx, dy) < 3) keep = false
       }
       if (!keep) {
+        // Nothing was kept — drop the pre-gesture snapshot pushed in onDown so
+        // Undo doesn't gain a no-op step.
         fc.remove(s)
-      } else {
-        pushHistorySnapshot(fc)
+        historyRef.current.past.pop()
       }
+      // (When kept, the snapshot from onDown is exactly the pre-shape state.)
       st.startPt = null
       st.active = null
       fc.requestRenderAll()
@@ -626,7 +643,7 @@ export default function AnnotateImageModal() {
       fc.off('mouse:move', onMove)
       fc.off('mouse:up', onUp)
     }
-  }, [tool, color, width, fontSize])
+  }, [tool, color, width, fontSize, fillShapes])
 
   // Track object edits (drag/resize/text changes) for history + count
   useEffect(() => {
@@ -1098,6 +1115,17 @@ export default function AnnotateImageModal() {
             >
               {WIDTHS.map(w => <option key={w} value={w}>{w} px</option>)}
             </select>
+          )}
+
+          {/* Fill toggle — solid vs hollow rectangle/ellipse */}
+          {(tool === 'rect' || tool === 'ellipse') && (
+            <button
+              onClick={() => setFillShapes(v => !v)}
+              title={fillShapes ? 'Filled (solid) — click to draw hollow outlines' : 'Hollow outline — click to draw solid filled shapes'}
+              className={`px-2 py-1 rounded text-xs ${fillShapes ? 'bg-indigo-600 hover:bg-indigo-500 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+            >
+              {fillShapes ? '■ Fill' : '□ Fill'}
+            </button>
           )}
 
           {/* Font size — only for text tool */}
