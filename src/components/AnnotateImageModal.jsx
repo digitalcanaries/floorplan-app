@@ -93,6 +93,7 @@ export default function AnnotateImageModal() {
   const [zoom, setZoom] = useState(1)
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
   const [objectCount, setObjectCount] = useState(0)
+  const [hasSelection, setHasSelection] = useState(false) // an anno object is selected (Select tool)
   const [draftRestored, setDraftRestored] = useState(false) // an unsaved draft was loaded
   const serverAnnoRef = useRef(null) // last server-saved annotations_json, for "discard draft"
   const dirtyRef = useRef(false) // true once the user actually edits (not just on load)
@@ -659,6 +660,46 @@ export default function AnnotateImageModal() {
     }
   }, [annotatingRefId, saveDraftNow, layoutTick])
 
+  // Track whether a single annotation object is selected, so the layer-order
+  // buttons (bring forward / to front / …) can show + enable.
+  useEffect(() => {
+    const fc = fcRef.current
+    if (!fc || !annotatingRefId) return
+    const sync = () => {
+      const a = fc.getActiveObject()
+      setHasSelection(!!a && a.name === 'anno')
+    }
+    fc.on('selection:created', sync)
+    fc.on('selection:updated', sync)
+    fc.on('selection:cleared', sync)
+    sync()
+    return () => {
+      fc.off('selection:created', sync)
+      fc.off('selection:updated', sync)
+      fc.off('selection:cleared', sync)
+    }
+  }, [annotatingRefId, layoutTick])
+
+  // Re-stack the selected annotation. bg-image is always forced back to the
+  // bottom so reordering can't hide the picture. Order persists automatically:
+  // save/draft read fc.getObjects() in stacking order.
+  const reorderSelected = (dir) => {
+    const fc = fcRef.current
+    if (!fc) return
+    const obj = fc.getActiveObject()
+    if (!obj || obj.name !== 'anno') return
+    pushHistorySnapshot(fc)
+    if (dir === 'front') fc.bringObjectToFront(obj)
+    else if (dir === 'forward') fc.bringObjectForward(obj)
+    else if (dir === 'backward') fc.sendObjectBackward(obj)
+    else if (dir === 'back') fc.sendObjectToBack(obj)
+    const bg = fc.getObjects().find(o => o.name === 'bg-image')
+    if (bg) fc.sendObjectToBack(bg)
+    fc.setActiveObject(obj)
+    fc.requestRenderAll()
+    saveDraftNow() // z-order isn't an object:added/modified event — persist now
+  }
+
   // ----- Zoom / pan: wheel + mouse (space+drag or middle-click) + 2-finger touch -----
   // All handlers are attached imperatively on the wrapper with capture=true
   // so we can steal events from fabric before they reach the drawing layer.
@@ -1080,6 +1121,26 @@ export default function AnnotateImageModal() {
           <button onClick={() => rotateBy(90)}
             className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
             title="Rotate 90° right">↻</button>
+
+          {/* Layer order — reorder the selected annotation (Select tool). */}
+          {tool === 'select' && hasSelection && (
+            <>
+              <div className="h-4 w-px bg-gray-600 mx-1" />
+              <span className="text-[10px] text-gray-400">Layer</span>
+              <button onClick={() => reorderSelected('back')}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+                title="Send to back">⤓</button>
+              <button onClick={() => reorderSelected('backward')}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+                title="Send backward">▽</button>
+              <button onClick={() => reorderSelected('forward')}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+                title="Bring forward">△</button>
+              <button onClick={() => reorderSelected('front')}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded text-xs"
+                title="Bring to front">⤒</button>
+            </>
+          )}
 
           {/* Crop controls — shown once a crop region is set. The dark mask
               outside the box IS the preview, so no zoom buttons are needed. */}
